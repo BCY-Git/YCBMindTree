@@ -34,4 +34,13 @@ export function assertValidDocument(document: MindMapDocument): void {
   visit(document.rootId)
   // 确保没有节点游离于遍历之外（即没有孤岛）。
   if (seen.size !== Object.keys(document.nodes).length) throw new Error('文档存在孤立节点')
+
+  const relationPairs = new Set<string>()
+  for (const relation of document.relations) {
+    if (!document.nodes[relation.sourceId] || !document.nodes[relation.targetId]) throw new Error('关系引用了不存在的节点')
+    if (relation.sourceId === relation.targetId) throw new Error('关系不能连接节点自身')
+    const pair = [relation.sourceId, relation.targetId].sort().join(':')
+    if (relationPairs.has(pair)) throw new Error('节点之间已存在关系')
+    relationPairs.add(pair)
+  }
 }

@@ -8,17 +8,19 @@
  * 菜单在视口边缘自动收缩，防止溢出；点击菜单外部或按 Escape 关闭。
  */
 import { useEffect, useRef } from 'react'
-import type { MindNode } from '../domain/document.types'
+import type { MindMapRelation, MindNode } from '../domain/document.types'
 
 export type ContextMenuPosition = { x: number; y: number }
 
 type ContextMenuProps = {
   position: ContextMenuPosition
   node: MindNode | null
+  relation: MindMapRelation | null
   isRoot: boolean
   onAddChild: () => void
   onAddSibling: () => void
   onEdit: () => void
+  onCreateRelation: () => void
   onToggleCollapse: () => void
   onCollapseDescendants: () => void
   onExpandDescendants: () => void
@@ -32,6 +34,7 @@ type ContextMenuProps = {
   onAutoArrange: () => void
   onRestoreFreeform: () => void
   onDelete: () => void
+  onDeleteRelation: () => void
   hasClipboard: boolean
   hasFreeformHistory: boolean
   canOutdent: boolean
@@ -54,9 +57,9 @@ function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
   )
 }
 
-export function ContextMenu({ position, node, isRoot, onAddChild, onAddSibling, onEdit, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, hasClipboard, hasFreeformHistory, canOutdent, canIndent, onClose }: ContextMenuProps) {
+export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onEdit, onCreateRelation, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
-  const isCanvasMenu = node === null
+  const isCanvasMenu = node === null && relation === null
 
   useEffect(() => {
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -73,13 +76,19 @@ export function ContextMenu({ position, node, isRoot, onAddChild, onAddSibling, 
 
   const style = {
     left: Math.min(position.x, window.innerWidth - 238),
-    top: Math.min(position.y, window.innerHeight - (isCanvasMenu ? 346 : 626)),
+    top: Math.min(position.y, window.innerHeight - (relation ? 148 : isCanvasMenu ? 346 : 670)),
   }
 
   return (
     <div ref={menuRef} className="context-menu" style={style} role="menu" onContextMenu={(event) => event.preventDefault()}>
-      <p className="context-menu__title">{isCanvasMenu ? '画布' : isRoot ? '中心主题' : '当前节点'}</p>
-      {isCanvasMenu ? (
+      <p className="context-menu__title">{relation ? '关系线' : isCanvasMenu ? '画布' : isRoot ? '中心主题' : '当前节点'}</p>
+      {relation ? (
+        <>
+          <div className="context-menu__hint">“{relation.label}” · 可在右侧修改说明</div>
+          <div className="context-menu__divider" />
+          <MenuItem onClick={onDeleteRelation} shortcut="⌫" destructive>删除关系</MenuItem>
+        </>
+      ) : isCanvasMenu ? (
         <>
           <MenuItem onClick={onAddChild} shortcut="Tab">新建一级节点</MenuItem>
           <MenuItem onClick={onEdit} shortcut="F2">编辑中心主题</MenuItem>
@@ -92,12 +101,13 @@ export function ContextMenu({ position, node, isRoot, onAddChild, onAddSibling, 
           <MenuItem onClick={onRestoreFreeform} disabled={!hasFreeformHistory}>恢复自由排布</MenuItem>
           <div className="context-menu__hint">一张导图目前保持一个中心主题</div>
         </>
-      ) : (
+      ) : node ? (
         <>
           <MenuItem onClick={onAddChild} shortcut="Tab">新建子节点</MenuItem>
           <MenuItem onClick={onAddSibling} shortcut="Enter" disabled={isRoot}>新建同级节点</MenuItem>
           <div className="context-menu__divider" />
           <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
+          <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>
           <MenuItem onClick={onToggleCollapse} shortcut="Space" disabled={!node.childIds.length}>{node.collapsed ? '展开分支' : '折叠分支'}</MenuItem>
           <MenuItem onClick={onCollapseDescendants} disabled={!node.childIds.length}>折叠所有次级分支</MenuItem>
           <MenuItem onClick={onExpandDescendants} disabled={!node.childIds.length}>展开所有次级分支</MenuItem>
@@ -115,7 +125,7 @@ export function ContextMenu({ position, node, isRoot, onAddChild, onAddSibling, 
           <div className="context-menu__divider" />
           <MenuItem onClick={onDelete} shortcut="⌫" destructive disabled={isRoot}>删除分支</MenuItem>
         </>
-      )}
+      ) : null}
     </div>
   )
 }

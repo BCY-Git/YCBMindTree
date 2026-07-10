@@ -24,6 +24,15 @@ export const mindNodeSchema = z.object({
   updatedAt: z.number(),
 })
 
+export const mindMapRelationSchema = z.object({
+  id: z.string().min(1),
+  sourceId: z.string().min(1),
+  targetId: z.string().min(1),
+  label: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+
 export const mindMapDocumentSchema = z.object({
   id: z.string().min(1),
   schemaVersion: z.literal(1),
@@ -31,6 +40,8 @@ export const mindMapDocumentSchema = z.object({
   categoryId: z.string().min(1).default('uncategorized'),
   rootId: z.string().min(1),
   nodes: z.record(z.string(), mindNodeSchema),
+  // 旧文档尚未包含关系数据，读取时以空数组平滑兼容。
+  relations: z.array(mindMapRelationSchema).default([]),
   layout: z.object({
     levelGap: z.number().min(20),
     siblingGap: z.number().min(8),

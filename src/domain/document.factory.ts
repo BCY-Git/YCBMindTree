@@ -43,6 +43,7 @@ export function createInitialDocument(): MindMapDocument {
     categoryId: 'uncategorized',
     rootId: root.id,
     nodes: { [root.id]: root, [first.id]: first, [second.id]: second, [third.id]: third },
+    relations: [],
     layout: { levelGap: 96, siblingGap: 22, freeformOffsets: null },
     theme: { id: 'calm' },
     createdAt: now,

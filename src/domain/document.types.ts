@@ -30,6 +30,16 @@ export type MindNode = {
   updatedAt: number
 }
 
+/** 独立于父子树结构的横向关联。sourceId / targetId 用于定位两端节点。 */
+export type MindMapRelation = {
+  id: string
+  sourceId: string
+  targetId: string
+  label: string
+  createdAt: number
+  updatedAt: number
+}
+
 export type MindMapDocument = {
   id: string
   schemaVersion: 1
@@ -37,6 +47,7 @@ export type MindMapDocument = {
   categoryId: string
   rootId: string
   nodes: Record<string, MindNode>
+  relations: MindMapRelation[]
   layout: LayoutConfig
   theme: { id: ThemeId }
   createdAt: number
