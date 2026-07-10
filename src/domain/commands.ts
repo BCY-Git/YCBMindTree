@@ -1,0 +1,318 @@
+/**
+ * 命令系统 — MindTree 的唯一状态变更入口。
+ *
+ * 所有对导图的修改（增删节点、重命名、拖拽、折叠、复制粘贴、主题切换……）
+ * 都通过派发一个 MindMapCommand 来完成。executeCommand(source, command) 接收
+ * 当前文档的深拷贝，应用命令逻辑，返回新文档及可选的焦点节点 ID。
+ *
+ * 关键保证：
+ * - 每条命令执行后调用 assertValidDocument，异常直接抛出
+ * - 文档更新统一由 touch() 更新时间戳
+ * - copy/paste/indent/outdent 等操作通过 moveNode / pasteSubtree 实现
+ * - AUTO_ARRANGE 先保存当前自由偏移快照，再清除所有 offset，以便自动布局
+ *   接管；RESTORE_FREEFORM_LAYOUT 从快照恢复，实现"排列后可撤销"
+ */
+import { createNode } from './document.factory'
+import { assertValidDocument } from './document.validator'
+import type { LayoutConfig, MindMapDocument } from './document.types'
+import type { ThemeId } from './themes'
+
+/**
+ * 所有可用命令的联合类型（判别联合）。
+ * 详见每条命令的注释。
+ */
+export type MindMapCommand =
+  | { type: 'ADD_CHILD'; parentId: string; topic?: string }
+  | { type: 'ADD_SIBLING'; nodeId: string; topic?: string }
+  | { type: 'UPDATE_NODE_TOPIC'; nodeId: string; topic: string }
+  | { type: 'DELETE_NODE'; nodeId: string }
+  | { type: 'TOGGLE_COLLAPSE'; nodeId: string }
+  | { type: 'COLLAPSE_DESCENDANTS'; nodeId: string }
+  | { type: 'EXPAND_DESCENDANTS'; nodeId: string }
+  | { type: 'UPDATE_NODE_OFFSET'; nodeId: string; offsetX: number; offsetY: number }
+  /** 拖拽根节点时平移整张导图 */
+  | { type: 'TRANSLATE_DOCUMENT'; deltaX: number; deltaY: number }
+  | { type: 'RESET_NODE_OFFSET'; nodeId: string }
+  | { type: 'RESET_LAYOUT' }
+  /** 自动排列：保存当前偏移快照 → 清除所有 offset → 让 tree-layout 接管 */
+  | { type: 'AUTO_ARRANGE' }
+  /** 从快照恢复自由排布 */
+  | { type: 'RESTORE_FREEFORM_LAYOUT' }
+  | { type: 'MOVE_NODE'; nodeId: string; newParentId: string; index: number }
+  | { type: 'INDENT_NODE'; nodeId: string }
+  | { type: 'OUTDENT_NODE'; nodeId: string }
+  | { type: 'PASTE_SUBTREE'; parentId: string; clipboard: MindNodeClipboard }
+  | { type: 'RENAME_DOCUMENT'; title: string }
+  | { type: 'SET_CATEGORY'; categoryId: string }
+  | { type: 'UPDATE_LAYOUT'; layout: Partial<LayoutConfig> }
+  | { type: 'APPLY_THEME'; themeId: ThemeId }
+
+export type CommandResult = { document: MindMapDocument; focusNodeId?: string }
+
+/**
+ * 剪贴板数据结构：递归保存一个节点及其完整子树（不含 id，用于粘贴时重新生成）。
+ */
+export type MindNodeClipboard = {
+  topic: string
+  collapsed: boolean
+  children: MindNodeClipboard[]
+}
+
+// 深拷贝文档，保证命令执行是纯函数，不污染原状态。
+function copy(document: MindMapDocument): MindMapDocument {
+  return structuredClone(document)
+}
+
+// 每次状态变更后更新时间戳，供 persistence 层判断"最近修改"文档。
+function touch(document: MindMapDocument) {
+  document.updatedAt = Date.now()
+}
+
+// 递归删除子树：从叶子节点向上逐层删除，确保不遗漏。
+function removeSubtree(document: MindMapDocument, nodeId: string) {
+  const node = document.nodes[nodeId]
+  node.childIds.forEach((childId) => removeSubtree(document, childId))
+  delete document.nodes[nodeId]
+}
+
+// 检查 candidateId 是否在 ancestorId 的子树中（含自身），用于防止循环引用。
+function isDescendant(document: MindMapDocument, ancestorId: string, candidateId: string): boolean {
+  if (ancestorId === candidateId) return true
+  return document.nodes[ancestorId].childIds.some((childId) => isDescendant(document, childId, candidateId))
+}
+
+/**
+ * 移动节点到新父节点下指定位置。
+ * 关键约束：
+ * - 根节点不可移动
+ * - 禁止移动到自身子树中（isDescendant 检查）
+ * - 移动后重置新节点的 offset，并展开新父节点
+ */
+function moveNode(document: MindMapDocument, nodeId: string, newParentId: string, index: number) {
+  const node = document.nodes[nodeId]
+  const newParent = document.nodes[newParentId]
+  if (!node || !newParent) throw new Error('节点不存在')
+  if (!node.parentId) throw new Error('根节点不能调整层级')
+  if (isDescendant(document, nodeId, newParentId)) throw new Error('节点不能移动到自身子树中')
+
+  const previousParent = document.nodes[node.parentId]
+  previousParent.childIds = previousParent.childIds.filter((id) => id !== nodeId)
+  const targetIndex = Math.max(0, Math.min(index, newParent.childIds.length))
+  newParent.childIds.splice(targetIndex, 0, nodeId)
+  node.parentId = newParentId
+  node.offsetX = 0
+  node.offsetY = 0
+  newParent.collapsed = false
+}
+
+/**
+ * 将节点及其子树序列化为剪贴板（不含 id，粘贴时重新生成）。
+ * 递归保存 topic / collapsed / children，供 PASTE_SUBTREE 使用。
+ */
+export function createNodeClipboard(document: MindMapDocument, nodeId: string): MindNodeClipboard {
+  const node = document.nodes[nodeId]
+  if (!node) throw new Error('节点不存在')
+  return {
+    topic: node.topic,
+    collapsed: node.collapsed,
+    children: node.childIds.map((childId) => createNodeClipboard(document, childId)),
+  }
+}
+
+// 递归创建子树（为每个节点分配新 id），返回插入的根节点 id。
+function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: MindNodeClipboard): string {
+  const parent = document.nodes[parentId]
+  if (!parent) throw new Error('父节点不存在')
+  const node = createNode(clipboard.topic, parentId)
+  node.collapsed = clipboard.collapsed
+  document.nodes[node.id] = node
+  node.childIds = clipboard.children.map((child) => pasteSubtree(document, node.id, child))
+  return node.id
+}
+
+export function executeCommand(source: MindMapDocument, command: MindMapCommand): CommandResult {
+  const document = copy(source)
+  let focusNodeId: string | undefined
+
+  switch (command.type) {
+    // ── 节点增删 ──────────────────────────────────────────────
+    case 'ADD_CHILD': {
+      const parent = document.nodes[command.parentId]
+      if (!parent) throw new Error('父节点不存在')
+      const child = createNode(command.topic ?? '新节点', parent.id)
+      parent.childIds.push(child.id)
+      // 新增子节点时自动展开父节点，让子节点立即可见。
+      parent.collapsed = false
+      document.nodes[child.id] = child
+      focusNodeId = child.id
+      break
+    }
+    case 'ADD_SIBLING': {
+      const node = document.nodes[command.nodeId]
+      if (!node?.parentId) throw new Error('根节点不能创建同级节点')
+      const parent = document.nodes[node.parentId]
+      const sibling = createNode(command.topic ?? '新节点', parent.id)
+      // 插入到当前节点之后，保持同级顺序。
+      const index = parent.childIds.indexOf(node.id)
+      parent.childIds.splice(index + 1, 0, sibling.id)
+      document.nodes[sibling.id] = sibling
+      focusNodeId = sibling.id
+      break
+    }
+    case 'UPDATE_NODE_TOPIC': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.topic = command.topic.trim() || '未命名节点'
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'DELETE_NODE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      if (!node.parentId) throw new Error('根节点不能删除')
+      const parent = document.nodes[node.parentId]
+      parent.childIds = parent.childIds.filter((id) => id !== node.id)
+      // 递归删除整个子树，删除后焦点回到被删节点的父节点。
+      removeSubtree(document, node.id)
+      focusNodeId = parent.id
+      break
+    }
+
+    // ── 折叠 / 偏移量 ──────────────────────────────────────────
+    case 'TOGGLE_COLLAPSE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.collapsed = !node.collapsed
+      break
+    }
+    case 'COLLAPSE_DESCENDANTS': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      const collapse = (nodeId: string) => {
+        const current = document.nodes[nodeId]
+        current.childIds.forEach((childId) => {
+          document.nodes[childId].collapsed = true
+          collapse(childId)
+        })
+      }
+      collapse(node.id)
+      break
+    }
+    case 'EXPAND_DESCENDANTS': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      const expand = (nodeId: string) => {
+        const current = document.nodes[nodeId]
+        current.collapsed = false
+        current.childIds.forEach(expand)
+      }
+      expand(node.id)
+      break
+    }
+    case 'UPDATE_NODE_OFFSET': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      // 偏移量取整，防止浮点积累。
+      node.offsetX = Math.round(command.offsetX)
+      node.offsetY = Math.round(command.offsetY)
+      node.updatedAt = Date.now()
+      break
+    }
+    // 拖拽根节点时平移整张导图，保持相对布局不变。
+    case 'TRANSLATE_DOCUMENT':
+      Object.values(document.nodes).forEach((node) => {
+        node.offsetX = Math.round(node.offsetX + command.deltaX)
+        node.offsetY = Math.round(node.offsetY + command.deltaY)
+      })
+      break
+    case 'RESET_NODE_OFFSET': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.offsetX = 0
+      node.offsetY = 0
+      break
+    }
+    // 清除所有节点的偏移量，回到纯自动布局状态。
+    case 'RESET_LAYOUT':
+      Object.values(document.nodes).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
+      break
+
+    // ── 自动排列 ↔ 自由排布恢复 ────────────────────────────────
+    // 保存快照 → 清除 offset → tree-layout 完全接管
+    case 'AUTO_ARRANGE':
+      document.layout.freeformOffsets = Object.fromEntries(
+        Object.values(document.nodes).map((node) => [node.id, { x: node.offsetX, y: node.offsetY }]),
+      )
+      Object.values(document.nodes).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
+      break
+    // 从之前保存的快照恢复自由排布偏移。
+    case 'RESTORE_FREEFORM_LAYOUT': {
+      const offsets = document.layout.freeformOffsets
+      if (!offsets) throw new Error('尚未保存自由排布记录')
+      Object.values(document.nodes).forEach((node) => {
+        const offset = offsets[node.id]
+        node.offsetX = offset?.x ?? 0
+        node.offsetY = offset?.y ?? 0
+      })
+      break
+    }
+
+    // ── 结构调整 ──────────────────────────────────────────────
+    // 拖拽节点（非 Shift）时更新该节点的偏移；Shift+拖拽则触发结构移动。
+    case 'MOVE_NODE':
+      moveNode(document, command.nodeId, command.newParentId, command.index)
+      focusNodeId = command.nodeId
+      break
+    // 降低层级：变成前一同级节点的子节点（向右缩进）。
+    case 'INDENT_NODE': {
+      const node = document.nodes[command.nodeId]
+      if (!node?.parentId) throw new Error('根节点不能降低层级')
+      const siblings = document.nodes[node.parentId].childIds
+      const index = siblings.indexOf(node.id)
+      if (index < 1) throw new Error('第一个同级节点不能降低层级')
+      const previousSibling = document.nodes[siblings[index - 1]]
+      moveNode(document, node.id, previousSibling.id, previousSibling.childIds.length)
+      focusNodeId = node.id
+      break
+    }
+    // 提升层级：移动到父节点之后（向左提升）。
+    case 'OUTDENT_NODE': {
+      const node = document.nodes[command.nodeId]
+      if (!node?.parentId) throw new Error('根节点不能提升层级')
+      const parent = document.nodes[node.parentId]
+      if (!parent.parentId) throw new Error('一级节点不能提升层级')
+      const grandparent = document.nodes[parent.parentId]
+      moveNode(document, node.id, grandparent.id, grandparent.childIds.indexOf(parent.id) + 1)
+      focusNodeId = node.id
+      break
+    }
+    // 将剪贴板内容递归插入为父节点的子节点（所有节点重新分配 id）。
+    case 'PASTE_SUBTREE': {
+      const parent = document.nodes[command.parentId]
+      if (!parent) throw new Error('父节点不存在')
+      const rootId = pasteSubtree(document, parent.id, command.clipboard)
+      parent.childIds.push(rootId)
+      parent.collapsed = false
+      focusNodeId = rootId
+      break
+    }
+
+    // ── 文档级操作 ───────────────────────────────────────────
+    case 'RENAME_DOCUMENT':
+      document.title = command.title.trim() || '未命名导图'
+      break
+    case 'SET_CATEGORY':
+      document.categoryId = command.categoryId.trim() || 'uncategorized'
+      break
+    case 'UPDATE_LAYOUT':
+      document.layout = { ...document.layout, ...command.layout }
+      break
+    case 'APPLY_THEME':
+      document.theme = { id: command.themeId }
+      break
+  }
+
+  touch(document)
+  assertValidDocument(document)
+  return { document, focusNodeId }
+}
