@@ -1,0 +1,184 @@
+/**
+ * 编辑器全局状态（Zustand）。
+ *
+ * 单一数据源：存储当前 document、undo/redo 历史栈、选中/编辑中节点 id、
+ * 剪贴板内容、以及 IndexedDB 持久化状态（hydrated 标志）。
+ *
+ * 核心操作：
+ * - dispatch(command)：执行命令 → 保存旧文档到 past → 推入新文档 → 记录焦点
+ * - undo/redo：从 past/future 栈中恢复历史文档
+ * - copyNode/cutNode/pasteIntoNode：基于 createNodeClipboard 实现
+ * - hydrate(doc)：从 IndexedDB 加载后初始化，清空历史栈
+ * - createDocument()：创建新文档，覆盖当前内容，清空历史
+ *
+ * 历史栈最多保留 50 条（past.length ≤ 50），超出时丢弃最旧条目。
+ */
+import { create } from 'zustand'
+import { createInitialDocument } from '../domain/document.factory'
+import { createNodeClipboard, executeCommand, type MindMapCommand, type MindNodeClipboard } from '../domain/commands'
+import type { MindMapDocument } from '../domain/document.types'
+
+type EditorState = {
+  document: MindMapDocument
+  past: MindMapDocument[]   // undo 栈
+  future: MindMapDocument[] // redo 栈
+  selectedNodeId: string | null
+  editingNodeId: string | null
+  clipboard: MindNodeClipboard | null
+  hydrated: boolean
+  lastHistoryMerge: { key: string; at: number } | null
+  dispatch: (command: MindMapCommand) => boolean
+  undo: () => void
+  redo: () => void
+  selectNode: (id: string | null) => void
+  editNode: (id: string | null) => void
+  hydrate: (document: MindMapDocument) => void
+  copyNode: (nodeId: string) => void
+  cutNode: (nodeId: string) => void
+  pasteIntoNode: (parentId: string) => void
+  insertGeneratedBranch: (parentId: string, branch: MindNodeClipboard) => boolean
+  createDocument: () => void
+}
+
+const initialDocument = createInitialDocument()
+
+function historyMergeKey(command: MindMapCommand): string | null {
+  switch (command.type) {
+    case 'UPDATE_NODE_TOPIC': return `topic:${command.nodeId}`
+    case 'RENAME_DOCUMENT': return 'document-title'
+    case 'UPDATE_LAYOUT': return `layout:${Object.keys(command.layout).sort().join(',')}`
+    default: return null
+  }
+}
+
+const historyMergeWindowMs = 1_000
+
+export const useEditorStore = create<EditorState>((set, get) => ({
+  document: initialDocument,
+  past: [],
+  future: [],
+  selectedNodeId: initialDocument.rootId,
+  editingNodeId: null,
+  clipboard: null,
+  hydrated: false,
+  lastHistoryMerge: null,
+  // dispatch：命令执行的统一入口，同时维护 undo/redo 栈。
+  // 执行后保存旧文档到 past 栈（最多 50 条），清空 redo 栈，更新选中/编辑焦点。
+  dispatch: (command) => {
+    const state = get()
+    try {
+      const result = executeCommand(state.document, command)
+      const mergeKey = historyMergeKey(command)
+      const shouldMerge = mergeKey !== null
+        && state.lastHistoryMerge?.key === mergeKey
+        && Date.now() - state.lastHistoryMerge.at < historyMergeWindowMs
+      set({
+        document: result.document,
+        past: shouldMerge ? state.past : [...state.past.slice(-49), state.document],
+        future: [],
+        selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        editingNodeId: result.focusNodeId ?? null,
+        lastHistoryMerge: mergeKey ? { key: mergeKey, at: Date.now() } : null,
+      })
+      return true
+    } catch (error) {
+      console.warn(error)
+      return false
+    }
+  },
+  // undo：从 past 栈恢复上一份文档，将当前文档推入 future 栈。
+  undo: () => {
+    const state = get()
+    const previous = state.past.at(-1)
+    if (!previous) return
+    set({ document: previous, past: state.past.slice(0, -1), future: [state.document, ...state.future], lastHistoryMerge: null })
+  },
+  // redo：从 future 栈取出下一份文档，将当前文档推入 past 栈。
+  redo: () => {
+    const state = get()
+    const next = state.future[0]
+    if (!next) return
+    set({ document: next, past: [...state.past, state.document], future: state.future.slice(1), lastHistoryMerge: null })
+  },
+  selectNode: (id) => set({ selectedNodeId: id }),
+  // editNode：进入编辑态，同时选中该节点；传 null 则退出编辑态。
+  editNode: (id) => set({ editingNodeId: id, selectedNodeId: id }),
+  // copyNode：将节点及子树序列化为剪贴板，不修改文档。
+  copyNode: (nodeId) => {
+    const state = get()
+    try { set({ clipboard: createNodeClipboard(state.document, nodeId) }) } catch (error) { console.warn(error) }
+  },
+  cutNode: (nodeId) => {
+    const state = get()
+    if (nodeId === state.document.rootId) return
+    try {
+      const clipboard = createNodeClipboard(state.document, nodeId)
+      const result = executeCommand(state.document, { type: 'DELETE_NODE', nodeId })
+      set({
+        clipboard,
+        document: result.document,
+        past: [...state.past.slice(-49), state.document],
+        future: [],
+        selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        editingNodeId: null,
+        lastHistoryMerge: null,
+      })
+    } catch (error) { console.warn(error) }
+  },
+  pasteIntoNode: (parentId) => {
+    const state = get()
+    if (!state.clipboard) return
+    try {
+      const result = executeCommand(state.document, { type: 'PASTE_SUBTREE', parentId, clipboard: state.clipboard })
+      set({
+        document: result.document,
+        past: [...state.past.slice(-49), state.document],
+        future: [],
+        selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        editingNodeId: null,
+        lastHistoryMerge: null,
+      })
+    } catch (error) { console.warn(error) }
+  },
+  insertGeneratedBranch: (parentId, branch) => {
+    const state = get()
+    try {
+      const result = executeCommand(state.document, { type: 'PASTE_SUBTREE', parentId, clipboard: branch })
+      set({
+        document: result.document,
+        past: [...state.past.slice(-49), state.document],
+        future: [],
+        selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        editingNodeId: null,
+        lastHistoryMerge: null,
+      })
+      return true
+    } catch (error) {
+      console.warn(error)
+      return false
+    }
+  },
+  createDocument: () => {
+    const document = createInitialDocument()
+    set({
+      document,
+      past: [],
+      future: [],
+      selectedNodeId: document.rootId,
+      editingNodeId: document.rootId,
+      clipboard: null,
+      hydrated: true,
+      lastHistoryMerge: null,
+    })
+  },
+  hydrate: (document) => set({
+    document,
+    past: [],
+    future: [],
+    selectedNodeId: document.rootId,
+    editingNodeId: null,
+    clipboard: null,
+    hydrated: true,
+    lastHistoryMerge: null,
+  }),
+}))
