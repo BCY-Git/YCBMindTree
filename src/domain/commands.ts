@@ -14,7 +14,7 @@
  */
 import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapDocument } from './document.types'
+import type { LayoutConfig, MindMapDocument, MindMapRelation } from './document.types'
 import type { ThemeId } from './themes'
 
 /**
@@ -26,6 +26,9 @@ export type MindMapCommand =
   | { type: 'ADD_SIBLING'; nodeId: string; topic?: string }
   | { type: 'UPDATE_NODE_TOPIC'; nodeId: string; topic: string }
   | { type: 'DELETE_NODE'; nodeId: string }
+  | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
+  | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
+  | { type: 'DELETE_RELATION'; relationId: string }
   | { type: 'TOGGLE_COLLAPSE'; nodeId: string }
   | { type: 'COLLAPSE_DESCENDANTS'; nodeId: string }
   | { type: 'EXPAND_DESCENDANTS'; nodeId: string }
@@ -47,7 +50,7 @@ export type MindMapCommand =
   | { type: 'UPDATE_LAYOUT'; layout: Partial<LayoutConfig> }
   | { type: 'APPLY_THEME'; themeId: ThemeId }
 
-export type CommandResult = { document: MindMapDocument; focusNodeId?: string }
+export type CommandResult = { document: MindMapDocument; focusNodeId?: string; focusRelationId?: string }
 
 /**
  * 剪贴板数据结构：递归保存一个节点及其完整子树（不含 id，用于粘贴时重新生成）。
@@ -72,7 +75,13 @@ function touch(document: MindMapDocument) {
 function removeSubtree(document: MindMapDocument, nodeId: string) {
   const node = document.nodes[nodeId]
   node.childIds.forEach((childId) => removeSubtree(document, childId))
+  document.relations = document.relations.filter((relation) => relation.sourceId !== nodeId && relation.targetId !== nodeId)
   delete document.nodes[nodeId]
+}
+
+function createRelation(sourceId: string, targetId: string, label: string): MindMapRelation {
+  const now = Date.now()
+  return { id: crypto.randomUUID(), sourceId, targetId, label: label.trim() || '关联', createdAt: now, updatedAt: now }
 }
 
 // 检查 candidateId 是否在 ancestorId 的子树中（含自身），用于防止循环引用。
@@ -133,6 +142,7 @@ function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: Mi
 export function executeCommand(source: MindMapDocument, command: MindMapCommand): CommandResult {
   const document = copy(source)
   let focusNodeId: string | undefined
+  let focusRelationId: string | undefined
 
   switch (command.type) {
     // ── 节点增删 ──────────────────────────────────────────────
@@ -175,6 +185,30 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       // 递归删除整个子树，删除后焦点回到被删节点的父节点。
       removeSubtree(document, node.id)
       focusNodeId = parent.id
+      break
+    }
+    case 'CREATE_RELATION': {
+      if (!document.nodes[command.sourceId] || !document.nodes[command.targetId]) throw new Error('关系节点不存在')
+      if (command.sourceId === command.targetId) throw new Error('关系不能连接节点自身')
+      if (document.relations.some((relation) => (relation.sourceId === command.sourceId && relation.targetId === command.targetId)
+        || (relation.sourceId === command.targetId && relation.targetId === command.sourceId))) throw new Error('节点之间已存在关系')
+      const relation = createRelation(command.sourceId, command.targetId, command.label ?? '关联')
+      document.relations.push(relation)
+      focusRelationId = relation.id
+      break
+    }
+    case 'UPDATE_RELATION_LABEL': {
+      const relation = document.relations.find((item) => item.id === command.relationId)
+      if (!relation) throw new Error('关系不存在')
+      relation.label = command.label.trim() || '关联'
+      relation.updatedAt = Date.now()
+      focusRelationId = relation.id
+      break
+    }
+    case 'DELETE_RELATION': {
+      const index = document.relations.findIndex((relation) => relation.id === command.relationId)
+      if (index < 0) throw new Error('关系不存在')
+      document.relations.splice(index, 1)
       break
     }
 
@@ -314,5 +348,5 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
 
   touch(document)
   assertValidDocument(document)
-  return { document, focusNodeId }
+  return { document, focusNodeId, focusRelationId }
 }

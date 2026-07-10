@@ -60,8 +60,10 @@ export function MindMapCanvas() {
   const document = useEditorStore((state) => state.document)
   const theme = getTheme(document.theme.id)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
+  const selectedRelationId = useEditorStore((state) => state.selectedRelationId)
   const editingNodeId = useEditorStore((state) => state.editingNodeId)
   const selectNode = useEditorStore((state) => state.selectNode)
+  const selectRelation = useEditorStore((state) => state.selectRelation)
   const editNode = useEditorStore((state) => state.editNode)
   const dispatch = useEditorStore((state) => state.dispatch)
   const copyNode = useEditorStore((state) => state.copyNode)
@@ -70,8 +72,9 @@ export function MindMapCanvas() {
   const clipboard = useEditorStore((state) => state.clipboard)
   const undo = useEditorStore((state) => state.undo)
   const redo = useEditorStore((state) => state.redo)
-  const [contextMenu, setContextMenu] = useState<{ position: ContextMenuPosition; nodeId: string | null } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ position: ContextMenuPosition; nodeId: string | null; relationId: string | null } | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [relationSourceId, setRelationSourceId] = useState<string | null>(null)
   const [flowNodes, setFlowNodes] = useState<Node<MindNodeData>[]>([])
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
 
@@ -101,11 +104,12 @@ export function MindMapCanvas() {
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
+          isRelationSource: relationSourceId === item.id,
         },
         style: { width: item.width, minHeight: item.height },
       }
     })
-    const edges: Edge[] = placed.flatMap((item) => {
+    const treeEdges: Edge[] = placed.flatMap((item) => {
       const mindNode = document.nodes[item.id]
       const parent = mindNode.parentId ? positionedById.get(mindNode.parentId) : undefined
       const anchors = parent ? getTreeEdgeAnchors(parent, item) : undefined
@@ -125,8 +129,32 @@ export function MindMapCanvas() {
           }]
         : []
     })
-    return { baseNodes, edges, basePositionsById: new Map(placed.map((item) => [item.id, item])) }
-  }, [document, selectedNodeId, theme])
+    const relationEdges: Edge[] = document.relations.flatMap((relation) => {
+      const source = positionedById.get(relation.sourceId)
+      const target = positionedById.get(relation.targetId)
+      if (!source || !target) return []
+      const targetIsRight = target.x + target.width / 2 >= source.x + source.width / 2
+      const isSelected = relation.id === selectedRelationId
+      return [{
+        id: relation.id,
+        source: relation.sourceId,
+        target: relation.targetId,
+        sourceHandle: targetIsRight ? 'source-right' : 'source-left',
+        targetHandle: targetIsRight ? 'target-left' : 'target-right',
+        type: 'smoothstep',
+        label: relation.label,
+        className: `mind-relation-edge ${isSelected ? 'is-selected' : ''}`,
+        selectable: true,
+        style: { stroke: isSelected ? theme.selected : theme.branch, strokeWidth: isSelected ? 2.4 : 1.5, strokeDasharray: '7 5', opacity: isSelected ? 1 : .82 },
+        labelStyle: { fill: theme.nodeText, fontSize: 11, fontWeight: 620 },
+        labelBgStyle: { fill: theme.nodeBackground, fillOpacity: .94 },
+        labelBgPadding: [5, 3] as [number, number],
+        labelBgBorderRadius: 4,
+        zIndex: 2,
+      }]
+    })
+    return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(placed.map((item) => [item.id, item])) }
+  }, [document, relationSourceId, selectedNodeId, selectedRelationId, theme])
 
   useEffect(() => setFlowNodes(baseNodes), [baseNodes])
 
@@ -136,7 +164,13 @@ export function MindMapCanvas() {
     if (rootNode) flowInstance?.fitView({ nodes: [rootNode], padding: 1.5, maxZoom: 1.05, duration: 280 })
   }, [baseNodes, document.rootId, flowInstance, selectNode])
 
-  const onNodeClick: NodeMouseHandler = useCallback((_, node) => selectNode(node.id), [selectNode])
+  const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
+    if (relationSourceId) {
+      if (node.id !== relationSourceId && dispatch({ type: 'CREATE_RELATION', sourceId: relationSourceId, targetId: node.id })) setRelationSourceId(null)
+      return
+    }
+    selectNode(node.id)
+  }, [dispatch, relationSourceId, selectNode])
   // ── React Flow 节点拖拽结束：计算相对于自动布局基准位置的偏移量 ──────────────
   const getDragOffset = useCallback((node: Node<MindNodeData>) => {
     const original = basePositionsById.get(node.id)
@@ -208,7 +242,7 @@ export function MindMapCanvas() {
   const openContextMenu = useCallback((event: MouseEvent, nodeId: string | null) => {
     event.preventDefault()
     if (nodeId) selectNode(nodeId)
-    setContextMenu({ position: { x: event.clientX, y: event.clientY }, nodeId })
+    setContextMenu({ position: { x: event.clientX, y: event.clientY }, nodeId, relationId: null })
   }, [selectNode])
 
   const runContextAction = useCallback((action: () => void) => {
@@ -223,6 +257,7 @@ export function MindMapCanvas() {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       const meta = event.metaKey || event.ctrlKey
+      if (relationSourceId && event.key === 'Escape') { event.preventDefault(); setRelationSourceId(null); return }
       if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandPaletteOpen(true); return }
       if (target.closest('input, textarea')) return
       const editor = useEditorStore.getState()
@@ -262,7 +297,7 @@ export function MindMapCanvas() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, pasteIntoNode, redo, selectNode, undo])
+  }, [commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, pasteIntoNode, redo, relationSourceId, selectNode, undo])
 
   return (
     <div className="canvas-shell" style={{
@@ -286,7 +321,13 @@ export function MindMapCanvas() {
         onNodeDoubleClick={(_, node) => editNode(node.id)}
         onNodeContextMenu={(event, node) => openContextMenu(event.nativeEvent, node.id)}
         onPaneContextMenu={(event) => openContextMenu('nativeEvent' in event ? event.nativeEvent : event, null)}
-        onPaneClick={() => { selectNode(null); closeContextMenu() }}
+        onEdgeClick={(event, edge) => { event.stopPropagation(); selectRelation(edge.id) }}
+        onEdgeContextMenu={(event, edge) => {
+          event.preventDefault()
+          selectRelation(edge.id)
+          setContextMenu({ position: { x: event.clientX, y: event.clientY }, nodeId: null, relationId: edge.id })
+        }}
+        onPaneClick={() => { setRelationSourceId(null); selectNode(null); closeContextMenu() }}
         fitView
         minZoom={0.25}
         maxZoom={1.6}
@@ -295,17 +336,21 @@ export function MindMapCanvas() {
         <Background gap={20} size={1} color={theme.grid} />
         <Controls showInteractive={false}><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
       </ReactFlow>
+      {relationSourceId && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>请选择另一个节点作为目标 · Esc 取消</span></div>}
       {contextMenu && (() => {
         const contextNode = contextMenu.nodeId ? document.nodes[contextMenu.nodeId] : null
+        const contextRelation = contextMenu.relationId ? document.relations.find((relation) => relation.id === contextMenu.relationId) ?? null : null
         const targetNodeId = contextNode?.id ?? document.rootId
         return (
           <ContextMenu
             position={contextMenu.position}
             node={contextNode}
+            relation={contextRelation}
             isRoot={targetNodeId === document.rootId}
             onAddChild={() => runContextAction(() => dispatch({ type: 'ADD_CHILD', parentId: targetNodeId }))}
             onAddSibling={() => runContextAction(() => dispatch({ type: 'ADD_SIBLING', nodeId: targetNodeId }))}
             onEdit={() => runContextAction(() => editNode(targetNodeId))}
+            onCreateRelation={() => runContextAction(() => { selectNode(targetNodeId); setRelationSourceId(targetNodeId) })}
             onToggleCollapse={() => runContextAction(() => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: targetNodeId }))}
             onCollapseDescendants={() => runContextAction(() => dispatch({ type: 'COLLAPSE_DESCENDANTS', nodeId: targetNodeId }))}
             onExpandDescendants={() => runContextAction(() => dispatch({ type: 'EXPAND_DESCENDANTS', nodeId: targetNodeId }))}
@@ -319,6 +364,7 @@ export function MindMapCanvas() {
             onAutoArrange={() => runContextAction(() => dispatch({ type: 'AUTO_ARRANGE' }))}
             onRestoreFreeform={() => runContextAction(() => dispatch({ type: 'RESTORE_FREEFORM_LAYOUT' }))}
             onDelete={() => runContextAction(() => dispatch({ type: 'DELETE_NODE', nodeId: targetNodeId }))}
+            onDeleteRelation={() => contextRelation && runContextAction(() => dispatch({ type: 'DELETE_RELATION', relationId: contextRelation.id }))}
             hasClipboard={clipboard !== null}
             hasFreeformHistory={document.layout.freeformOffsets !== null}
             canOutdent={contextNode !== null && contextNode.parentId !== null && document.nodes[contextNode.parentId].parentId !== null}
@@ -337,6 +383,7 @@ export function MindMapCanvas() {
               { label: '新建子节点', detail: '在当前节点下继续展开想法', shortcut: 'Tab', run: () => dispatch({ type: 'ADD_CHILD', parentId: selectedId }) },
               { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
+              { label: '创建关系', detail: '选择另一个节点建立横向关联', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceId(selectedId) } },
               { label: selected.collapsed ? '展开当前分支' : '折叠当前分支', detail: '收起或展开子节点', shortcut: 'Space', disabled: !selected.childIds.length, run: () => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: selectedId }) },
               { label: '折叠所有次级分支', detail: '保留当前层级，收起更深的内容', shortcut: '—', disabled: !selected.childIds.length, run: () => dispatch({ type: 'COLLAPSE_DESCENDANTS', nodeId: selectedId }) },
               { label: '展开所有次级分支', detail: '展开当前分支下的全部内容', shortcut: '—', disabled: !selected.childIds.length, run: () => dispatch({ type: 'EXPAND_DESCENDANTS', nodeId: selectedId }) },

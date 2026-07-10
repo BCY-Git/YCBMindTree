@@ -18,6 +18,7 @@ export type MindNodeData = {
   hasChildren: boolean
   collapsed: boolean
   accentColor: string
+  isRelationSource: boolean
 }
 
 export function MindNode({ id, data, selected }: NodeProps) {
@@ -39,7 +40,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   }
 
   return (
-    <div className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${selected ? 'is-selected' : ''}`} style={{ '--node-accent': node.accentColor } as CSSProperties}>
+    <div className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`} style={{ '--node-accent': node.accentColor } as CSSProperties}>
       <Handle id="target-left" type="target" position={Position.Left} className="node-handle" />
       <Handle id="target-right" type="target" position={Position.Right} className="node-handle" />
       {node.hasChildren && (

@@ -30,6 +30,35 @@ describe('MindTree command executor', () => {
     expect(() => executeCommand(document, { type: 'DELETE_NODE', nodeId: document.rootId })).toThrow('根节点不能删除')
   })
 
+  it('creates a labelled relation, rejects duplicates, and cleans it up with a deleted branch', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const [, secondChild] = document.nodes[branchId].childIds
+    const created = executeCommand(document, { type: 'CREATE_RELATION', sourceId: branchId, targetId: secondChild, label: '依赖' })
+    const relationId = created.focusRelationId!
+
+    expect(created.document.relations).toContainEqual(expect.objectContaining({ id: relationId, label: '依赖' }))
+    expect(() => executeCommand(created.document, { type: 'CREATE_RELATION', sourceId: secondChild, targetId: branchId })).toThrow('已存在关系')
+
+    const removed = executeCommand(created.document, { type: 'DELETE_NODE', nodeId: branchId }).document
+    expect(removed.relations).toEqual([])
+    expect(() => assertValidDocument(removed)).not.toThrow()
+  })
+
+  it('updates and deletes a relation without changing the tree', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const firstChild = document.nodes[branchId].childIds[0]
+    const created = executeCommand(document, { type: 'CREATE_RELATION', sourceId: document.rootId, targetId: firstChild })
+    const relationId = created.focusRelationId!
+    const renamed = executeCommand(created.document, { type: 'UPDATE_RELATION_LABEL', relationId, label: '说明' }).document
+    const deleted = executeCommand(renamed, { type: 'DELETE_RELATION', relationId }).document
+
+    expect(renamed.relations[0].label).toBe('说明')
+    expect(deleted.relations).toEqual([])
+    expect(deleted.nodes).toEqual(document.nodes)
+  })
+
   it('persists a manual node offset without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

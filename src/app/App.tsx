@@ -46,6 +46,7 @@ function saveCategories(categories: Category[]) {
 export function App() {
   const document = useEditorStore((state) => state.document)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
+  const selectedRelationId = useEditorStore((state) => state.selectedRelationId)
   const past = useEditorStore((state) => state.past)
   const future = useEditorStore((state) => state.future)
   const hydrated = useEditorStore((state) => state.hydrated)
@@ -64,6 +65,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
   const pendingSaveRef = useRef<number | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
+  const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
   const visibleDocuments = useMemo(() => activeCategoryId === 'all'
     ? documents
@@ -234,8 +236,21 @@ export function App() {
         <MindMapCanvas />
 
         <aside className="inspector">
-          <p className="eyebrow">{selectedNode ? '节点属性' : '文档设置'}</p>
-          {selectedNode ? (
+          <p className="eyebrow">{selectedRelation ? '关系属性' : selectedNode ? '节点属性' : '文档设置'}</p>
+          {selectedRelation ? (
+            <>
+              <label className="field-label" htmlFor="relation-label">关系说明</label>
+              <textarea
+                id="relation-label"
+                value={selectedRelation.label}
+                rows={2}
+                onChange={(event) => dispatch({ type: 'UPDATE_RELATION_LABEL', relationId: selectedRelation.id, label: event.target.value })}
+              />
+              <div className="property-row"><span>起点</span><strong>{document.nodes[selectedRelation.sourceId]?.topic ?? '已删除节点'}</strong></div>
+              <div className="property-row"><span>终点</span><strong>{document.nodes[selectedRelation.targetId]?.topic ?? '已删除节点'}</strong></div>
+              <button className="danger-button" onClick={() => dispatch({ type: 'DELETE_RELATION', relationId: selectedRelation.id })}>删除此关系</button>
+            </>
+          ) : selectedNode ? (
             <>
               <label className="field-label" htmlFor="topic">主题</label>
               <textarea
@@ -284,9 +299,10 @@ export function App() {
       <footer className="statusbar">
         <span><i className="status-dot" />本地优先</span>
         <span>{Object.keys(document.nodes).length} 个节点</span>
+        {document.relations.length > 0 && <span>{document.relations.length} 条关系</span>}
         <span>右向树布局</span>
         {clipboard && <span>已复制「{clipboard.topic}」</span>}
-        <span className="status-hint">拖动根节点移动整图 · 拖动微调 · 右键可自动排列或恢复自由排布 · Shift+拖动调整结构 · ⌘K 命令</span>
+        <span className="status-hint">拖动根节点移动整图 · 右键“创建关系”后选择目标节点 · Shift+拖动调整结构 · ⌘K 命令</span>
       </footer>
     </main>
   )
