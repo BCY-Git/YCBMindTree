@@ -13,4 +13,5 @@ export const config = {
   databasePath: resolve(process.cwd(), process.env.DATABASE_PATH || './data/mindtree.db'),
   devToken: required('MINDTREE_DEV_TOKEN'),
   allowedHosts: (process.env.ALLOWED_HOSTS || '127.0.0.1:8787,localhost:8787').split(',').map((host) => host.trim()).filter(Boolean),
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:5174,http://localhost:5174').split(',').map((origin) => origin.trim()).filter(Boolean),
 }

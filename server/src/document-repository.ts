@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -14,6 +15,12 @@ export type DocumentRecord = {
 }
 
 export type VersionConflict = { type: 'VERSION_CONFLICT'; document: DocumentRecord }
+
+export type PairingChallenge = {
+  id: string
+  secret: string
+  expiresAt: number
+}
 
 export class DocumentRepository {
   private readonly database: Database.Database
@@ -34,6 +41,14 @@ export class DocumentRepository {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS documents_owner_updated ON documents(owner_id, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS pairing_challenges (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        secret_hash TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        claimed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS pairing_challenges_expiry ON pairing_challenges(expires_at);
       CREATE TABLE IF NOT EXISTS document_changes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         document_id TEXT NOT NULL,
@@ -96,6 +111,24 @@ export class DocumentRepository {
     })
   }
 
+  createPairingChallenge(ownerId: string, lifetimeMs = 5 * 60 * 1000): PairingChallenge {
+    const id = randomUUID()
+    const secret = randomBytes(32).toString('base64url')
+    const expiresAt = Date.now() + lifetimeMs
+    this.database.prepare('DELETE FROM pairing_challenges WHERE expires_at < ? OR claimed_at IS NOT NULL').run(Date.now())
+    this.database.prepare('INSERT INTO pairing_challenges (id, owner_id, secret_hash, expires_at, claimed_at) VALUES (?, ?, ?, ?, NULL)')
+      .run(id, ownerId, hashPairingSecret(secret), expiresAt)
+    return { id, secret, expiresAt }
+  }
+
+  claimPairingChallenge(ownerId: string, id: string, secret: string): boolean {
+    const result = this.database.prepare(`UPDATE pairing_challenges
+      SET claimed_at = ?
+      WHERE id = ? AND owner_id = ? AND secret_hash = ? AND expires_at > ? AND claimed_at IS NULL`)
+      .run(Date.now(), id, ownerId, hashPairingSecret(secret), Date.now())
+    return result.changes === 1
+  }
+
   private fromRow(row: Record<string, unknown>): DocumentRecord {
     return {
       id: String(row.id), ownerId: String(row.owner_id), title: String(row.title), categoryId: String(row.category_id), version: Number(row.version),
@@ -107,4 +140,8 @@ export class DocumentRepository {
     const row = this.database.prepare('SELECT * FROM documents WHERE id = ?').get(documentId) as Record<string, unknown> | undefined
     return row ? this.fromRow(row) : undefined
   }
+}
+
+function hashPairingSecret(secret: string): string {
+  return createHash('sha256').update(secret).digest('hex')
 }

@@ -26,6 +26,8 @@ MindTree Server (Node.js / Express)
 
 服务只监听 `127.0.0.1`；Nginx 负责公网 TLS。单机 SQLite 足以支撑个人多设备同步，文档快照与变更记录应定期备份到对象存储或另一台机器。
 
+浏览器直连 API 时，`ALLOWED_ORIGINS` 必须明确列出前端来源（开发环境为 `http://127.0.0.1:5174`）；服务端只对名单内来源返回 CORS 响应头，且仅允许 `GET`、`POST`、`PUT` 与 `OPTIONS`，防止任意网站借用本机 Token 调用同步 API。
+
 ## 同步数据模型
 
 `documents` 保存当前快照和 `version`；每一次写入要求客户端携带 `baseVersion`。版本一致才提交，并生成新的 `version` 与一条 `document_changes` 记录；不一致时返回 `409 VERSION_CONFLICT`，客户端先拉取最新快照后再决定合并策略。
@@ -68,3 +70,17 @@ document_changes(id, document_id, version, kind, payload_json, created_at)
 3. 带 dry-run 与版本校验的 MCP 写工具；
 4. Web 前端接入 token 与 push/pull；
 5. 阿里云 Docker + Nginx + 备份 + 正式认证。
+
+## 前端受控同步 MVP
+
+前端通过本地设置保存服务根地址和单用户 Bearer Token；Token 不会进入导图 JSON 或上传到除目标服务外的任何位置。每份导图在 IndexedDB 的独立 `syncMetadata` 表记录远端 `version`。用户手动点击上传时携带该版本作为 `baseVersion`；发生 `409 VERSION_CONFLICT` 时停止上传并展示远端摘要。
+
+服务端会在写入 SQLite 前用与客户端一致的导图快照结构校验 `nodes`、`relations`、布局和主题，并验证路径中的文档 ID 必须与快照 ID 一致；Bearer Token 不再能写入任意 JSON。
+
+拉取操作先获取远端摘要，用户确认后才写入本地；写入前创建一份新的“同步前备份”导图，避免远端内容覆盖未同步的本地工作。首期不提供静默后台同步、自动覆盖或自动合并。
+
+## 设备扫码配对
+
+已配置设备可以请求 `POST /api/v1/pairings`，服务端生成一个随机配对 secret，并仅保存它的 SHA-256 哈希。二维码只包含服务地址、配对 ID、随机 secret 与过期时间；它不包含长期 Bearer Token。新设备扫码后调用不需要 Bearer Token 的 `POST /api/v1/pairings/:pairingId/exchange` 兑换一次，服务端仅在 secret 匹配、未被领取且仍在五分钟有效期内时返回 Token，并立刻把该配对记录标记为已领取。
+
+二维码应被视为临时敏感信息：展示设备不应截图或转发，领取后立即失效。后续切换 HTTPS 后，配对兑换同样必须走 TLS。

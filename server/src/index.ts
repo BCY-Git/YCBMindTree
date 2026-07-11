@@ -2,17 +2,34 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { config } from './config.js'
-import { requireAllowedHost, requireDevelopmentBearer, type AuthenticatedRequest } from './auth.js'
+import { requireAllowedHost, requireAllowedOrigin, requireDevelopmentBearer, type AuthenticatedRequest } from './auth.js'
 import { DocumentRepository } from './document-repository.js'
 import { createMindTreeMcp } from './mcp.js'
+import { mindMapDocumentSchema } from './mindmap-document.js'
 
 const repository = new DocumentRepository(config.databasePath)
 const app = express()
 app.disable('x-powered-by')
 app.use(requireAllowedHost)
+app.use(requireAllowedOrigin)
 app.use(express.json({ limit: '1mb' }))
 
 app.get('/healthz', (_request, response) => response.json({ ok: true, service: 'mindtree-server', mcp: '/mcp' }))
+
+// 配对凭据只存哈希、仅能兑换一次，并在五分钟后自动失效。
+app.post('/api/v1/pairings', requireDevelopmentBearer, (request: AuthenticatedRequest, response) => {
+  const challenge = repository.createPairingChallenge(request.ownerId!)
+  return response.status(201).json({ pairingId: challenge.id, secret: challenge.secret, expiresAt: challenge.expiresAt })
+})
+
+app.post('/api/v1/pairings/:pairingId/exchange', (request, response) => {
+  const secret = typeof request.body?.secret === 'string' ? request.body.secret : ''
+  const pairingId = String(request.params.pairingId)
+  if (!secret || !repository.claimPairingChallenge('local-user', pairingId, secret)) {
+    return response.status(401).json({ error: { code: 'INVALID_PAIRING', message: '配对二维码无效、已使用或已过期' } })
+  }
+  return response.json({ token: config.devToken })
+})
 
 app.use('/api/v1', requireDevelopmentBearer)
 app.get('/api/v1/documents', (request: AuthenticatedRequest, response) => response.json({ documents: repository.list(request.ownerId!) }))
@@ -21,9 +38,13 @@ app.get('/api/v1/documents/:documentId', (request: AuthenticatedRequest, respons
   return document ? response.json(document) : response.status(404).json({ error: { code: 'NOT_FOUND', message: '导图不存在' } })
 })
 app.put('/api/v1/documents/:documentId', (request: AuthenticatedRequest, response) => {
-  const body = request.body as { title?: unknown; categoryId?: unknown; payload?: unknown; baseVersion?: unknown }
-  if (typeof body.title !== 'string' || typeof body.categoryId !== 'string' || typeof body.baseVersion !== 'number') return response.status(400).json({ error: { code: 'INVALID_DOCUMENT', message: 'title、categoryId、baseVersion 必填' } })
-  const saved = repository.save({ id: String(request.params.documentId), ownerId: request.ownerId!, title: body.title, categoryId: body.categoryId, payload: body.payload, baseVersion: body.baseVersion })
+  const body = request.body as { payload?: unknown; baseVersion?: unknown }
+  const payload = mindMapDocumentSchema.safeParse(body.payload)
+  const documentId = String(request.params.documentId)
+  if (typeof body.baseVersion !== 'number' || !payload.success || payload.data.id !== documentId) {
+    return response.status(400).json({ error: { code: 'INVALID_DOCUMENT', message: '导图快照、路径 ID 或 baseVersion 无效' } })
+  }
+  const saved = repository.save({ id: documentId, ownerId: request.ownerId!, title: payload.data.title, categoryId: payload.data.categoryId, payload: payload.data, baseVersion: body.baseVersion })
   return 'type' in saved ? response.status(409).json({ error: { code: saved.type }, document: saved.document }) : response.status(201).json(saved)
 })
 
