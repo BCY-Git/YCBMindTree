@@ -12,11 +12,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { listDocuments, loadLatestDocument, saveDocument } from '../persistence/database'
+import { getSyncMetadata, listDocumentVersions, listDocuments, loadLatestDocument, saveDocument, saveDocumentVersion, saveSyncMetadata } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
 import type { MindMapDocument } from '../domain/document.types'
+import { SyncDialog } from '../sync/SyncDialog'
+import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
+import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
+import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -63,7 +67,19 @@ export function App() {
   const [showCategoryInput, setShowCategoryInput] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
+  const [syncOpen, setSyncOpen] = useState(false)
+  const [syncConfig, setSyncConfig] = useState<SyncConfig>(loadSyncConfig)
+  const [syncRemoteVersion, setSyncRemoteVersion] = useState<number | null>(null)
+  const [syncStatus, setSyncStatus] = useState<string | null>(null)
+  const [syncPreview, setSyncPreview] = useState<RemoteDocument | null>(null)
+  const [syncConflict, setSyncConflict] = useState<RemoteDocument | null>(null)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [versions, setVersions] = useState<DocumentVersion[]>([])
+  const [historyBusy, setHistoryBusy] = useState(false)
   const pendingSaveRef = useRef<number | null>(null)
+  const pendingSnapshotRef = useRef<number | null>(null)
+  const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
@@ -107,6 +123,52 @@ export function App() {
     await persistDocument(document)
   }, [document, hydrated, persistDocument])
 
+  const refreshVersions = useCallback(() => {
+    void listDocumentVersions(useEditorStore.getState().document.id).then(setVersions).catch(console.warn)
+  }, [])
+
+  const createManualSnapshot = useCallback(async () => {
+    try {
+      setHistoryBusy(true)
+      const current = useEditorStore.getState().document
+      await saveDocumentVersion(createDocumentVersion(current, 'manual', '手动快照'))
+      refreshVersions()
+    } finally {
+      setHistoryBusy(false)
+    }
+  }, [refreshVersions])
+
+  const restoreVersion = useCallback(async (version: DocumentVersion) => {
+    try {
+      setHistoryBusy(true)
+      await flushCurrentDocument()
+      const current = useEditorStore.getState().document
+      await saveDocumentVersion(createDocumentVersion(current, 'restore-point', '恢复前备份'))
+      const restored = restoreDocumentVersion(version, current)
+      await persistDocument(restored)
+      observedVersionRef.current = { documentId: restored.id, updatedAt: restored.updatedAt }
+      hydrate(restored)
+      refreshVersions()
+    } finally {
+      setHistoryBusy(false)
+    }
+  }, [flushCurrentDocument, hydrate, persistDocument, refreshVersions])
+
+  const duplicateVersion = useCallback(async (version: DocumentVersion) => {
+    try {
+      setHistoryBusy(true)
+      await flushCurrentDocument()
+      const duplicate = duplicateDocumentVersion(version)
+      await saveDocument(duplicate)
+      setDocuments((current) => [duplicate, ...current].sort((left, right) => right.updatedAt - left.updatedAt))
+      observedVersionRef.current = { documentId: duplicate.id, updatedAt: duplicate.updatedAt }
+      hydrate(duplicate)
+      setHistoryOpen(false)
+    } finally {
+      setHistoryBusy(false)
+    }
+  }, [flushCurrentDocument, hydrate])
+
   const openDocument = useCallback(async (nextDocument: MindMapDocument) => {
     if (nextDocument.id === document.id) return
     await flushCurrentDocument()
@@ -118,6 +180,135 @@ export function App() {
     createDocument()
     setActiveCategoryId('uncategorized')
   }, [createDocument, flushCurrentDocument])
+
+  const saveSyncSettings = useCallback((nextConfig: SyncConfig) => {
+    saveSyncConfig(nextConfig)
+    setSyncConfig(nextConfig)
+    setSyncStatus('连接设置已保存在此浏览器。')
+  }, [])
+
+  const uploadToCloud = useCallback(async (config: SyncConfig) => {
+    try {
+      setSyncBusy(true)
+      setSyncStatus(null)
+      setSyncPreview(null)
+      setSyncConflict(null)
+      saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
+      await flushCurrentDocument()
+      const metadata = await getSyncMetadata(document.id)
+      const result = await pushDocument(config, document, metadata?.remoteVersion ?? 0)
+      if (result.type === 'conflict') {
+        setSyncConflict(result.remote)
+        setSyncStatus('云端已有较新的版本，本地内容未被上传。')
+        return
+      }
+      await saveSyncMetadata({ documentId: document.id, remoteVersion: result.remote.version, syncedAt: Date.now() })
+      setSyncRemoteVersion(result.remote.version)
+      setSyncStatus(`已上传到云端 · v${result.remote.version}`)
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : '上传失败，请检查服务地址与 Token。')
+    } finally {
+      setSyncBusy(false)
+    }
+  }, [document, flushCurrentDocument, saveSyncSettings])
+
+  const checkCloudVersion = useCallback(async (config: SyncConfig) => {
+    try {
+      setSyncBusy(true)
+      setSyncStatus(null)
+      setSyncConflict(null)
+      saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
+      const remote = await fetchRemoteDocument(config, document.id)
+      if (!remote) {
+        setSyncPreview(null)
+        setSyncStatus('云端还没有这份导图，请先上传本地版本。')
+        return
+      }
+      setSyncPreview(remote)
+      setSyncStatus('已读取云端版本，请确认后再替换本地内容。')
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : '读取云端版本失败。')
+    } finally {
+      setSyncBusy(false)
+    }
+  }, [document.id, saveSyncSettings])
+
+  const createDevicePairing = useCallback(async (config: SyncConfig) => {
+    saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
+    return createPairingInvite(config)
+  }, [saveSyncSettings])
+
+  const redeemDevicePairing = useCallback(async (invite: PairingInvite) => {
+    const token = await redeemPairingInvite(invite)
+    const nextConfig = { serverUrl: invite.serverUrl, token }
+    saveSyncSettings(nextConfig)
+    setSyncStatus('扫码配对成功，已保存此设备的同步连接。')
+    return nextConfig
+  }, [saveSyncSettings])
+
+  // 拉取云端版本并替换本地：先建一份「同步前备份」，再写入云端内容并 hydrate。
+  // 自动拉取与手动确认拉取共用此逻辑，保证两种入口都不会覆盖未同步的本地工作。
+  const pullRemoteDocument = useCallback(async (remote: RemoteDocument) => {
+    const currentDoc = useEditorStore.getState().document
+    if (currentDoc.id !== remote.payload.id) return
+    const now = Date.now()
+    const backup: MindMapDocument = { ...currentDoc, id: crypto.randomUUID(), title: `${currentDoc.title}（同步前备份）`, createdAt: now, updatedAt: now }
+    await saveDocumentVersion(createDocumentVersion(currentDoc, 'sync-backup', '同步前备份'))
+    await saveDocument(backup)
+    await saveDocument(remote.payload)
+    await saveSyncMetadata({ documentId: remote.payload.id, remoteVersion: remote.version, syncedAt: now })
+    setDocuments((current) => [remote.payload, backup, ...current.filter((item) => item.id !== remote.payload.id && item.id !== backup.id)]
+      .sort((left, right) => right.updatedAt - left.updatedAt))
+    hydrate(remote.payload)
+    setSyncRemoteVersion(remote.version)
+  }, [hydrate])
+
+  const autoSyncRef = useRef(false)
+  // 自动同步：打开应用或切换文档时静默检查云端。本地无未上传修改时直接拉取较新版本；
+  // 本地也改过时只提示冲突，不自动覆盖（保守，绝不丢本地工作）。未配置 Token 则跳过。
+  const autoSync = useCallback(async (config: SyncConfig) => {
+    if (autoSyncRef.current || !config.token.trim()) return
+    autoSyncRef.current = true
+    try {
+      const currentDoc = useEditorStore.getState().document
+      const metadata = await getSyncMetadata(currentDoc.id)
+      const remote = await fetchRemoteDocument(config, currentDoc.id)
+      if (!remote) return
+      if (metadata && remote.version <= metadata.remoteVersion) return
+      setSyncRemoteVersion(remote.version)
+      // 本地在上次同步后是否改动过（留 2s 容差应对防抖保存）。
+      const localDirty = !metadata || currentDoc.updatedAt > metadata.syncedAt + 2000
+      if (localDirty) {
+        setSyncPreview(null)
+        setSyncConflict(remote)
+        setSyncStatus(`云端有新版本 v${remote.version}，但本地也有未上传的修改，已暂停自动同步。请打开「同步」手动决定。`)
+        return
+      }
+      await pullRemoteDocument(remote)
+      setSyncStatus(`已自动同步云端版本 v${remote.version}`)
+    } catch {
+      // 自动同步静默失败，不打扰用户；可在「同步」里手动重试。
+    } finally {
+      autoSyncRef.current = false
+    }
+  }, [pullRemoteDocument])
+
+  const confirmCloudPull = useCallback(async () => {
+    const remote = syncConflict ?? syncPreview
+    if (!remote) return
+    try {
+      setSyncBusy(true)
+      await flushCurrentDocument()
+      await pullRemoteDocument(remote)
+      setSyncPreview(null)
+      setSyncConflict(null)
+      setSyncStatus(`已拉取云端版本 v${remote.version}；本地备份已创建。`)
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : '拉取云端版本失败。')
+    } finally {
+      setSyncBusy(false)
+    }
+  }, [flushCurrentDocument, pullRemoteDocument, syncConflict, syncPreview])
 
   // ── 初始化：从 IndexedDB 并行加载最新文档和文档列表 ─────────────────────────
   // hydrate() 恢复画布状态；setDocuments() 填充左侧导图列表。
@@ -149,6 +340,43 @@ export function App() {
     }
   }, [document, hydrated, persistDocument])
 
+  // 自动快照独立于 450ms 自动保存：用户停止编辑 3 秒后才记录，避免每次键入都产生历史版本。
+  useEffect(() => {
+    if (!hydrated) return
+    const previous = observedVersionRef.current
+    if (!previous || previous.documentId !== document.id) {
+      observedVersionRef.current = { documentId: document.id, updatedAt: document.updatedAt }
+      return
+    }
+    if (document.updatedAt <= previous.updatedAt) return
+    pendingSnapshotRef.current = window.setTimeout(() => {
+      const snapshot = createDocumentVersion(document, 'auto')
+      void saveDocumentVersion(snapshot).then(() => {
+        observedVersionRef.current = { documentId: document.id, updatedAt: document.updatedAt }
+        if (historyOpen) refreshVersions()
+      }).catch(console.warn)
+      pendingSnapshotRef.current = null
+    }, 3_000)
+    return () => {
+      if (pendingSnapshotRef.current !== null) {
+        window.clearTimeout(pendingSnapshotRef.current)
+        pendingSnapshotRef.current = null
+      }
+    }
+  }, [document, historyOpen, hydrated, refreshVersions])
+
+  useEffect(() => {
+    getSyncMetadata(document.id).then((metadata) => setSyncRemoteVersion(metadata?.remoteVersion ?? null)).catch(() => setSyncRemoteVersion(null))
+  }, [document.id])
+
+  // 自动同步触发：每次打开应用或切换文档后，静默拉取云端较新版本。
+  useEffect(() => {
+    if (!hydrated) return
+    const config = loadSyncConfig()
+    if (!config.token.trim()) return
+    void autoSync(config)
+  }, [document.id, hydrated, autoSync])
+
   return (
     <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''}`} style={{
       '--app-bg': theme.canvas,
@@ -175,6 +403,8 @@ export function App() {
           <button className="toolbar-button" onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })}><Icon>＋</Icon>子节点</button>
           <button className="toolbar-button toolbar-button--dark" disabled={(selectedNodeId ?? document.rootId) === document.rootId} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })}><Icon>↳</Icon>同级</button>
           <button className="toolbar-button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon>排列</button>
+          <button className="toolbar-button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本"><Icon>◷</Icon>历史</button>
+          <button className="toolbar-button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图"><Icon>⇅</Icon>同步</button>
         </div>
       </header>
 
@@ -300,10 +530,38 @@ export function App() {
         <span><i className="status-dot" />本地优先</span>
         <span>{Object.keys(document.nodes).length} 个节点</span>
         {document.relations.length > 0 && <span>{document.relations.length} 条关系</span>}
-        <span>右向树布局</span>
+        <span>{syncRemoteVersion === null ? '仅本地' : `云端 v${syncRemoteVersion}`}</span>
+        {syncStatus && <span>{syncStatus}</span>}
         {clipboard && <span>已复制「{clipboard.topic}」</span>}
         <span className="status-hint">拖动根节点移动整图 · 右键“创建关系”后选择目标节点 · Shift+拖动调整结构 · ⌘K 命令</span>
       </footer>
+      <SyncDialog
+        open={syncOpen}
+        config={syncConfig}
+        remoteVersion={syncRemoteVersion}
+        status={syncStatus}
+        remotePreview={syncPreview}
+        conflict={syncConflict}
+        busy={syncBusy}
+        onClose={() => setSyncOpen(false)}
+        onSaveConfig={saveSyncSettings}
+        onPush={uploadToCloud}
+        onCheckPull={checkCloudVersion}
+        onConfirmPull={confirmCloudPull}
+        onCreatePairing={createDevicePairing}
+        onRedeemPairing={redeemDevicePairing}
+      />
+      <VersionHistoryDialog
+        open={historyOpen}
+        documentTitle={document.title}
+        versions={versions}
+        busy={historyBusy}
+        onClose={() => setHistoryOpen(false)}
+        onRefresh={refreshVersions}
+        onCreateSnapshot={() => { void createManualSnapshot() }}
+        onRestore={(version) => { void restoreVersion(version) }}
+        onDuplicate={(version) => { void duplicateVersion(version) }}
+      />
     </main>
   )
 }

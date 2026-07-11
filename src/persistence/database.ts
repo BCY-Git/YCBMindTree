@@ -16,13 +16,28 @@ import Dexie, { type EntityTable } from 'dexie'
 import { mindMapDocumentSchema } from '../domain/document.schema'
 import type { MindMapDocument } from '../domain/document.types'
 import { assertValidDocument } from '../domain/document.validator'
+import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
+
+export type SyncMetadata = {
+  documentId: string
+  remoteVersion: number
+  syncedAt: number
+}
 
 class MindTreeDatabase extends Dexie {
   documents!: EntityTable<MindMapDocument, 'id'>
+  syncMetadata!: EntityTable<SyncMetadata, 'documentId'>
+  documentVersions!: EntityTable<DocumentVersion, 'id'>
 
   constructor() {
     super('mindtree')
     this.version(1).stores({ documents: 'id, title, updatedAt' })
+    this.version(2).stores({ documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt' })
+    this.version(3).stores({
+      documents: 'id, title, updatedAt',
+      syncMetadata: 'documentId, syncedAt',
+      documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind',
+    })
   }
 }
 
@@ -46,4 +61,36 @@ export async function listDocuments(): Promise<MindMapDocument[]> {
 
 export async function saveDocument(document: MindMapDocument): Promise<void> {
   await database.documents.put(document)
+}
+
+/** 每张导图保留有限的自动版本；手动快照、恢复点和同步备份不会被自动清理。 */
+export async function saveDocumentVersion(version: DocumentVersion, autoVersionLimit = 30): Promise<void> {
+  await database.transaction('rw', database.documentVersions, async () => {
+    await database.documentVersions.put(version)
+    if (version.kind !== 'auto') return
+    const automatic = (await database.documentVersions.where('documentId').equals(version.documentId).toArray())
+      .filter((item) => item.kind === 'auto')
+      .sort((left, right) => right.createdAt - left.createdAt)
+    const obsoleteIds = automatic.slice(autoVersionLimit).map((item) => item.id)
+    if (obsoleteIds.length) await database.documentVersions.bulkDelete(obsoleteIds)
+  })
+}
+
+export async function listDocumentVersions(documentId: string): Promise<DocumentVersion[]> {
+  const versions = await database.documentVersions.where('documentId').equals(documentId).toArray()
+  return versions.sort((left, right) => right.createdAt - left.createdAt)
+}
+
+export async function deleteDocumentVersions(documentId: string, kinds?: DocumentVersionKind[]): Promise<void> {
+  const versions = await database.documentVersions.where('documentId').equals(documentId).toArray()
+  const ids = versions.filter((version) => !kinds || kinds.includes(version.kind)).map((version) => version.id)
+  if (ids.length) await database.documentVersions.bulkDelete(ids)
+}
+
+export async function getSyncMetadata(documentId: string): Promise<SyncMetadata | undefined> {
+  return database.syncMetadata.get(documentId)
+}
+
+export async function saveSyncMetadata(metadata: SyncMetadata): Promise<void> {
+  await database.syncMetadata.put(metadata)
 }
