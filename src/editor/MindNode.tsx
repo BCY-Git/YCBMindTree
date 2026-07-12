@@ -35,7 +35,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const document = useEditorStore((state) => state.document)
   const isEditing = editingNodeId === id
   const [topic, setTopic] = useState(node.label)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const requestRef = useRef<AbortController | null>(null)
   const [suggestion, setSuggestion] = useState('')
   const [isCompleting, setIsCompleting] = useState(false)
@@ -77,6 +77,8 @@ export function MindNode({ id, data, selected }: NodeProps) {
   }
   const taskIcon = node.taskStatus === 'todo' ? '○' : node.taskStatus === 'doing' ? '◐' : node.taskStatus === 'done' ? '✓' : null
   const taskLabel = node.taskStatus === 'todo' ? '待办' : node.taskStatus === 'doing' ? '进行中' : node.taskStatus === 'done' ? '已完成' : ''
+  // 用预览文本估算行数，让长幽灵续写和真实长标题都能平滑扩展节点高度。
+  const editorLineCount = Math.min(5, Math.max(1, Math.ceil((topic + suggestion).length / (node.isRoot ? 20 : 16))))
 
   return (
     <div className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`} style={{ '--node-accent': node.accentColor } as CSSProperties}>
@@ -92,12 +94,13 @@ export function MindNode({ id, data, selected }: NodeProps) {
         </button>
       )}
       {isEditing ? (
-        <div className="node-input-shell">
+        <div className="node-input-shell" style={{ minHeight: `${editorLineCount * 19}px` }}>
           <div className="node-input-mirror" aria-hidden="true"><span>{topic}</span>{suggestion && <span className="node-input-mirror__suggestion">{suggestion}</span>}</div>
-          <input
+          <textarea
             ref={inputRef}
             className="node-input node-input--ghost"
             value={topic}
+            rows={1}
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
             onSelect={(event) => setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length && event.currentTarget.selectionEnd === event.currentTarget.value.length)}
             onCompositionStart={() => setComposing(true)}
@@ -109,9 +112,9 @@ export function MindNode({ id, data, selected }: NodeProps) {
               if (event.key === 'Enter') { event.preventDefault(); commit(); dispatch({ type: 'ADD_SIBLING', nodeId: id }) }
             }}
           />
-          {isCompleting && <span className="node-completion-loading" aria-label="AI 正在续写">AI 续写中</span>}
-          {suggestion && <span className="node-completion-hint" aria-label="AI 续写建议">Tab 接受 · Esc 忽略</span>}
-          {completionError && <span className="node-completion-error" role="status">AI 续写暂不可用</span>}
+          {isCompleting && <span className="sr-only" role="status">AI 正在续写</span>}
+          {suggestion && <span className="sr-only">按 Tab 接受 AI 续写，按 Esc 忽略</span>}
+          {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
       ) : <button className="node-label" title="双击编辑主题" onDoubleClick={() => editNode(id)}>
         {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
