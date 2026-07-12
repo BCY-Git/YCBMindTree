@@ -636,17 +636,23 @@ export function App() {
           <input value={document.title} aria-label="导图标题" onChange={(event) => dispatch({ type: 'RENAME_DOCUMENT', title: event.target.value })} />
           <span className="save-state">{hydrated ? document.isDraft ? '随手记草稿 · 已本机保存' : '已本地保存' : '正在打开…'}</span>
         </div>
-        <div className="toolbar-actions">
-          <button className="icon-button" onClick={undo} disabled={!past.length} title="撤销 (⌘Z)"><Icon>↶</Icon></button>
-          <button className="icon-button" onClick={redo} disabled={!future.length} title="重做 (⇧⌘Z)"><Icon>↷</Icon></button>
-          <span className="toolbar-divider" />
-          <button className="toolbar-button" onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })}><Icon>＋</Icon>子节点</button>
-          <button className="toolbar-button toolbar-button--dark" disabled={(selectedNodeId ?? document.rootId) === document.rootId} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })}><Icon>↳</Icon>同级</button>
-          <button className="toolbar-button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon>排列</button>
-          <button className="toolbar-button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本"><Icon>◷</Icon>历史</button>
-          <span className="export-menu-wrap"><button className="toolbar-button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown"><Icon>⇩</Icon>导出</button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
-          <button className="toolbar-button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图"><Icon>⇅</Icon>同步</button>
-          {document.isDraft && <button className="toolbar-button toolbar-button--dark" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon>保存随手记</button>}
+        <nav className="floating-toolbar" aria-label="导图编辑工具">
+          <div className="floating-toolbar__cluster">
+            <button className="floating-toolbar__icon" onClick={undo} disabled={!past.length} title="撤销 (⌘Z)" aria-label="撤销"><Icon>↶</Icon></button>
+            <button className="floating-toolbar__icon" onClick={redo} disabled={!future.length} title="重做 (⇧⌘Z)" aria-label="重做"><Icon>↷</Icon></button>
+          </div>
+          <span className="floating-toolbar__divider" />
+          <div className="floating-toolbar__cluster">
+            <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title="新建子节点 (Tab)"><Icon>＋</Icon><span>子节点</span></button>
+            <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title="新建同级节点 (Enter)"><Icon>↳</Icon><span>同级</span></button>
+            <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon><span>排列</span></button>
+          </div>
+        </nav>
+        <div className="topbar-utility">
+          <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
+          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown" aria-label="导出"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
+          <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
+          {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
         </div>
       </header>
 
