@@ -8,7 +8,7 @@
  * 左侧有 4 个隐藏的 Handle（source-left/right, target-left/right），
  * 由 tree-edge.ts 根据节点相对位置决定哪两个实际连接画布边。
  */
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react'
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
@@ -45,7 +45,16 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const [isHovering, setIsHovering] = useState(false)
 
   useEffect(() => setTopic(node.label), [node.label])
-  useEffect(() => { if (isEditing) inputRef.current?.focus() }, [isEditing])
+  useLayoutEffect(() => {
+    if (!isEditing) return
+    const frame = window.requestAnimationFrame(() => {
+      const input = inputRef.current
+      if (!input) return
+      input.focus({ preventScroll: true })
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [isEditing])
   useEffect(() => {
     requestRef.current?.abort()
     setSuggestion('')
@@ -111,10 +120,10 @@ export function MindNode({ id, data, selected }: NodeProps) {
       )}
       {isEditing ? (
         <div className="node-input-shell" style={{ minHeight: `${editorLineCount * 19}px` }}>
-          <div className="node-input-mirror" aria-hidden="true"><span>{topic}</span>{suggestion && <span className="node-input-mirror__suggestion">{suggestion}</span>}</div>
+          {suggestion && <div className="node-input-mirror" aria-hidden="true"><span>{topic}</span><span className="node-input-mirror__suggestion">{suggestion}</span></div>}
           <textarea
             ref={inputRef}
-            className="node-input node-input--ghost"
+            className={`node-input ${suggestion ? 'node-input--ghost' : ''}`}
             value={topic}
             rows={1}
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
@@ -135,7 +144,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
       ) : <div
         className="node-label"
         title="双击编辑主题"
-        onDoubleClick={(event) => { event.stopPropagation(); editNode(id) }}
+        onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); editNode(id) }}
       >
         {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
           {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
