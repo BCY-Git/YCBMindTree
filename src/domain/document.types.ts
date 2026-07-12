@@ -69,6 +69,16 @@ export type MindMapRelation = {
   updatedAt: number
 }
 
+/** 同一父节点下的一组主题的视觉分组，不改变树结构。 */
+export type MindMapBoundary = {
+  id: string
+  parentId: string
+  nodeIds: string[]
+  label: string
+  createdAt: number
+  updatedAt: number
+}
+
 export type MindMapDocument = {
   id: string
   schemaVersion: 1
@@ -80,6 +90,7 @@ export type MindMapDocument = {
   rootId: string
   nodes: Record<string, MindNode>
   relations: MindMapRelation[]
+  boundaries: MindMapBoundary[]
   layout: LayoutConfig
   theme: { id: ThemeId }
   createdAt: number

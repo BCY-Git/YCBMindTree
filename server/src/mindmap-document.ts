@@ -28,6 +28,15 @@ const relationSchema = z.object({
   updatedAt: z.number(),
 })
 
+const boundarySchema = z.object({
+  id: z.string().uuid(),
+  parentId: z.string().uuid(),
+  nodeIds: z.array(z.string().uuid()).min(2),
+  label: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+
 /** 服务端接收的完整导图快照；拒绝任意 JSON 写入 SQLite。 */
 export const mindMapDocumentSchema = z.object({
   id: z.string().uuid(),
@@ -39,6 +48,7 @@ export const mindMapDocumentSchema = z.object({
   rootId: z.string().uuid(),
   nodes: z.record(z.string().uuid(), nodeSchema),
   relations: z.array(relationSchema).default([]),
+  boundaries: z.array(boundarySchema).default([]),
   layout: z.object({
     levelGap: z.number().min(20),
     siblingGap: z.number().min(8),

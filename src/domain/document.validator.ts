@@ -48,4 +48,12 @@ export function assertValidDocument(document: MindMapDocument): void {
     if (relationPairs.has(pair)) throw new Error('节点之间已存在关系')
     relationPairs.add(pair)
   }
+
+  for (const boundary of document.boundaries) {
+    const parent = document.nodes[boundary.parentId]
+    if (!parent || parent.isFreeTopic || boundary.nodeIds.length < 2) throw new Error('边界父节点无效')
+    const ids = new Set(boundary.nodeIds)
+    if (ids.size !== boundary.nodeIds.length) throw new Error('边界节点重复')
+    if (boundary.nodeIds.some((nodeId) => document.nodes[nodeId]?.parentId !== boundary.parentId)) throw new Error('边界只能包含同级节点')
+  }
 }

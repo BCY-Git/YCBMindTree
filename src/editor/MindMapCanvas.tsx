@@ -18,6 +18,7 @@ import {
   ControlButton,
   Controls,
   ReactFlow,
+  ViewportPortal,
   applyNodeChanges,
   type Edge,
   type Node,
@@ -106,7 +107,7 @@ export function MindMapCanvas() {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
 
   // ── 构建 React Flow nodes / edges（响应 document / selectedNodeId / theme 变化）─────────
-  const { baseNodes, edges, basePositionsById } = useMemo(() => {
+  const { baseNodes, edges, basePositionsById, boundaryBoxes } = useMemo(() => {
     const placed = layoutTree(document)
     const visibleIds = new Set(placed.map((item) => item.id))
     const positionedById = new Map(placed.map((item) => [item.id, item]))
@@ -184,7 +185,16 @@ export function MindMapCanvas() {
         zIndex: 2,
       }]
     })
-    return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(placed.map((item) => [item.id, item])) }
+    const boundaryBoxes = document.boundaries.flatMap((boundary) => {
+      const nodes = boundary.nodeIds.map((id) => positionedById.get(id)).filter((node): node is NonNullable<typeof node> => Boolean(node))
+      if (nodes.length < 2) return []
+      const left = Math.min(...nodes.map((node) => node.x)) - 18
+      const top = Math.min(...nodes.map((node) => node.y)) - 27
+      const right = Math.max(...nodes.map((node) => node.x + node.width)) + 18
+      const bottom = Math.max(...nodes.map((node) => node.y + node.height)) + 18
+      return [{ id: boundary.id, label: boundary.label, left, top, width: right - left, height: bottom - top }]
+    })
+    return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(placed.map((item) => [item.id, item])), boundaryBoxes }
   }, [document, dropIntent, freeTopicAttachmentParentId, relationSourceId, selectedNodeIds, selectedRelationId, theme])
 
   useEffect(() => setFlowNodes(baseNodes), [baseNodes])
@@ -352,9 +362,17 @@ export function MindMapCanvas() {
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
   const openContextMenu = useCallback((event: MouseEvent, nodeId: string | null) => {
     event.preventDefault()
-    if (nodeId) selectNode(nodeId)
+    // 对已经在多选集内的节点右键，不清掉多选；否则回到单选。
+    if (nodeId && !selectedNodeIds.includes(nodeId)) selectNode(nodeId)
     setContextMenu({ position: { x: event.clientX, y: event.clientY }, nodeId, relationId: null })
-  }, [selectNode])
+  }, [selectNode, selectedNodeIds])
+
+  const canCreateBoundary = useMemo(() => {
+    if (selectedNodeIds.length < 2) return false
+    const selected = selectedNodeIds.map((id) => document.nodes[id])
+    const parentId = selected[0]?.parentId
+    return Boolean(parentId && selected.every((node) => node && !node.isFreeTopic && node.parentId === parentId))
+  }, [document.nodes, selectedNodeIds])
 
   const runContextAction = useCallback((action: () => void) => {
     action()
@@ -467,6 +485,22 @@ export function MindMapCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color={theme.grid} />
+        <ViewportPortal>
+          {boundaryBoxes.map((boundary) => (
+            <div key={boundary.id} className="mind-boundary" style={{ left: boundary.left, top: boundary.top, width: boundary.width, height: boundary.height }}>
+              <button
+                className="mind-boundary__label"
+                title="双击修改边界名称"
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  const label = window.prompt('边界名称', boundary.label)
+                  if (label !== null) dispatch({ type: 'UPDATE_BOUNDARY_LABEL', boundaryId: boundary.id, label })
+                }}
+              >{boundary.label}</button>
+              <button className="mind-boundary__delete" title="删除边界" onClick={() => dispatch({ type: 'DELETE_BOUNDARY', boundaryId: boundary.id })}>×</button>
+            </div>
+          ))}
+        </ViewportPortal>
         <Controls showInteractive={false}><ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
       </ReactFlow>
       {relationSourceId && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>请选择另一个节点作为目标 · Esc 取消</span></div>}
@@ -487,6 +521,7 @@ export function MindMapCanvas() {
             onAddSibling={() => runContextAction(() => dispatch({ type: 'ADD_SIBLING', nodeId: targetNodeId }))}
             onEdit={() => runContextAction(() => editNode(targetNodeId))}
             onCreateRelation={() => runContextAction(() => { selectNode(targetNodeId); setRelationSourceId(targetNodeId) })}
+            onCreateBoundary={() => runContextAction(() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }))}
             onToggleCollapse={() => runContextAction(() => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: targetNodeId }))}
             onCollapseDescendants={() => runContextAction(() => dispatch({ type: 'COLLAPSE_DESCENDANTS', nodeId: targetNodeId }))}
             onExpandDescendants={() => runContextAction(() => dispatch({ type: 'EXPAND_DESCENDANTS', nodeId: targetNodeId }))}
@@ -505,6 +540,7 @@ export function MindMapCanvas() {
             hasFreeformHistory={document.layout.freeformOffsets !== null}
             canOutdent={contextNode !== null && contextNode.parentId !== null && document.nodes[contextNode.parentId].parentId !== null}
             canIndent={contextNode !== null && contextNode.parentId !== null && document.nodes[contextNode.parentId].childIds.indexOf(contextNode.id) > 0}
+            canCreateBoundary={canCreateBoundary}
             onClose={closeContextMenu}
           />
         )
@@ -520,6 +556,7 @@ export function MindMapCanvas() {
               { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
               { label: '创建关系', detail: '选择另一个节点建立横向关联', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceId(selectedId) } },
+              { label: '为所选节点创建边界', detail: '圈定两个或以上同级节点，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }) },
               { label: selected.collapsed ? '展开当前分支' : '折叠当前分支', detail: '收起或展开子节点', shortcut: 'Space', disabled: !selected.childIds.length, run: () => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: selectedId }) },
               { label: '折叠所有次级分支', detail: '保留当前层级，收起更深的内容', shortcut: '—', disabled: !selected.childIds.length, run: () => dispatch({ type: 'COLLAPSE_DESCENDANTS', nodeId: selectedId }) },
               { label: '展开所有次级分支', detail: '展开当前分支下的全部内容', shortcut: '—', disabled: !selected.childIds.length, run: () => dispatch({ type: 'EXPAND_DESCENDANTS', nodeId: selectedId }) },

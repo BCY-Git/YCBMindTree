@@ -14,7 +14,7 @@
  */
 import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapDocument, MindMapRelation, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus } from './document.types'
+import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus } from './document.types'
 import type { ThemeId } from './themes'
 
 /**
@@ -39,6 +39,9 @@ export type MindMapCommand =
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
   | { type: 'DELETE_RELATION'; relationId: string }
+  | { type: 'CREATE_BOUNDARY'; nodeIds: string[]; label?: string }
+  | { type: 'UPDATE_BOUNDARY_LABEL'; boundaryId: string; label: string }
+  | { type: 'DELETE_BOUNDARY'; boundaryId: string }
   | { type: 'TOGGLE_COLLAPSE'; nodeId: string }
   | { type: 'COLLAPSE_DESCENDANTS'; nodeId: string }
   | { type: 'EXPAND_DESCENDANTS'; nodeId: string }
@@ -108,17 +111,31 @@ function arrangeAfterInsert(document: MindMapDocument) {
   Object.values(document.nodes).filter((node) => !node.isFreeTopic).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
 }
 
+/** 节点离开原同级集合后，边界应收缩；只剩一个节点的边界自动消失。 */
+function removeNodeFromBoundaries(document: MindMapDocument, nodeId: string) {
+  document.boundaries = document.boundaries.flatMap((boundary) => {
+    const nodeIds = boundary.nodeIds.filter((id) => id !== nodeId)
+    return nodeIds.length >= 2 ? [{ ...boundary, nodeIds, updatedAt: Date.now() }] : []
+  })
+}
+
 // 递归删除子树：从叶子节点向上逐层删除，确保不遗漏。
 function removeSubtree(document: MindMapDocument, nodeId: string) {
   const node = document.nodes[nodeId]
   node.childIds.forEach((childId) => removeSubtree(document, childId))
   document.relations = document.relations.filter((relation) => relation.sourceId !== nodeId && relation.targetId !== nodeId)
+  removeNodeFromBoundaries(document, nodeId)
   delete document.nodes[nodeId]
 }
 
 function createRelation(sourceId: string, targetId: string, label: string): MindMapRelation {
   const now = Date.now()
   return { id: crypto.randomUUID(), sourceId, targetId, label: label.trim() || '关联', createdAt: now, updatedAt: now }
+}
+
+function createBoundary(parentId: string, nodeIds: string[], label: string): MindMapBoundary {
+  const now = Date.now()
+  return { id: crypto.randomUUID(), parentId, nodeIds, label: label.trim() || '分组', createdAt: now, updatedAt: now }
 }
 
 // 检查 candidateId 是否在 ancestorId 的子树中（含自身），用于防止循环引用。
@@ -144,6 +161,7 @@ function moveNode(document: MindMapDocument, nodeId: string, newParentId: string
   const previousParent = document.nodes[node.parentId]
   const previousIndex = previousParent.childIds.indexOf(nodeId)
   previousParent.childIds = previousParent.childIds.filter((id) => id !== nodeId)
+  if (previousParent.id !== newParent.id) removeNodeFromBoundaries(document, nodeId)
   // 同一父节点内向下移动时，移除自身会让目标索引左移一格。
   const adjustedIndex = previousParent.id === newParent.id && previousIndex >= 0 && previousIndex < index ? index - 1 : index
   const targetIndex = Math.max(0, Math.min(adjustedIndex, newParent.childIds.length))
@@ -347,6 +365,28 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const index = document.relations.findIndex((relation) => relation.id === command.relationId)
       if (index < 0) throw new Error('关系不存在')
       document.relations.splice(index, 1)
+      break
+    }
+    case 'CREATE_BOUNDARY': {
+      const nodeIds = [...new Set(command.nodeIds)]
+      if (nodeIds.length < 2) throw new Error('至少选择两个同级节点才能创建边界')
+      const first = document.nodes[nodeIds[0]]
+      if (!first?.parentId || first.isFreeTopic) throw new Error('边界不能包含根节点或自由主题')
+      if (nodeIds.some((nodeId) => document.nodes[nodeId]?.parentId !== first.parentId || document.nodes[nodeId]?.isFreeTopic)) throw new Error('边界只能包含同级节点')
+      document.boundaries.push(createBoundary(first.parentId, nodeIds, command.label ?? '分组'))
+      break
+    }
+    case 'UPDATE_BOUNDARY_LABEL': {
+      const boundary = document.boundaries.find((item) => item.id === command.boundaryId)
+      if (!boundary) throw new Error('边界不存在')
+      boundary.label = command.label.trim() || '分组'
+      boundary.updatedAt = Date.now()
+      break
+    }
+    case 'DELETE_BOUNDARY': {
+      const index = document.boundaries.findIndex((item) => item.id === command.boundaryId)
+      if (index < 0) throw new Error('边界不存在')
+      document.boundaries.splice(index, 1)
       break
     }
 

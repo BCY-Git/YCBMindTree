@@ -93,6 +93,25 @@ describe('MindTree command executor', () => {
     expect(deleted.nodes).toEqual(document.nodes)
   })
 
+  it('groups sibling nodes in a boundary and removes the boundary when it no longer has two nodes', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const [firstChild, secondChild] = document.nodes[parentId].childIds
+    const grouped = executeCommand(document, { type: 'CREATE_BOUNDARY', nodeIds: [firstChild, secondChild], label: '待确认' }).document
+
+    expect(grouped.boundaries).toHaveLength(1)
+    expect(grouped.boundaries[0]).toMatchObject({ parentId, nodeIds: [firstChild, secondChild], label: '待确认' })
+    expect(() => executeCommand(document, { type: 'CREATE_BOUNDARY', nodeIds: [document.rootId, firstChild] })).toThrow('边界不能包含根节点或自由主题')
+
+    const pruned = executeCommand(grouped, { type: 'DELETE_NODE', nodeId: firstChild }).document
+    expect(pruned.boundaries).toEqual([])
+    expect(() => assertValidDocument(pruned)).not.toThrow()
+
+    const moved = executeCommand(grouped, { type: 'MOVE_NODE', nodeId: firstChild, newParentId: document.rootId, index: 1 }).document
+    expect(moved.boundaries).toEqual([])
+    expect(() => assertValidDocument(moved)).not.toThrow()
+  })
+
   it('sets task state and priority without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]
