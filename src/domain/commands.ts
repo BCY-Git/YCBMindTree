@@ -50,6 +50,7 @@ export type MindMapCommand =
   | { type: 'EXPAND_DESCENDANTS'; nodeId: string }
   | { type: 'REVEAL_NODE'; nodeId: string }
   | { type: 'UPDATE_NODE_OFFSET'; nodeId: string; offsetX: number; offsetY: number }
+  | { type: 'SET_NODE_SIZE'; nodeId: string; width: number; height: number }
   /** 拖拽根节点时平移整张导图 */
   | { type: 'TRANSLATE_DOCUMENT'; deltaX: number; deltaY: number }
   | { type: 'RESET_NODE_OFFSET'; nodeId: string }
@@ -479,6 +480,18 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       // 偏移量取整，防止浮点积累。
       node.offsetX = Math.round(command.offsetX)
       node.offsetY = Math.round(command.offsetY)
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'SET_NODE_SIZE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      const minWidth = node.id === document.rootId ? 196 : 118
+      const minHeight = node.id === document.rootId ? 58 : 44
+      if (!Number.isFinite(command.width) || !Number.isFinite(command.height)
+        || command.width < minWidth || command.width > 560 || command.height < minHeight || command.height > 420) throw new Error('节点尺寸无效')
+      node.width = Math.round(command.width)
+      node.height = Math.round(command.height)
       node.updatedAt = Date.now()
       break
     }

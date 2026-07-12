@@ -35,6 +35,9 @@ export type MindNode = {
   /** 本地日期 YYYY-MM-DD；不设时间，避免跨时区意外偏移。 */
   dueDate: string | null
   collapsed: boolean
+  /** 用户从右下角拖拽后的尺寸；null 时由标题内容自动计算。 */
+  width: number | null
+  height: number | null
   offsetX: number
   offsetY: number
   createdAt: number

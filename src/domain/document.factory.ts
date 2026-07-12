@@ -27,6 +27,8 @@ export function createNode(topic: string, parentId: string | null): MindNode {
     priority: 0,
     dueDate: null,
     collapsed: false,
+    width: null,
+    height: null,
     offsetX: 0,
     offsetY: 0,
     createdAt: now,

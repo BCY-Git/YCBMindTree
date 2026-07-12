@@ -9,7 +9,7 @@
  * 由 tree-edge.ts 根据节点相对位置决定哪两个实际连接画布边。
  */
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react'
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
@@ -42,6 +42,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const [completionError, setCompletionError] = useState(false)
   const [cursorAtEnd, setCursorAtEnd] = useState(true)
   const [composing, setComposing] = useState(false)
+  const [isHovering, setIsHovering] = useState(false)
 
   useEffect(() => setTopic(node.label), [node.label])
   useEffect(() => { if (isEditing) inputRef.current?.focus() }, [isEditing])
@@ -81,7 +82,22 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const editorLineCount = Math.min(5, Math.max(1, Math.ceil((topic + suggestion).length / (node.isRoot ? 20 : 16))))
 
   return (
-    <div className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`} style={{ '--node-accent': node.accentColor } as CSSProperties}>
+    <div
+      className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`}
+      style={{ '--node-accent': node.accentColor } as CSSProperties}
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => setIsHovering(false)}
+    >
+      {!isEditing && (selected || isHovering) && <NodeResizeControl
+        position="bottom-right"
+        className="node-resize-control"
+        minWidth={node.isRoot ? 196 : 118}
+        minHeight={node.isRoot ? 58 : 44}
+        maxWidth={560}
+        maxHeight={420}
+        autoScale
+        onResizeEnd={(_, size) => dispatch({ type: 'SET_NODE_SIZE', nodeId: id, width: size.width, height: size.height })}
+      ><span aria-hidden="true">⤢</span></NodeResizeControl>}
       <Handle id="target-left" type="target" position={Position.Left} className="node-handle" />
       <Handle id="target-right" type="target" position={Position.Right} className="node-handle" />
       {node.hasChildren && (

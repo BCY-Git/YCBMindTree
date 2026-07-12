@@ -138,7 +138,7 @@ export function MindMapCanvas() {
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
           isRelationSource: relationSourceId === item.id,
         },
-        style: { width: item.width, minHeight: item.height },
+        style: { width: item.width, height: item.height },
       }
     })
     const treeEdges: Edge[] = placed.flatMap((item) => {

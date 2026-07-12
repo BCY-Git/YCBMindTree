@@ -47,4 +47,14 @@ describe('tree layout', () => {
 
     expect(free).toMatchObject({ x: 511, y: 233 })
   })
+
+  it('uses the persisted node size while keeping enough height for its text', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    document.nodes[nodeId].width = 310
+    document.nodes[nodeId].height = 92
+
+    const placed = layoutTree(document).find((node) => node.id === nodeId)!
+    expect(placed).toMatchObject({ width: 310, height: 92 })
+  })
 })

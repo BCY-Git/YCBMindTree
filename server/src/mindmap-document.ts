@@ -13,6 +13,8 @@ const nodeSchema = z.object({
   priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).default(0),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
   collapsed: z.boolean(),
+  width: z.number().min(118).max(560).nullable().default(null),
+  height: z.number().min(44).max(420).nullable().default(null),
   offsetX: z.number(),
   offsetY: z.number(),
   createdAt: z.number(),

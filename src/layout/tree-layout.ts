@@ -29,9 +29,11 @@ const ROOT_HEIGHT = 58
  */
 function nodeSize(node: MindNode, isRoot: boolean) {
   const longestLine = Math.max(...node.topic.split('\n').map((line) => line.length), 1)
-  const width = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * 8.5 + 44))
+  const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * 8.5 + 44))
+  const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth)
   const lines = Math.max(1, Math.ceil(node.topic.length / Math.max(12, Math.floor((width - 36) / 8.5))))
-  return { width, height: (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20 }
+  const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20
+  return { width, height: Math.max(node.height ?? 0, automaticHeight) }
 }
 
 export function layoutTree(document: MindMapDocument): PositionedNode[] {

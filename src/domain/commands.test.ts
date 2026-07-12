@@ -147,6 +147,15 @@ describe('MindTree command executor', () => {
     expect(() => executeCommand(document, { type: 'SET_NODE_DUE_DATE', nodeId, dueDate: '2030-02-30' })).toThrow('截止日期格式无效')
   })
 
+  it('persists a manual node size while rejecting invalid dimensions', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    const resized = executeCommand(document, { type: 'SET_NODE_SIZE', nodeId, width: 320, height: 96 }).document
+
+    expect(resized.nodes[nodeId]).toMatchObject({ width: 320, height: 96 })
+    expect(() => executeCommand(document, { type: 'SET_NODE_SIZE', nodeId, width: 40, height: 20 })).toThrow('节点尺寸无效')
+  })
+
   it('persists a manual node offset without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]
