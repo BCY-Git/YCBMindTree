@@ -40,6 +40,8 @@ type PendingNavigation =
   | { kind: 'new-map' }
   | { kind: 'quick-note' }
 
+type SidebarPanel = 'projects' | 'maps' | 'tasks' | 'assistant'
+
 // localStorage key for persisting user-defined categories.
 const categoryStorageKey = 'mindtree.categories.v1'
 const defaultCategories: Category[] = [{ id: 'uncategorized', name: '未分类' }]
@@ -90,6 +92,7 @@ export function App() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [accountSession, setAccountSession] = useState<AuthSession | null>(loadAccountSession)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
+  const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>('projects')
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(loadSyncConfig)
   const [syncRemoteVersion, setSyncRemoteVersion] = useState<number | null>(null)
@@ -127,6 +130,7 @@ export function App() {
   const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
   const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
   const openTaskCount = useMemo(() => tasks.filter((task) => task.status !== 'done').length, [tasks])
+  const toggleSidebarPanel = (panel: SidebarPanel) => setSidebarPanel((current) => current === panel ? null : panel)
 
   const exportCurrentDocument = (mode: MarkdownExportMode) => {
     downloadMarkdown(document, mode)
@@ -663,16 +667,16 @@ export function App() {
           ) : <>
           <div className="sidebar-scroll">
             <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong><button onClick={toggleSidebar} aria-label="收起侧栏" title="收起侧栏">‹</button></div>
-            <button className="sidebar-quick-note" onClick={() => { void startQuickNote() }}><span>✦</span><span><strong>随手记</strong><small>快速梳理一个想法</small></span><i>⌘⇧N</i></button>
-            <button className="sidebar-create sidebar-create--secondary" onClick={() => { void startNewDocument() }}><span>＋</span>新建导图</button>
+            <div className="sidebar-quick-actions"><button onClick={() => { void startQuickNote() }} title="随手记 (⌘⇧N)"><span>✦</span>随手记</button><button onClick={() => { void startNewDocument() }} title="新建导图"><span>＋</span>新建导图</button></div>
+            <nav className="sidebar-panel-nav" aria-label="侧栏分类">
+              <button className={sidebarPanel === 'projects' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('projects')} aria-expanded={sidebarPanel === 'projects'}><span>◫</span><strong>项目</strong><small>{categories.length}</small><i>›</i></button>
+              <button className={sidebarPanel === 'maps' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('maps')} aria-expanded={sidebarPanel === 'maps'}><span>◇</span><strong>导图</strong><small>{savedDocuments.length + draftDocuments.length}</small><i>›</i></button>
+              <button className={sidebarPanel === 'tasks' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('tasks')} aria-expanded={sidebarPanel === 'tasks'}><span>☑</span><strong>任务中心</strong><small>{openTaskCount}</small><i>›</i></button>
+              <button className={sidebarPanel === 'assistant' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('assistant')} aria-expanded={sidebarPanel === 'assistant'}><span>✦</span><strong>AI 助手</strong><i>›</i></button>
+            </nav>
 
-            {draftDocuments.length > 0 && <section className="sidebar-section sidebar-drafts">
-              <div className="sidebar-section__heading"><p className="sidebar-section__title">随手记草稿</p><span>{draftDocuments.length}</span></div>
-              {draftDocuments.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>已自动保存到本机</small></span></button>)}
-            </section>}
-
-            <section className="sidebar-section">
-              <p className="sidebar-section__title">项目</p>
+            {sidebarPanel === 'projects' && <section className="sidebar-panel" aria-label="项目分类">
+              <div className="sidebar-panel__heading"><span>项目分类</span><small>双击名称可编辑</small></div>
               <button className={`sidebar-nav-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span>◫</span>全部导图 <small>{savedDocuments.length}</small></button>
               {categories.map((category) => {
                 const count = savedDocuments.filter((item) => item.categoryId === category.id).length
@@ -687,10 +691,11 @@ export function App() {
                   <button type="submit">添加</button>
                 </form>
               ) : <button className="sidebar-add-category" onClick={() => setShowCategoryInput(true)}>＋ 新建分类</button>}
-            </section>
+            </section>}
 
-            <section className="sidebar-section sidebar-documents">
-              <div className="sidebar-section__heading"><p className="sidebar-section__title">导图记录</p><span>{activeCategoryId === 'all' ? '全部' : categoryName(activeCategoryId)}</span></div>
+            {sidebarPanel === 'maps' && <section className="sidebar-panel" aria-label="导图列表">
+              <div className="sidebar-panel__heading"><span>导图记录</span><small>{activeCategoryId === 'all' ? '全部' : categoryName(activeCategoryId)}</small></div>
+              {draftDocuments.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{draftDocuments.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>已自动保存到本机</small></span></button>)}</div>}
               {visibleDocuments.map((item) => (
                 <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => { void openDocument(item) }}>
                   <span className="sidebar-document__icon">◈</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>{categoryName(item.categoryId)}</small></span>
@@ -702,15 +707,14 @@ export function App() {
                   {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
                 </select>
               </label>
-            </section>
+            </section>}
 
-            <section className="sidebar-section sidebar-assistant-section">
-              <button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>任务中心</strong><small>跨导图查看待办</small></span><i>{openTaskCount}</i></button>
-            </section>
-            <section className="sidebar-section sidebar-assistant-section">
-              <p className="sidebar-section__title">助手</p>
+            {sidebarPanel === 'tasks' && <section className="sidebar-panel sidebar-panel--tasks" aria-label="任务中心"><p>跨导图汇总待办，统一处理进度与截止日期。</p><button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>打开任务中心</strong><small>{openTaskCount ? `${openTaskCount} 项未完成` : '当前没有未完成任务'}</small></span><i>›</i></button></section>}
+
+            {sidebarPanel === 'assistant' && <section className="sidebar-panel sidebar-panel--assistant" aria-label="AI 助手">
+              <div className="sidebar-panel__heading"><span>AI 助手</span><small>基于当前导图</small></div>
               <AiAssistant document={document} targetNodeId={selectedNodeId ?? document.rootId} />
-            </section>
+            </section>}
           </div>
           <footer className="sidebar-footer">
             <button className="sidebar-footer-action" type="button"><span>⚙</span>设置</button>
