@@ -85,6 +85,8 @@ finalPosition = autoPosition + manualOffset
 
 Dexie 以 `documents` 表保存完整、经 Zod 解析的文档。Store 对文档变更防抖自动保存；读取失败或无历史文档时生成一个默认导图。
 
+随手记使用同一份 `MindMapDocument` 与命令系统，仅以 `isDraft` / `origin` 标明其生命周期：草稿始终先写入本机，切换导图时由 UI 请求用户保存为正式导图或继续保留草稿；草稿不会进入云端上传与自动拉取流程。这样桌面端或移动端只需替换持久化适配器，不必重写编辑器。
+
 工作区导航通过 Dexie 的时间倒序文档列表展示已有导图；`categoryId` 随文档持久化，分类名称列表则保存在当前浏览器的 `localStorage` 中。旧文档读取时默认归入“未分类”。
 
 AI 服务地址、模型名和 API Key 不进入导图文档或 IndexedDB，而是保存在当前浏览器的独立 `localStorage` 项中。开发环境中，浏览器将请求发送给同源 `/api/ai/chat`，Vite 代理再转发给用户设置的公开 HTTPS 服务，避免浏览器 CORS 限制。只有用户主动提交提示词时才会传输当前导图的最小结构上下文；调用采用 OpenAI Chat Completions 兼容格式。

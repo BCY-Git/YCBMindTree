@@ -32,6 +32,10 @@ function Icon({ children }: { children: ReactNode }) {
 }
 
 type Category = { id: string; name: string }
+type PendingNavigation =
+  | { kind: 'open'; document: MindMapDocument }
+  | { kind: 'new-map' }
+  | { kind: 'quick-note' }
 
 // localStorage key for persisting user-defined categories.
 const categoryStorageKey = 'mindtree.categories.v1'
@@ -69,6 +73,7 @@ export function App() {
   const redo = useEditorStore((state) => state.redo)
   const hydrate = useEditorStore((state) => state.hydrate)
   const createDocument = useEditorStore((state) => state.createDocument)
+  const createQuickNote = useEditorStore((state) => state.createQuickNote)
   const clipboard = useEditorStore((state) => state.clipboard)
   const [documents, setDocuments] = useState<MindMapDocument[]>([])
   const [categories, setCategories] = useState<Category[]>(loadCategories)
@@ -95,6 +100,10 @@ export function App() {
   const [linkUrl, setLinkUrl] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [attachmentStatus, setAttachmentStatus] = useState<string | null>(null)
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null)
+  const [draftSaveOpen, setDraftSaveOpen] = useState(false)
+  const [draftTitle, setDraftTitle] = useState('')
+  const [draftCategoryId, setDraftCategoryId] = useState('uncategorized')
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
@@ -103,9 +112,11 @@ export function App() {
   const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
   const libraryDocuments = useMemo(() => documents.filter((item) => !isBackgroundBackup(item)), [documents])
+  const draftDocuments = useMemo(() => libraryDocuments.filter((item) => item.isDraft), [libraryDocuments])
+  const savedDocuments = useMemo(() => libraryDocuments.filter((item) => !item.isDraft), [libraryDocuments])
   const visibleDocuments = useMemo(() => activeCategoryId === 'all'
-    ? libraryDocuments
-    : libraryDocuments.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, libraryDocuments])
+    ? savedDocuments
+    : savedDocuments.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, savedDocuments])
   const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
 
   const exportCurrentDocument = (mode: MarkdownExportMode) => {
@@ -219,8 +230,8 @@ export function App() {
       window.clearTimeout(pendingSaveRef.current)
       pendingSaveRef.current = null
     }
-    await persistDocument(document)
-  }, [document, hydrated, persistDocument])
+    await persistDocument(useEditorStore.getState().document)
+  }, [hydrated, persistDocument])
 
   const refreshVersions = useCallback(() => {
     void listDocumentVersions(useEditorStore.getState().document.id).then(setVersions).catch(console.warn)
@@ -268,17 +279,70 @@ export function App() {
     }
   }, [flushCurrentDocument, hydrate])
 
-  const openDocument = useCallback(async (nextDocument: MindMapDocument) => {
-    if (nextDocument.id === document.id) return
+  const runNavigation = useCallback(async (navigation: PendingNavigation) => {
     await flushCurrentDocument()
-    hydrate(nextDocument)
-  }, [document.id, flushCurrentDocument, hydrate])
+    if (navigation.kind === 'open') hydrate(navigation.document)
+    if (navigation.kind === 'new-map') {
+      createDocument()
+      setActiveCategoryId('uncategorized')
+    }
+    if (navigation.kind === 'quick-note') {
+      createQuickNote()
+      setActiveCategoryId('all')
+    }
+  }, [createDocument, createQuickNote, flushCurrentDocument, hydrate])
 
-  const startNewDocument = useCallback(async () => {
-    await flushCurrentDocument()
-    createDocument()
-    setActiveCategoryId('uncategorized')
-  }, [createDocument, flushCurrentDocument])
+  const requestNavigation = useCallback((navigation: PendingNavigation) => {
+    if (!document.isDraft) {
+      void runNavigation(navigation)
+      return
+    }
+    setDraftTitle(document.title)
+    setDraftCategoryId(document.categoryId)
+    setPendingNavigation(navigation)
+    setDraftSaveOpen(true)
+  }, [document.categoryId, document.isDraft, document.title, runNavigation])
+
+  const openDocument = useCallback((nextDocument: MindMapDocument) => {
+    if (nextDocument.id !== document.id) requestNavigation({ kind: 'open', document: nextDocument })
+  }, [document.id, requestNavigation])
+
+  const startNewDocument = useCallback(() => requestNavigation({ kind: 'new-map' }), [requestNavigation])
+  const startQuickNote = useCallback(() => requestNavigation({ kind: 'quick-note' }), [requestNavigation])
+
+  const closeDraftSave = () => {
+    setDraftSaveOpen(false)
+    setPendingNavigation(null)
+  }
+
+  const keepDraftAndNavigate = async () => {
+    const navigation = pendingNavigation
+    closeDraftSave()
+    if (navigation) await runNavigation(navigation)
+  }
+
+  const saveDraftAndNavigate = async () => {
+    if (!document.isDraft) return
+    if (!dispatch({ type: 'SAVE_QUICK_NOTE', title: draftTitle, categoryId: draftCategoryId })) return
+    const saved = useEditorStore.getState().document
+    await persistDocument(saved)
+    await saveDocumentVersion(createDocumentVersion(saved, 'manual', '保存随手记')).catch(console.warn)
+    const navigation = pendingNavigation
+    closeDraftSave()
+    if (navigation) await runNavigation(navigation)
+  }
+
+  useEffect(() => {
+    const handleQuickNoteShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.key.toLowerCase() !== 'n') return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      event.preventDefault()
+      startQuickNote()
+    }
+    window.addEventListener('keydown', handleQuickNoteShortcut)
+    return () => window.removeEventListener('keydown', handleQuickNoteShortcut)
+  }, [startQuickNote])
 
   const saveSyncSettings = useCallback((nextConfig: SyncConfig) => {
     saveSyncConfig(nextConfig)
@@ -305,6 +369,10 @@ export function App() {
   }
 
   const uploadToCloud = useCallback(async (config: SyncConfig) => {
+    if (document.isDraft) {
+      setSyncStatus('随手记草稿仅保存在本机。请先保存为正式导图后再同步。')
+      return
+    }
     try {
       setSyncBusy(true)
       setSyncStatus(null)
@@ -330,6 +398,10 @@ export function App() {
   }, [document, flushCurrentDocument, saveSyncSettings])
 
   const checkCloudVersion = useCallback(async (config: SyncConfig) => {
+    if (document.isDraft) {
+      setSyncStatus('随手记草稿仅保存在本机。请先保存为正式导图后再同步。')
+      return
+    }
     try {
       setSyncBusy(true)
       setSyncStatus(null)
@@ -386,6 +458,7 @@ export function App() {
     autoSyncRef.current = true
     try {
       const currentDoc = useEditorStore.getState().document
+      if (currentDoc.isDraft) return
       const metadata = await getSyncMetadata(currentDoc.id)
       const remote = await fetchRemoteDocument(config, currentDoc.id)
       if (!remote) return
@@ -455,6 +528,17 @@ export function App() {
     }
   }, [document, hydrated, persistDocument])
 
+  // 草稿虽已自动保存到本机，离开页面时仍提示用户决定是否转为正式导图。
+  useEffect(() => {
+    if (!document.isDraft) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [document.isDraft])
+
   // 自动快照独立于 450ms 自动保存：用户停止编辑 3 秒后才记录，避免每次键入都产生历史版本。
   useEffect(() => {
     if (!hydrated) return
@@ -509,7 +593,7 @@ export function App() {
         </div>
         <div className="document-title">
           <input value={document.title} aria-label="导图标题" onChange={(event) => dispatch({ type: 'RENAME_DOCUMENT', title: event.target.value })} />
-          <span className="save-state">{hydrated ? '已本地保存' : '正在打开…'}</span>
+          <span className="save-state">{hydrated ? document.isDraft ? '随手记草稿 · 已本机保存' : '已本地保存' : '正在打开…'}</span>
         </div>
         <div className="toolbar-actions">
           <button className="icon-button" onClick={undo} disabled={!past.length} title="撤销 (⌘Z)"><Icon>↶</Icon></button>
@@ -521,6 +605,7 @@ export function App() {
           <button className="toolbar-button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本"><Icon>◷</Icon>历史</button>
           <span className="export-menu-wrap"><button className="toolbar-button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown"><Icon>⇩</Icon>导出</button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
           <button className="toolbar-button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图"><Icon>⇅</Icon>同步</button>
+          {document.isDraft && <button className="toolbar-button toolbar-button--dark" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon>保存随手记</button>}
         </div>
       </header>
 
@@ -531,13 +616,19 @@ export function App() {
           ) : <>
           <div className="sidebar-scroll">
             <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong><button onClick={toggleSidebar} aria-label="收起侧栏" title="收起侧栏">‹</button></div>
-            <button className="sidebar-create" onClick={() => { void startNewDocument() }}><span>＋</span>新建导图</button>
+            <button className="sidebar-quick-note" onClick={() => { void startQuickNote() }}><span>✦</span><span><strong>随手记</strong><small>快速梳理一个想法</small></span><i>⌘⇧N</i></button>
+            <button className="sidebar-create sidebar-create--secondary" onClick={() => { void startNewDocument() }}><span>＋</span>新建导图</button>
+
+            {draftDocuments.length > 0 && <section className="sidebar-section sidebar-drafts">
+              <div className="sidebar-section__heading"><p className="sidebar-section__title">随手记草稿</p><span>{draftDocuments.length}</span></div>
+              {draftDocuments.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>已自动保存到本机</small></span></button>)}
+            </section>}
 
             <section className="sidebar-section">
               <p className="sidebar-section__title">项目</p>
-              <button className={`sidebar-nav-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span>◫</span>全部导图 <small>{libraryDocuments.length}</small></button>
+              <button className={`sidebar-nav-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span>◫</span>全部导图 <small>{savedDocuments.length}</small></button>
               {categories.map((category) => {
-                const count = libraryDocuments.filter((item) => item.categoryId === category.id).length
+                const count = savedDocuments.filter((item) => item.categoryId === category.id).length
                 return editingCategoryId === category.id ? <form key={category.id} className="sidebar-category-form sidebar-category-form--editing" onSubmit={renameCategory}>
                   <input autoFocus value={editingCategoryName} onChange={(event) => setEditingCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingCategoryId(null) } }} aria-label="分类名称" />
                   <button type="submit">保存</button>{category.id !== 'uncategorized' && <button type="button" className="sidebar-category-delete" onClick={() => { void deleteCategory(category.id) }}>删除</button>}
@@ -718,6 +809,21 @@ export function App() {
         onDuplicate={(version) => { void duplicateVersion(version) }}
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
+      {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
+        <section className="draft-save-dialog">
+          <span className="draft-save-dialog__mark">✦</span>
+          <p className="eyebrow">随手记</p>
+          <h2 id="draft-save-title">{pendingNavigation ? '先处理这份随手记' : '保存随手记'}</h2>
+          <p>{pendingNavigation ? '它已自动保存在本机。保存后会成为正式导图并可参与同步；也可以暂时保留为草稿。' : '保存后会成为正式导图，并可在其他已登录设备上同步。'}</p>
+          <label>导图名称<input autoFocus value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveDraftAndNavigate() } }} /></label>
+          <label>保存到分类<select value={draftCategoryId} onChange={(event) => setDraftCategoryId(event.target.value)}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <div className="draft-save-dialog__actions">
+            <button className="draft-save-dialog__primary" onClick={() => { void saveDraftAndNavigate() }}>保存为正式导图</button>
+            {pendingNavigation && <button className="draft-save-dialog__secondary" onClick={() => { void keepDraftAndNavigate() }}>保留草稿并切换</button>}
+            <button className="draft-save-dialog__cancel" onClick={closeDraftSave}>继续编辑</button>
+          </div>
+        </section>
+      </div>}
     </main>
   )
 }

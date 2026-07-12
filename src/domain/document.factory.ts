@@ -47,8 +47,32 @@ export function createInitialDocument(): MindMapDocument {
     schemaVersion: 1,
     title: '未命名导图',
     categoryId: 'uncategorized',
+    isDraft: false,
+    origin: 'standard',
     rootId: root.id,
     nodes: { [root.id]: root, [first.id]: first, [second.id]: second, [third.id]: third },
+    relations: [],
+    layout: { levelGap: 96, siblingGap: 22, freeformOffsets: null },
+    theme: { id: 'calm' },
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+/** 创建一个没有教学节点的随手记草稿，直接从中心主题开始组织想法。 */
+export function createQuickNoteDocument(): MindMapDocument {
+  const root = createNode('随手记', null)
+  const now = Date.now()
+  const stamp = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(now)
+  return {
+    id: id(),
+    schemaVersion: 1,
+    title: `随手记 · ${stamp}`,
+    categoryId: 'uncategorized',
+    isDraft: true,
+    origin: 'quick-note',
+    rootId: root.id,
+    nodes: { [root.id]: root },
     relations: [],
     layout: { levelGap: 96, siblingGap: 22, freeformOffsets: null },
     theme: { id: 'calm' },

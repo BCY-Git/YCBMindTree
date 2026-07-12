@@ -72,6 +72,9 @@ export type MindMapDocument = {
   schemaVersion: 1
   title: string
   categoryId: string
+  /** 随手记草稿在本机保留，转为正式导图前不会参与云端同步。 */
+  isDraft: boolean
+  origin: 'standard' | 'quick-note'
   rootId: string
   nodes: Record<string, MindNode>
   relations: MindMapRelation[]

@@ -44,6 +44,8 @@ export const mindMapDocumentSchema = z.object({
   schemaVersion: z.literal(1),
   title: z.string().min(1),
   categoryId: z.string().min(1).default('uncategorized'),
+  isDraft: z.boolean().default(false),
+  origin: z.enum(['standard', 'quick-note']).default('standard'),
   rootId: z.string().min(1),
   nodes: z.record(z.string(), mindNodeSchema),
   // 旧文档尚未包含关系数据，读取时以空数组平滑兼容。

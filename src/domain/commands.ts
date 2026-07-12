@@ -56,6 +56,7 @@ export type MindMapCommand =
   | { type: 'PASTE_SUBTREE'; parentId: string; clipboard: MindNodeClipboard }
   | { type: 'RENAME_DOCUMENT'; title: string }
   | { type: 'SET_CATEGORY'; categoryId: string }
+  | { type: 'SAVE_QUICK_NOTE'; title: string; categoryId: string }
   | { type: 'UPDATE_LAYOUT'; layout: Partial<LayoutConfig> }
   | { type: 'APPLY_THEME'; themeId: ThemeId }
 
@@ -457,6 +458,12 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       break
     case 'SET_CATEGORY':
       document.categoryId = command.categoryId.trim() || 'uncategorized'
+      break
+    case 'SAVE_QUICK_NOTE':
+      if (!document.isDraft) throw new Error('当前导图不是随手记草稿')
+      document.title = command.title.trim() || '未命名导图'
+      document.categoryId = command.categoryId.trim() || 'uncategorized'
+      document.isDraft = false
       break
     case 'UPDATE_LAYOUT':
       document.layout = { ...document.layout, ...command.layout }

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { createNodeClipboard, executeCommand } from './commands'
-import { createInitialDocument } from './document.factory'
+import { createInitialDocument, createQuickNoteDocument } from './document.factory'
 import { assertValidDocument } from './document.validator'
 
 describe('MindTree command executor', () => {
+  it('creates a local-only quick-note draft without tutorial branches', () => {
+    const document = createQuickNoteDocument()
+
+    expect(document).toMatchObject({ isDraft: true, origin: 'quick-note', categoryId: 'uncategorized' })
+    expect(Object.keys(document.nodes)).toEqual([document.rootId])
+  })
+
   it('adds a child and keeps both sides of the parent relationship in sync', () => {
     const document = createInitialDocument()
     const result = executeCommand(document, { type: 'ADD_CHILD', parentId: document.rootId, topic: '新分支' })
@@ -147,6 +154,16 @@ describe('MindTree command executor', () => {
 
     expect(result.document.categoryId).toBe('work')
     expect(result.document.nodes).toEqual(document.nodes)
+  })
+
+  it('promotes a quick-note draft to a saved document atomically', () => {
+    const document = createInitialDocument()
+    document.isDraft = true
+    document.origin = 'quick-note'
+    const result = executeCommand(document, { type: 'SAVE_QUICK_NOTE', title: '周会行动项', categoryId: 'work' }).document
+
+    expect(result).toMatchObject({ title: '周会行动项', categoryId: 'work', isDraft: false, origin: 'quick-note' })
+    expect(result.nodes).toEqual(document.nodes)
   })
 
   it('collapses and expands all descendant branches without hiding the target itself', () => {

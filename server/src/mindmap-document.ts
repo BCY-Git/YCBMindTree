@@ -33,6 +33,8 @@ export const mindMapDocumentSchema = z.object({
   schemaVersion: z.literal(1),
   title: z.string().min(1),
   categoryId: z.string().min(1),
+  isDraft: z.boolean().default(false),
+  origin: z.enum(['standard', 'quick-note']).default('standard'),
   rootId: z.string().uuid(),
   nodes: z.record(z.string().uuid(), nodeSchema),
   relations: z.array(relationSchema).default([]),

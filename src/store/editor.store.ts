@@ -14,7 +14,7 @@
  * 历史栈最多保留 50 条（past.length ≤ 50），超出时丢弃最旧条目。
  */
 import { create } from 'zustand'
-import { createInitialDocument } from '../domain/document.factory'
+import { createInitialDocument, createQuickNoteDocument } from '../domain/document.factory'
 import { createNodeClipboard, executeCommand, type MindMapCommand, type MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 
@@ -41,6 +41,7 @@ type EditorState = {
   pasteIntoNode: (parentId: string) => void
   insertGeneratedBranch: (parentId: string, branch: MindNodeClipboard) => boolean
   createDocument: () => void
+  createQuickNote: () => void
 }
 
 const initialDocument = createInitialDocument()
@@ -183,6 +184,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   createDocument: () => {
     const document = createInitialDocument()
+    set({
+      document,
+      past: [],
+      future: [],
+      selectedNodeId: document.rootId,
+      selectedNodeIds: [document.rootId],
+      selectedRelationId: null,
+      editingNodeId: document.rootId,
+      clipboard: null,
+      hydrated: true,
+      lastHistoryMerge: null,
+    })
+  },
+  createQuickNote: () => {
+    const document = createQuickNoteDocument()
     set({
       document,
       past: [],
