@@ -32,6 +32,7 @@ import { useEditorStore } from '../store/editor.store'
 import { MindNode, type MindNodeData } from './MindNode'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu'
 import { CommandPalette } from './CommandPalette'
+import { NodeSearchDialog } from './NodeSearchDialog'
 import { getTheme } from '../domain/themes'
 import { getTreeEdgeAnchors } from './tree-edge'
 import type { MindNode as DomainMindNode } from '../domain/document.types'
@@ -94,6 +95,8 @@ export function MindMapCanvas() {
   const redo = useEditorStore((state) => state.redo)
   const [contextMenu, setContextMenu] = useState<{ position: ContextMenuPosition; nodeId: string | null; relationId: string | null } | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null)
   const [relationSourceId, setRelationSourceId] = useState<string | null>(null)
   const [freeTopicAttachmentParentId, setFreeTopicAttachmentParentId] = useState<string | null>(null)
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null)
@@ -189,6 +192,19 @@ export function MindMapCanvas() {
     selectNode(document.rootId)
     if (rootNode) flowInstance?.fitView({ nodes: [rootNode], padding: 1.5, maxZoom: 1.05, duration: 280 })
   }, [baseNodes, document.rootId, flowInstance, selectNode])
+
+  const revealSearchResult = useCallback((nodeId: string) => {
+    if (dispatch({ type: 'REVEAL_NODE', nodeId })) setSearchFocusNodeId(nodeId)
+    setSearchOpen(false)
+  }, [dispatch])
+
+  useEffect(() => {
+    if (!searchFocusNodeId) return
+    const node = baseNodes.find((item) => item.id === searchFocusNodeId)
+    if (!node || !flowInstance) return
+    flowInstance.fitView({ nodes: [node], padding: 1.15, maxZoom: 1.15, duration: 260 })
+    setSearchFocusNodeId(null)
+  }, [baseNodes, flowInstance, searchFocusNodeId])
 
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     if (relationSourceId) {
@@ -344,6 +360,7 @@ export function MindMapCanvas() {
       const meta = event.metaKey || event.ctrlKey
       if (relationSourceId && event.key === 'Escape') { event.preventDefault(); setRelationSourceId(null); return }
       if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandPaletteOpen(true); return }
+      if (meta && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); return }
       if (target.closest('input, textarea')) return
       const editor = useEditorStore.getState()
       const selected = editor.selectedNodeId ?? editor.document.rootId
@@ -440,11 +457,12 @@ export function MindMapCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color={theme.grid} />
-        <Controls showInteractive={false}><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
+        <Controls showInteractive={false}><ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
       </ReactFlow>
       {relationSourceId && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>请选择另一个节点作为目标 · Esc 取消</span></div>}
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : '松开即可插入高亮分支'}</div>}
+      {searchOpen && <NodeSearchDialog document={document} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const parentId = selectedNodeId ?? document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}
       {contextMenu && (() => {
         const contextNode = contextMenu.nodeId ? document.nodes[contextMenu.nodeId] : null
         const contextRelation = contextMenu.relationId ? document.relations.find((relation) => relation.id === contextMenu.relationId) ?? null : null

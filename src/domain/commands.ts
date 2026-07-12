@@ -41,6 +41,7 @@ export type MindMapCommand =
   | { type: 'TOGGLE_COLLAPSE'; nodeId: string }
   | { type: 'COLLAPSE_DESCENDANTS'; nodeId: string }
   | { type: 'EXPAND_DESCENDANTS'; nodeId: string }
+  | { type: 'REVEAL_NODE'; nodeId: string }
   | { type: 'UPDATE_NODE_OFFSET'; nodeId: string; offsetX: number; offsetY: number }
   /** 拖拽根节点时平移整张导图 */
   | { type: 'TRANSLATE_DOCUMENT'; deltaX: number; deltaY: number }
@@ -359,6 +360,17 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
         current.childIds.forEach(expand)
       }
       expand(node.id)
+      break
+    }
+    case 'REVEAL_NODE': {
+      let node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      while (node.parentId) {
+        const parent = document.nodes[node.parentId]
+        parent.collapsed = false
+        node = parent
+      }
+      focusNodeId = command.nodeId
       break
     }
     case 'UPDATE_NODE_OFFSET': {

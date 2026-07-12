@@ -177,6 +177,18 @@ describe('MindTree command executor', () => {
     expect(expanded.nodes[firstBranchId].collapsed).toBe(false)
   })
 
+  it('reveals a searched node by expanding only its ancestors', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const childId = document.nodes[branchId].childIds[0]
+    document.nodes[branchId].collapsed = true
+
+    const result = executeCommand(document, { type: 'REVEAL_NODE', nodeId: childId })
+
+    expect(result.focusNodeId).toBe(childId)
+    expect(result.document.nodes[branchId].collapsed).toBe(false)
+  })
+
   it('moves a node under a new parent without creating a cycle', () => {
     const document = createInitialDocument()
     const branchId = document.nodes[document.rootId].childIds[0]
