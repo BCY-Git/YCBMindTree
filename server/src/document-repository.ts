@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -21,6 +21,8 @@ export type PairingChallenge = {
   secret: string
   expiresAt: number
 }
+
+export type AccountUser = { id: string; email: string; createdAt: number }
 
 export class DocumentRepository {
   private readonly database: Database.Database
@@ -49,6 +51,19 @@ export class DocumentRepository {
         claimed_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS pairing_challenges_expiry ON pairing_challenges(expires_at);
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
       CREATE TABLE IF NOT EXISTS document_changes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         document_id TEXT NOT NULL,
@@ -129,6 +144,42 @@ export class DocumentRepository {
     return result.changes === 1
   }
 
+  registerAccount(email: string, password: string): AccountUser | null {
+    const normalizedEmail = normalizeEmail(email)
+    if (!normalizedEmail || password.length < 8) throw new Error('邮箱或密码格式无效')
+    const exists = this.database.prepare('SELECT 1 FROM users WHERE email = ?').get(normalizedEmail)
+    if (exists) return null
+    const firstAccount = Number((this.database.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number }).count) === 0
+    const user: AccountUser = { id: firstAccount ? 'local-user' : randomUUID(), email: normalizedEmail, createdAt: Date.now() }
+    this.database.prepare('INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)')
+      .run(user.id, user.email, passwordHash(password), user.createdAt)
+    return user
+  }
+
+  authenticateAccount(email: string, password: string): AccountUser | null {
+    const row = this.database.prepare('SELECT id, email, password_hash, created_at FROM users WHERE email = ?').get(normalizeEmail(email)) as Record<string, unknown> | undefined
+    if (!row || !verifyPassword(password, String(row.password_hash))) return null
+    return { id: String(row.id), email: String(row.email), createdAt: Number(row.created_at) }
+  }
+
+  createSession(userId: string, lifetimeMs: number): string {
+    const token = randomBytes(32).toString('base64url')
+    const now = Date.now()
+    this.database.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').run(now)
+    this.database.prepare('INSERT INTO auth_sessions (token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+      .run(hashToken(token), userId, now + lifetimeMs, now)
+    return token
+  }
+
+  sessionOwner(token: string): string | null {
+    const row = this.database.prepare('SELECT user_id FROM auth_sessions WHERE token_hash = ? AND expires_at > ?').get(hashToken(token), Date.now()) as { user_id?: unknown } | undefined
+    return row?.user_id ? String(row.user_id) : null
+  }
+
+  revokeSession(token: string) {
+    this.database.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(hashToken(token))
+  }
+
   private fromRow(row: Record<string, unknown>): DocumentRecord {
     return {
       id: String(row.id), ownerId: String(row.owner_id), title: String(row.title), categoryId: String(row.category_id), version: Number(row.version),
@@ -144,4 +195,28 @@ export class DocumentRepository {
 
 function hashPairingSecret(secret: string): string {
   return createHash('sha256').update(secret).digest('hex')
+}
+
+function hashToken(token: string) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function normalizeEmail(email: string) {
+  const value = email.trim().toLowerCase()
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : ''
+}
+
+function passwordHash(password: string) {
+  const salt = randomBytes(16).toString('base64url')
+  const derived = scryptSync(password, salt, 64).toString('base64url')
+  return `${salt}.${derived}`
+}
+
+function verifyPassword(password: string, encoded: string) {
+  const [salt, stored] = encoded.split('.')
+  if (!salt || !stored) return false
+  const candidate = scryptSync(password, salt, 64).toString('base64url')
+  const left = Buffer.from(candidate)
+  const right = Buffer.from(stored)
+  return left.length === right.length && timingSafeEqual(left, right)
 }

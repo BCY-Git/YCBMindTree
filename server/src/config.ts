@@ -12,6 +12,8 @@ export const config = {
   port: Number(process.env.PORT || 8787),
   databasePath: resolve(process.cwd(), process.env.DATABASE_PATH || './data/mindtree.db'),
   devToken: required('MINDTREE_DEV_TOKEN'),
+  allowRegistration: process.env.ALLOW_REGISTRATION === 'true',
+  sessionLifetimeMs: Math.max(60 * 60 * 1000, Number(process.env.SESSION_LIFETIME_DAYS || 30) * 24 * 60 * 60 * 1000),
   allowedHosts: (process.env.ALLOWED_HOSTS || '127.0.0.1:8787,localhost:8787').split(',').map((host) => host.trim()).filter(Boolean),
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:5174,http://localhost:5174').split(',').map((origin) => origin.trim()).filter(Boolean),
 }

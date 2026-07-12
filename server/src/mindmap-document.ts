@@ -3,8 +3,12 @@ import { z } from 'zod'
 const nodeSchema = z.object({
   id: z.string().uuid(),
   parentId: z.string().uuid().nullable(),
+  isFreeTopic: z.boolean().default(false),
   childIds: z.array(z.string().uuid()),
   topic: z.string(),
+  note: z.string().default(''),
+  links: z.array(z.object({ id: z.string().uuid(), url: z.string().url(), label: z.string() })).default([]),
+  attachments: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1), type: z.string(), size: z.number().nonnegative(), createdAt: z.number() })).default([]),
   collapsed: z.boolean(),
   offsetX: z.number(),
   offsetY: z.number(),

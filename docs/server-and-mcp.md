@@ -10,6 +10,12 @@
 
 首期不做多人协作、实时 CRDT、文件附件和第三方 OAuth；这些会在同步需求稳定后演进。
 
+## 自托管账号登录
+
+服务端提供邮箱/密码注册与登录：`POST /api/v1/auth/register`、`POST /api/v1/auth/login`，返回一个随机不透明的 Bearer 会话 Token。密码使用 Node `scrypt` 加盐哈希；SQLite 只保存密码哈希和 Token 的 SHA-256 哈希，默认会话有效期为 30 天。
+
+个人服务器默认不开放注册，部署时需显式设置 `ALLOW_REGISTRATION=true` 才能创建首个账号。首个账号沿用 `local-user` 身份，以便接管现有单用户同步数据；后续账号使用独立 ownerId，文档天然隔离。既有 `MINDTREE_DEV_TOKEN` 继续可用，以保证旧设备不被立即登出。
+
 ## 部署形态
 
 ```text

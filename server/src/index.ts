@@ -2,7 +2,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { config } from './config.js'
-import { requireAllowedHost, requireAllowedOrigin, requireDevelopmentBearer, type AuthenticatedRequest } from './auth.js'
+import { requireAccountBearer, requireAllowedHost, requireAllowedOrigin, requireDevelopmentBearer, type AuthenticatedRequest } from './auth.js'
 import { DocumentRepository } from './document-repository.js'
 import { createMindTreeMcp } from './mcp.js'
 import { mindMapDocumentSchema } from './mindmap-document.js'
@@ -15,6 +15,32 @@ app.use(requireAllowedOrigin)
 app.use(express.json({ limit: '1mb' }))
 
 app.get('/healthz', (_request, response) => response.json({ ok: true, service: 'mindtree-server', mcp: '/mcp' }))
+
+const requireApiBearer = requireAccountBearer(repository)
+app.post('/api/v1/auth/register', (request, response) => {
+  if (!config.allowRegistration) return response.status(403).json({ error: { code: 'REGISTRATION_DISABLED', message: '服务器暂未开放注册，请联系管理员。' } })
+  const email = typeof request.body?.email === 'string' ? request.body.email : ''
+  const password = typeof request.body?.password === 'string' ? request.body.password : ''
+  try {
+    const user = repository.registerAccount(email, password)
+    if (!user) return response.status(409).json({ error: { code: 'EMAIL_EXISTS', message: '该邮箱已注册，请直接登录。' } })
+    return response.status(201).json({ user, token: repository.createSession(user.id, config.sessionLifetimeMs) })
+  } catch {
+    return response.status(400).json({ error: { code: 'INVALID_ACCOUNT', message: '请输入有效邮箱，且密码至少 8 位。' } })
+  }
+})
+app.post('/api/v1/auth/login', (request, response) => {
+  const email = typeof request.body?.email === 'string' ? request.body.email : ''
+  const password = typeof request.body?.password === 'string' ? request.body.password : ''
+  const user = repository.authenticateAccount(email, password)
+  if (!user) return response.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: '邮箱或密码错误。' } })
+  return response.json({ user, token: repository.createSession(user.id, config.sessionLifetimeMs) })
+})
+app.post('/api/v1/auth/logout', requireApiBearer, (request: AuthenticatedRequest, response) => {
+  const token = request.header('authorization')?.replace(/^Bearer\s+/i, '')
+  if (token && token !== config.devToken) repository.revokeSession(token)
+  return response.status(204).end()
+})
 
 // 配对凭据只存哈希、仅能兑换一次，并在五分钟后自动失效。
 app.post('/api/v1/pairings', requireDevelopmentBearer, (request: AuthenticatedRequest, response) => {
@@ -31,7 +57,7 @@ app.post('/api/v1/pairings/:pairingId/exchange', (request, response) => {
   return response.json({ token: config.devToken })
 })
 
-app.use('/api/v1', requireDevelopmentBearer)
+app.use('/api/v1', requireApiBearer)
 app.get('/api/v1/documents', (request: AuthenticatedRequest, response) => response.json({ documents: repository.list(request.ownerId!) }))
 app.get('/api/v1/documents/:documentId', (request: AuthenticatedRequest, response) => {
   const document = repository.get(request.ownerId!, String(request.params.documentId))
@@ -48,7 +74,7 @@ app.put('/api/v1/documents/:documentId', (request: AuthenticatedRequest, respons
   return 'type' in saved ? response.status(409).json({ error: { code: saved.type }, document: saved.document }) : response.status(201).json(saved)
 })
 
-app.use('/mcp', requireDevelopmentBearer)
+app.use('/mcp', requireApiBearer)
 const mcpSessions = new Map<string, { transport: StreamableHTTPServerTransport; close: () => Promise<void> }>()
 
 async function createMcpSession() {
