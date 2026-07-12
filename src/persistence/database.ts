@@ -14,7 +14,7 @@
  */
 import Dexie, { type EntityTable } from 'dexie'
 import { mindMapDocumentSchema } from '../domain/document.schema'
-import type { MindMapDocument } from '../domain/document.types'
+import type { MindMapDocument, MindNodeAttachment } from '../domain/document.types'
 import { assertValidDocument } from '../domain/document.validator'
 import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
 
@@ -24,10 +24,17 @@ export type SyncMetadata = {
   syncedAt: number
 }
 
+type StoredAttachment = MindNodeAttachment & {
+  documentId: string
+  nodeId: string
+  blob: Blob
+}
+
 class MindTreeDatabase extends Dexie {
   documents!: EntityTable<MindMapDocument, 'id'>
   syncMetadata!: EntityTable<SyncMetadata, 'documentId'>
   documentVersions!: EntityTable<DocumentVersion, 'id'>
+  attachments!: EntityTable<StoredAttachment, 'id'>
 
   constructor() {
     super('mindtree')
@@ -37,6 +44,12 @@ class MindTreeDatabase extends Dexie {
       documents: 'id, title, updatedAt',
       syncMetadata: 'documentId, syncedAt',
       documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind',
+    })
+    this.version(4).stores({
+      documents: 'id, title, updatedAt',
+      syncMetadata: 'documentId, syncedAt',
+      documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind',
+      attachments: 'id, documentId, nodeId, createdAt',
     })
   }
 }
@@ -85,6 +98,23 @@ export async function deleteDocumentVersions(documentId: string, kinds?: Documen
   const versions = await database.documentVersions.where('documentId').equals(documentId).toArray()
   const ids = versions.filter((version) => !kinds || kinds.includes(version.kind)).map((version) => version.id)
   if (ids.length) await database.documentVersions.bulkDelete(ids)
+}
+
+/** 附件文件本体只留在当前浏览器，云同步的导图快照不会携带 Blob。 */
+export async function saveNodeAttachment(documentId: string, nodeId: string, file: File): Promise<MindNodeAttachment> {
+  const attachment: MindNodeAttachment = {
+    id: crypto.randomUUID(),
+    name: file.name || '未命名附件',
+    type: file.type,
+    size: file.size,
+    createdAt: Date.now(),
+  }
+  await database.attachments.put({ ...attachment, documentId, nodeId, blob: file })
+  return attachment
+}
+
+export async function getNodeAttachment(attachmentId: string): Promise<StoredAttachment | undefined> {
+  return database.attachments.get(attachmentId)
 }
 
 export async function getSyncMetadata(documentId: string): Promise<SyncMetadata | undefined> {

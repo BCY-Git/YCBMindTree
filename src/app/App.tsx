@@ -10,9 +10,9 @@
  *
  * 所有命令通过 dispatch() 派发，状态由 useEditorStore 统一管理。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { getSyncMetadata, listDocumentVersions, listDocuments, loadLatestDocument, saveDocument, saveDocumentVersion, saveSyncMetadata } from '../persistence/database'
+import { getNodeAttachment, getSyncMetadata, listDocumentVersions, listDocuments, loadLatestDocument, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
@@ -21,6 +21,10 @@ import { SyncDialog } from '../sync/SyncDialog'
 import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
 import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
+import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
+import { GhostNoteEditor } from '../ai/GhostNoteEditor'
+import { LoginDialog } from '../auth/LoginDialog'
+import { clearAccountSession, loadAccountSession, loginAccount, registerAccount, revokeAccountSession, saveAccountSession, type AuthSession } from '../auth/account-client'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -37,14 +41,20 @@ const defaultCategories: Category[] = [{ id: 'uncategorized', name: '未分类' 
 function loadCategories(): Category[] {
   try {
     const stored = JSON.parse(localStorage.getItem(categoryStorageKey) ?? '[]') as Category[]
-    return [...defaultCategories, ...stored.filter((item) => item?.id && item?.name && item.id !== 'uncategorized')]
+    const valid = stored.filter((item) => item?.id && item?.name)
+    const defaultCategory = valid.find((item) => item.id === 'uncategorized') ?? defaultCategories[0]
+    return [defaultCategory, ...valid.filter((item) => item.id !== 'uncategorized')]
   } catch {
     return defaultCategories
   }
 }
 
 function saveCategories(categories: Category[]) {
-  localStorage.setItem(categoryStorageKey, JSON.stringify(categories.filter((item) => item.id !== 'uncategorized')))
+  localStorage.setItem(categoryStorageKey, JSON.stringify(categories))
+}
+
+function isBackgroundBackup(document: MindMapDocument) {
+  return document.title.includes('（同步前备份）')
 }
 
 export function App() {
@@ -65,7 +75,11 @@ export function App() {
   const [activeCategoryId, setActiveCategoryId] = useState('all')
   const [categoryDraft, setCategoryDraft] = useState('')
   const [showCategoryInput, setShowCategoryInput] = useState(false)
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [editingCategoryName, setEditingCategoryName] = useState('')
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
+  const [accountSession, setAccountSession] = useState<AuthSession | null>(loadAccountSession)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(loadSyncConfig)
@@ -77,16 +91,67 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [versions, setVersions] = useState<DocumentVersion[]>([])
   const [historyBusy, setHistoryBusy] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkLabel, setLinkLabel] = useState('')
+  const [attachmentStatus, setAttachmentStatus] = useState<string | null>(null)
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
+  const libraryDocuments = useMemo(() => documents.filter((item) => !isBackgroundBackup(item)), [documents])
   const visibleDocuments = useMemo(() => activeCategoryId === 'all'
-    ? documents
-    : documents.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, documents])
+    ? libraryDocuments
+    : libraryDocuments.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, libraryDocuments])
   const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
+
+  const exportCurrentDocument = (mode: MarkdownExportMode) => {
+    downloadMarkdown(document, mode)
+    setExportOpen(false)
+  }
+
+  const addNodeLink = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedNode || !linkUrl.trim()) return
+    if (dispatch({ type: 'ADD_NODE_LINK', nodeId: selectedNode.id, url: linkUrl, label: linkLabel })) {
+      setLinkUrl('')
+      setLinkLabel('')
+    }
+  }
+
+  const uploadNodeAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !selectedNode) return
+    if (file.size > 15 * 1024 * 1024) {
+      setAttachmentStatus('单个附件最大 15 MB。')
+      return
+    }
+    try {
+      const attachment = await saveNodeAttachment(document.id, selectedNode.id, file)
+      if (!dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selectedNode.id, attachment })) throw new Error('附件没有写入节点')
+      setAttachmentStatus(`已添加 ${attachment.name}`)
+    } catch {
+      setAttachmentStatus('附件保存失败，请重试。')
+    }
+  }
+
+  const downloadNodeAttachment = async (attachmentId: string) => {
+    const stored = await getNodeAttachment(attachmentId)
+    if (!stored) {
+      setAttachmentStatus('附件仅存在于原浏览器，当前设备无法读取。')
+      return
+    }
+    const url = URL.createObjectURL(stored.blob)
+    const link = window.document.createElement('a')
+    link.href = url
+    link.download = stored.name
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
 
   const addCategory = () => {
     const name = categoryDraft.trim()
@@ -98,6 +163,40 @@ export function App() {
     setCategoryDraft('')
     setShowCategoryInput(false)
     setActiveCategoryId(category.id)
+  }
+
+  const beginCategoryEdit = (category: Category) => {
+    setEditingCategoryId(category.id)
+    setEditingCategoryName(category.name)
+  }
+
+  const renameCategory = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const name = editingCategoryName.trim()
+    if (!editingCategoryId || !name) return
+    const next = categories.map((category) => category.id === editingCategoryId ? { ...category, name } : category)
+    setCategories(next)
+    saveCategories(next)
+    setEditingCategoryId(null)
+  }
+
+  const deleteCategory = async (categoryId: string) => {
+    if (categoryId === 'uncategorized') return
+    const affected = documents.filter((item) => item.categoryId === categoryId)
+    const now = Date.now()
+    const reassigned = affected.map((item) => ({ ...item, categoryId: 'uncategorized', updatedAt: now }))
+    try {
+      await Promise.all(reassigned.map((item) => saveDocument(item)))
+      setDocuments((current) => current.map((item) => reassigned.find((next) => next.id === item.id) ?? item))
+      if (document.categoryId === categoryId) dispatch({ type: 'SET_CATEGORY', categoryId: 'uncategorized' })
+      const next = categories.filter((category) => category.id !== categoryId)
+      setCategories(next)
+      saveCategories(next)
+      setActiveCategoryId((current) => current === categoryId ? 'uncategorized' : current)
+      setEditingCategoryId(null)
+    } catch {
+      // IndexedDB 写入失败时保留当前分类，避免导图与分类列表脱节。
+    }
   }
 
   const toggleSidebar = () => {
@@ -187,6 +286,24 @@ export function App() {
     setSyncStatus('连接设置已保存在此浏览器。')
   }, [])
 
+  const authenticateAccount = useCallback(async (mode: 'login' | 'register', email: string, password: string) => {
+    const session = mode === 'login'
+      ? await loginAccount({ serverUrl: syncConfig.serverUrl }, email, password)
+      : await registerAccount({ serverUrl: syncConfig.serverUrl }, email, password)
+    saveAccountSession(session)
+    setAccountSession(session)
+    saveSyncSettings({ serverUrl: syncConfig.serverUrl, token: session.token })
+    setLoginOpen(false)
+  }, [saveSyncSettings, syncConfig.serverUrl])
+
+  const logoutAccount = async () => {
+    if (accountSession) await revokeAccountSession({ serverUrl: syncConfig.serverUrl }, accountSession.token).catch(() => undefined)
+    clearAccountSession()
+    setAccountSession(null)
+    saveSyncSettings({ serverUrl: syncConfig.serverUrl, token: '' })
+    setAccountMenuOpen(false)
+  }
+
   const uploadToCloud = useCallback(async (config: SyncConfig) => {
     try {
       setSyncBusy(true)
@@ -252,12 +369,10 @@ export function App() {
     const currentDoc = useEditorStore.getState().document
     if (currentDoc.id !== remote.payload.id) return
     const now = Date.now()
-    const backup: MindMapDocument = { ...currentDoc, id: crypto.randomUUID(), title: `${currentDoc.title}（同步前备份）`, createdAt: now, updatedAt: now }
     await saveDocumentVersion(createDocumentVersion(currentDoc, 'sync-backup', '同步前备份'))
-    await saveDocument(backup)
     await saveDocument(remote.payload)
     await saveSyncMetadata({ documentId: remote.payload.id, remoteVersion: remote.version, syncedAt: now })
-    setDocuments((current) => [remote.payload, backup, ...current.filter((item) => item.id !== remote.payload.id && item.id !== backup.id)]
+    setDocuments((current) => [remote.payload, ...current.filter((item) => item.id !== remote.payload.id)]
       .sort((left, right) => right.updatedAt - left.updatedAt))
     hydrate(remote.payload)
     setSyncRemoteVersion(remote.version)
@@ -404,6 +519,7 @@ export function App() {
           <button className="toolbar-button toolbar-button--dark" disabled={(selectedNodeId ?? document.rootId) === document.rootId} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })}><Icon>↳</Icon>同级</button>
           <button className="toolbar-button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon>排列</button>
           <button className="toolbar-button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本"><Icon>◷</Icon>历史</button>
+          <span className="export-menu-wrap"><button className="toolbar-button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown"><Icon>⇩</Icon>导出</button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
           <button className="toolbar-button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图"><Icon>⇅</Icon>同步</button>
         </div>
       </header>
@@ -419,10 +535,13 @@ export function App() {
 
             <section className="sidebar-section">
               <p className="sidebar-section__title">项目</p>
-              <button className={`sidebar-nav-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span>◫</span>全部导图 <small>{documents.length}</small></button>
+              <button className={`sidebar-nav-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span>◫</span>全部导图 <small>{libraryDocuments.length}</small></button>
               {categories.map((category) => {
-                const count = documents.filter((item) => item.categoryId === category.id).length
-                return <button key={category.id} className={`sidebar-nav-item ${activeCategoryId === category.id ? 'is-active' : ''}`} onClick={() => setActiveCategoryId(category.id)}><span>⌁</span>{category.name}<small>{count}</small></button>
+                const count = libraryDocuments.filter((item) => item.categoryId === category.id).length
+                return editingCategoryId === category.id ? <form key={category.id} className="sidebar-category-form sidebar-category-form--editing" onSubmit={renameCategory}>
+                  <input autoFocus value={editingCategoryName} onChange={(event) => setEditingCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingCategoryId(null) } }} aria-label="分类名称" />
+                  <button type="submit">保存</button>{category.id !== 'uncategorized' && <button type="button" className="sidebar-category-delete" onClick={() => { void deleteCategory(category.id) }}>删除</button>}
+                </form> : <button key={category.id} className={`sidebar-nav-item ${activeCategoryId === category.id ? 'is-active' : ''}`} onClick={() => setActiveCategoryId(category.id)} onDoubleClick={(event) => { event.preventDefault(); beginCategoryEdit(category) }} title="双击重命名"><span>⌁</span>{category.name}<small>{count}</small></button>
               })}
               {showCategoryInput ? (
                 <form className="sidebar-category-form" onSubmit={(event) => { event.preventDefault(); addCategory() }}>
@@ -456,8 +575,8 @@ export function App() {
             <button className="sidebar-footer-action" type="button"><span>⚙</span>设置</button>
             <button className="sidebar-footer-action" type="button"><span>?</span>帮助与反馈</button>
             <div className="sidebar-account">
-              <button className="sidebar-account__trigger" onClick={() => setAccountMenuOpen((open) => !open)}><span className="sidebar-avatar">M</span><span><strong>本地工作区</strong><small>未登录 · 本地保存</small></span><i>⋮</i></button>
-              {accountMenuOpen && <div className="sidebar-account__menu"><strong>同步账号</strong><p>账号登录将在同步服务接入后启用。</p><button disabled>登录账号</button><button disabled>退出登录</button></div>}
+              <button className="sidebar-account__trigger" onClick={() => setAccountMenuOpen((open) => !open)}><span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span><span><strong>{accountSession?.user.email ?? '本地工作区'}</strong><small>{accountSession ? '已登录 · 可同步' : '未登录 · 本地保存'}</small></span><i>⋮</i></button>
+              {accountMenuOpen && <div className="sidebar-account__menu"><strong>{accountSession ? '已登录账号' : '同步账号'}</strong><p>{accountSession ? '此账号的同步数据与其他账号隔离。' : '登录后可使用账号会话安全同步导图。'}</p>{accountSession ? <button onClick={() => { void logoutAccount() }}>退出登录</button> : <button onClick={() => { setLoginOpen(true); setAccountMenuOpen(false) }}>登录 / 注册</button>}</div>}
             </div>
           </footer>
           </>}
@@ -489,6 +608,24 @@ export function App() {
                 rows={3}
                 onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })}
               />
+              <label className="field-label" htmlFor="node-note">备注</label>
+              <GhostNoteEditor
+                value={selectedNode.note}
+                document={document}
+                nodeId={selectedNode.id}
+                onChange={(note) => dispatch({ type: 'UPDATE_NODE_NOTE', nodeId: selectedNode.id, note })}
+              />
+              <div className="node-resource-section"><p className="field-label">链接</p>
+                {selectedNode.links.map((link) => <div className="node-resource" key={link.id}><a href={link.url} target="_blank" rel="noreferrer" title={link.url}>{link.label}</a><button onClick={() => dispatch({ type: 'DELETE_NODE_LINK', nodeId: selectedNode.id, linkId: link.id })} aria-label={`删除链接 ${link.label}`}>×</button></div>)}
+                <form className="node-link-form" onSubmit={addNodeLink}><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://…" type="url" /><input value={linkLabel} onChange={(event) => setLinkLabel(event.target.value)} placeholder="链接名称（可选）" /><button type="submit">添加链接</button></form>
+              </div>
+              <div className="node-resource-section"><p className="field-label">附件</p>
+                {selectedNode.attachments.map((attachment) => <div className="node-resource" key={attachment.id}><button className="node-resource__file" onClick={() => { void downloadNodeAttachment(attachment.id) }} title="下载本机附件">⌁ {attachment.name}<small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small></button><button onClick={() => dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: selectedNode.id, attachmentId: attachment.id })} aria-label={`移除附件 ${attachment.name}`}>×</button></div>)}
+                <input ref={attachmentInputRef} className="node-attachment-input" type="file" onChange={(event) => { void uploadNodeAttachment(event) }} />
+                <button className="subtle-button" onClick={() => attachmentInputRef.current?.click()}>添加本机附件</button>
+                <small className="node-resource__hint">单个文件最大 15 MB，不会自动上传云端。</small>
+                {attachmentStatus && <small className="node-resource__hint">{attachmentStatus}</small>}
+              </div>
               <div className="property-row"><span>子节点</span><strong>{selectedNode.childIds.length}</strong></div>
               <div className="property-row"><span>状态</span><strong>{selectedNode.collapsed ? '已折叠' : '已展开'}</strong></div>
               <button className="subtle-button" onClick={() => dispatch({ type: 'RESET_NODE_OFFSET', nodeId: selectedNode.id })}>重置节点位置</button>
@@ -562,6 +699,7 @@ export function App() {
         onRestore={(version) => { void restoreVersion(version) }}
         onDuplicate={(version) => { void duplicateVersion(version) }}
       />
+      <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
     </main>
   )
 }

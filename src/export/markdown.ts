@@ -1,0 +1,74 @@
+import type { MindMapDocument, MindNode } from '../domain/document.types'
+
+export type MarkdownExportMode = 'outline' | 'minutes' | 'ai-context'
+
+function nodeExtras(node: MindNode, prefix = ''): string[] {
+  const lines: string[] = []
+  if (node.note.trim()) lines.push(...node.note.trim().split('\n').map((line) => `${prefix}> ${line}`))
+  node.links.forEach((link) => lines.push(`${prefix}- 链接：[${link.label || link.url}](${link.url})`))
+  node.attachments.forEach((attachment) => lines.push(`${prefix}- 附件：${attachment.name}（仅本机）`))
+  return lines
+}
+
+function outline(document: MindMapDocument) {
+  const lines = [`# ${document.title}`, '']
+  const visit = (nodeId: string, depth: number) => {
+    const node = document.nodes[nodeId]
+    const prefix = '  '.repeat(depth)
+    lines.push(`${prefix}- ${node.topic}`)
+    lines.push(...nodeExtras(node, `${prefix}  `))
+    node.childIds.forEach((childId) => visit(childId, depth + 1))
+  }
+  visit(document.rootId, 0)
+  return lines.join('\n')
+}
+
+function minutes(document: MindMapDocument) {
+  const lines = [`# ${document.title}`, '', '> 由 MindTree 导出，可继续补充结论、负责人和截止时间。', '']
+  const visit = (nodeId: string, depth: number) => {
+    const node = document.nodes[nodeId]
+    const heading = Math.min(depth + 2, 6)
+    lines.push(`${'#'.repeat(heading)} ${node.topic}`, '')
+    if (node.note.trim()) lines.push(node.note.trim(), '')
+    if (node.links.length || node.attachments.length) lines.push(...nodeExtras(node), '')
+    node.childIds.forEach((childId) => visit(childId, depth + 1))
+  }
+  const root = document.nodes[document.rootId]
+  if (root.note.trim()) lines.push(root.note.trim(), '')
+  root.childIds.forEach((childId) => visit(childId, 0))
+  return lines.join('\n').trimEnd()
+}
+
+function aiContext(document: MindMapDocument) {
+  const lines = [`# Mind map context: ${document.title}`, '', 'Use the following tree as source context. Preserve its hierarchy and do not invent missing details.', '']
+  const visit = (nodeId: string, path: string[]) => {
+    const node = document.nodes[nodeId]
+    const nextPath = [...path, node.topic]
+    lines.push(`## ${nextPath.join(' / ')}`)
+    if (node.note.trim()) lines.push(`Note: ${node.note.trim()}`)
+    if (node.links.length) lines.push(`Links: ${node.links.map((link) => `${link.label || link.url} (${link.url})`).join('; ')}`)
+    if (node.attachments.length) lines.push(`Local attachments: ${node.attachments.map((attachment) => attachment.name).join(', ')}`)
+    if (!node.note.trim() && !node.links.length && !node.attachments.length) lines.push('No additional note.')
+    lines.push('')
+    node.childIds.forEach((childId) => visit(childId, nextPath))
+  }
+  visit(document.rootId, [])
+  return lines.join('\n').trimEnd()
+}
+
+export function exportMarkdown(document: MindMapDocument, mode: MarkdownExportMode): string {
+  if (mode === 'minutes') return minutes(document)
+  if (mode === 'ai-context') return aiContext(document)
+  return outline(document)
+}
+
+export function downloadMarkdown(document: MindMapDocument, mode: MarkdownExportMode): void {
+  const safeName = document.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'mindtree'
+  const blob = new Blob([exportMarkdown(document, mode)], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = window.document.createElement('a')
+  link.href = url
+  link.download = `${safeName}-${mode}.md`
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
