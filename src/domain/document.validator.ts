@@ -56,4 +56,12 @@ export function assertValidDocument(document: MindMapDocument): void {
     if (ids.size !== boundary.nodeIds.length) throw new Error('边界节点重复')
     if (boundary.nodeIds.some((nodeId) => document.nodes[nodeId]?.parentId !== boundary.parentId)) throw new Error('边界只能包含同级节点')
   }
+
+  for (const summary of document.summaries) {
+    const parent = document.nodes[summary.parentId]
+    if (!parent || parent.isFreeTopic || summary.nodeIds.length < 2) throw new Error('摘要父节点无效')
+    const ids = new Set(summary.nodeIds)
+    if (ids.size !== summary.nodeIds.length) throw new Error('摘要节点重复')
+    if (summary.nodeIds.some((nodeId) => document.nodes[nodeId]?.parentId !== summary.parentId)) throw new Error('摘要只能包含同级节点')
+  }
 }

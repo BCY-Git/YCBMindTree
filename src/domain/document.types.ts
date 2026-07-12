@@ -79,6 +79,16 @@ export type MindMapBoundary = {
   updatedAt: number
 }
 
+/** 同级主题的汇总结论，不改变原有父子树。 */
+export type MindMapSummary = {
+  id: string
+  parentId: string
+  nodeIds: string[]
+  topic: string
+  createdAt: number
+  updatedAt: number
+}
+
 export type MindMapDocument = {
   id: string
   schemaVersion: 1
@@ -91,6 +101,7 @@ export type MindMapDocument = {
   nodes: Record<string, MindNode>
   relations: MindMapRelation[]
   boundaries: MindMapBoundary[]
+  summaries: MindMapSummary[]
   layout: LayoutConfig
   theme: { id: ThemeId }
   createdAt: number

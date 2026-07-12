@@ -14,7 +14,7 @@
  */
 import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus } from './document.types'
+import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus } from './document.types'
 import type { ThemeId } from './themes'
 
 /**
@@ -42,6 +42,9 @@ export type MindMapCommand =
   | { type: 'CREATE_BOUNDARY'; nodeIds: string[]; label?: string }
   | { type: 'UPDATE_BOUNDARY_LABEL'; boundaryId: string; label: string }
   | { type: 'DELETE_BOUNDARY'; boundaryId: string }
+  | { type: 'CREATE_SUMMARY'; nodeIds: string[]; topic?: string }
+  | { type: 'UPDATE_SUMMARY_TOPIC'; summaryId: string; topic: string }
+  | { type: 'DELETE_SUMMARY'; summaryId: string }
   | { type: 'TOGGLE_COLLAPSE'; nodeId: string }
   | { type: 'COLLAPSE_DESCENDANTS'; nodeId: string }
   | { type: 'EXPAND_DESCENDANTS'; nodeId: string }
@@ -119,12 +122,20 @@ function removeNodeFromBoundaries(document: MindMapDocument, nodeId: string) {
   })
 }
 
+function removeNodeFromSummaries(document: MindMapDocument, nodeId: string) {
+  document.summaries = document.summaries.flatMap((summary) => {
+    const nodeIds = summary.nodeIds.filter((id) => id !== nodeId)
+    return nodeIds.length >= 2 ? [{ ...summary, nodeIds, updatedAt: Date.now() }] : []
+  })
+}
+
 // 递归删除子树：从叶子节点向上逐层删除，确保不遗漏。
 function removeSubtree(document: MindMapDocument, nodeId: string) {
   const node = document.nodes[nodeId]
   node.childIds.forEach((childId) => removeSubtree(document, childId))
   document.relations = document.relations.filter((relation) => relation.sourceId !== nodeId && relation.targetId !== nodeId)
   removeNodeFromBoundaries(document, nodeId)
+  removeNodeFromSummaries(document, nodeId)
   delete document.nodes[nodeId]
 }
 
@@ -136,6 +147,11 @@ function createRelation(sourceId: string, targetId: string, label: string): Mind
 function createBoundary(parentId: string, nodeIds: string[], label: string): MindMapBoundary {
   const now = Date.now()
   return { id: crypto.randomUUID(), parentId, nodeIds, label: label.trim() || '分组', createdAt: now, updatedAt: now }
+}
+
+function createSummary(parentId: string, nodeIds: string[], topic: string): MindMapSummary {
+  const now = Date.now()
+  return { id: crypto.randomUUID(), parentId, nodeIds, topic: topic.trim() || '总结', createdAt: now, updatedAt: now }
 }
 
 // 检查 candidateId 是否在 ancestorId 的子树中（含自身），用于防止循环引用。
@@ -161,7 +177,10 @@ function moveNode(document: MindMapDocument, nodeId: string, newParentId: string
   const previousParent = document.nodes[node.parentId]
   const previousIndex = previousParent.childIds.indexOf(nodeId)
   previousParent.childIds = previousParent.childIds.filter((id) => id !== nodeId)
-  if (previousParent.id !== newParent.id) removeNodeFromBoundaries(document, nodeId)
+  if (previousParent.id !== newParent.id) {
+    removeNodeFromBoundaries(document, nodeId)
+    removeNodeFromSummaries(document, nodeId)
+  }
   // 同一父节点内向下移动时，移除自身会让目标索引左移一格。
   const adjustedIndex = previousParent.id === newParent.id && previousIndex >= 0 && previousIndex < index ? index - 1 : index
   const targetIndex = Math.max(0, Math.min(adjustedIndex, newParent.childIds.length))
@@ -387,6 +406,28 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const index = document.boundaries.findIndex((item) => item.id === command.boundaryId)
       if (index < 0) throw new Error('边界不存在')
       document.boundaries.splice(index, 1)
+      break
+    }
+    case 'CREATE_SUMMARY': {
+      const nodeIds = [...new Set(command.nodeIds)]
+      if (nodeIds.length < 2) throw new Error('至少选择两个同级节点才能创建摘要')
+      const first = document.nodes[nodeIds[0]]
+      if (!first?.parentId || first.isFreeTopic) throw new Error('摘要不能包含根节点或自由主题')
+      if (nodeIds.some((nodeId) => document.nodes[nodeId]?.parentId !== first.parentId || document.nodes[nodeId]?.isFreeTopic)) throw new Error('摘要只能包含同级节点')
+      document.summaries.push(createSummary(first.parentId, nodeIds, command.topic ?? '总结'))
+      break
+    }
+    case 'UPDATE_SUMMARY_TOPIC': {
+      const summary = document.summaries.find((item) => item.id === command.summaryId)
+      if (!summary) throw new Error('摘要不存在')
+      summary.topic = command.topic.trim() || '总结'
+      summary.updatedAt = Date.now()
+      break
+    }
+    case 'DELETE_SUMMARY': {
+      const index = document.summaries.findIndex((item) => item.id === command.summaryId)
+      if (index < 0) throw new Error('摘要不存在')
+      document.summaries.splice(index, 1)
       break
     }
 

@@ -112,6 +112,21 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(moved)).not.toThrow()
   })
 
+  it('creates an editable sibling summary and removes it when its source branch changes', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const [firstChild, secondChild] = document.nodes[parentId].childIds
+    const created = executeCommand(document, { type: 'CREATE_SUMMARY', nodeIds: [firstChild, secondChild], topic: '形成结论' }).document
+    const summaryId = created.summaries[0].id
+
+    expect(created.summaries[0]).toMatchObject({ parentId, nodeIds: [firstChild, secondChild], topic: '形成结论' })
+    const updated = executeCommand(created, { type: 'UPDATE_SUMMARY_TOPIC', summaryId, topic: '新的结论' }).document
+    expect(updated.summaries[0].topic).toBe('新的结论')
+    const moved = executeCommand(updated, { type: 'MOVE_NODE', nodeId: firstChild, newParentId: document.rootId, index: 1 }).document
+    expect(moved.summaries).toEqual([])
+    expect(() => assertValidDocument(moved)).not.toThrow()
+  })
+
   it('sets task state and priority without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

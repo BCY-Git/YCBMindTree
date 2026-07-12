@@ -107,7 +107,7 @@ export function MindMapCanvas() {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
 
   // ── 构建 React Flow nodes / edges（响应 document / selectedNodeId / theme 变化）─────────
-  const { baseNodes, edges, basePositionsById, boundaryBoxes } = useMemo(() => {
+  const { baseNodes, edges, basePositionsById, boundaryBoxes, summaryBoxes } = useMemo(() => {
     const placed = layoutTree(document)
     const visibleIds = new Set(placed.map((item) => item.id))
     const positionedById = new Map(placed.map((item) => [item.id, item]))
@@ -194,7 +194,17 @@ export function MindMapCanvas() {
       const bottom = Math.max(...nodes.map((node) => node.y + node.height)) + 18
       return [{ id: boundary.id, label: boundary.label, left, top, width: right - left, height: bottom - top }]
     })
-    return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(placed.map((item) => [item.id, item])), boundaryBoxes }
+    const summaryBoxes = document.summaries.flatMap((summary, summaryIndex) => {
+      const nodes = summary.nodeIds.map((id) => positionedById.get(id)).filter((node): node is NonNullable<typeof node> => Boolean(node))
+      if (nodes.length < 2) return []
+      const rightmost = Math.max(...nodes.map((node) => node.x + node.width))
+      const sources = nodes.map((node) => ({ x: node.x + node.width, y: node.y + node.height / 2 }))
+      const centerY = (Math.min(...sources.map((source) => source.y)) + Math.max(...sources.map((source) => source.y))) / 2 + summaryIndex * 58
+      const left = rightmost + 74
+      const top = centerY - 22
+      return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
+    })
+    return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(placed.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
   }, [document, dropIntent, freeTopicAttachmentParentId, relationSourceId, selectedNodeIds, selectedRelationId, theme])
 
   useEffect(() => setFlowNodes(baseNodes), [baseNodes])
@@ -500,6 +510,25 @@ export function MindMapCanvas() {
               <button className="mind-boundary__delete" title="删除边界" onClick={() => dispatch({ type: 'DELETE_BOUNDARY', boundaryId: boundary.id })}>×</button>
             </div>
           ))}
+          {summaryBoxes.map((summary) => (
+            <svg key={`${summary.id}-connector`} className="mind-summary-connector" style={{ width: summary.left + 1, height: summary.top + summary.height + 1 }} aria-hidden="true">
+              {summary.sources.map((source, index) => <path key={index} d={`M ${source.x + 8} ${source.y} C ${source.x + 36} ${source.y}, ${summary.left - 28} ${summary.targetY}, ${summary.left} ${summary.targetY}`} />)}
+            </svg>
+          ))}
+          {summaryBoxes.map((summary) => (
+            <div key={summary.id} className="mind-summary" style={{ left: summary.left, top: summary.top, width: summary.width, minHeight: summary.height }}>
+              <button
+                className="mind-summary__topic"
+                title="双击修改摘要"
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  const topic = window.prompt('摘要内容', summary.topic)
+                  if (topic !== null) dispatch({ type: 'UPDATE_SUMMARY_TOPIC', summaryId: summary.id, topic })
+                }}
+              >{summary.topic}</button>
+              <button className="mind-summary__delete" title="删除摘要" onClick={() => dispatch({ type: 'DELETE_SUMMARY', summaryId: summary.id })}>×</button>
+            </div>
+          ))}
         </ViewportPortal>
         <Controls showInteractive={false}><ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
       </ReactFlow>
@@ -522,6 +551,7 @@ export function MindMapCanvas() {
             onEdit={() => runContextAction(() => editNode(targetNodeId))}
             onCreateRelation={() => runContextAction(() => { selectNode(targetNodeId); setRelationSourceId(targetNodeId) })}
             onCreateBoundary={() => runContextAction(() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }))}
+            onCreateSummary={() => runContextAction(() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds }))}
             onToggleCollapse={() => runContextAction(() => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: targetNodeId }))}
             onCollapseDescendants={() => runContextAction(() => dispatch({ type: 'COLLAPSE_DESCENDANTS', nodeId: targetNodeId }))}
             onExpandDescendants={() => runContextAction(() => dispatch({ type: 'EXPAND_DESCENDANTS', nodeId: targetNodeId }))}
@@ -557,6 +587,7 @@ export function MindMapCanvas() {
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
               { label: '创建关系', detail: '选择另一个节点建立横向关联', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceId(selectedId) } },
               { label: '为所选节点创建边界', detail: '圈定两个或以上同级节点，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }) },
+              { label: '为所选节点创建摘要', detail: '为同级分支写下一个结论，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds }) },
               { label: selected.collapsed ? '展开当前分支' : '折叠当前分支', detail: '收起或展开子节点', shortcut: 'Space', disabled: !selected.childIds.length, run: () => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: selectedId }) },
               { label: '折叠所有次级分支', detail: '保留当前层级，收起更深的内容', shortcut: '—', disabled: !selected.childIds.length, run: () => dispatch({ type: 'COLLAPSE_DESCENDANTS', nodeId: selectedId }) },
               { label: '展开所有次级分支', detail: '展开当前分支下的全部内容', shortcut: '—', disabled: !selected.childIds.length, run: () => dispatch({ type: 'EXPAND_DESCENDANTS', nodeId: selectedId }) },

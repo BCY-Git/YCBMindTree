@@ -22,6 +22,7 @@ type ContextMenuProps = {
   onEdit: () => void
   onCreateRelation: () => void
   onCreateBoundary: () => void
+  onCreateSummary: () => void
   onToggleCollapse: () => void
   onCollapseDescendants: () => void
   onExpandDescendants: () => void
@@ -59,7 +60,7 @@ function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
   )
 }
 
-export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onEdit, onCreateRelation, onCreateBoundary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
+export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onEdit, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const isCanvasMenu = node === null && relation === null
 
@@ -111,6 +112,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
           <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>
           <MenuItem onClick={onCreateBoundary} disabled={!canCreateBoundary}>为所选节点创建边界</MenuItem>
+          <MenuItem onClick={onCreateSummary} disabled={!canCreateBoundary}>为所选节点创建摘要</MenuItem>
           <MenuItem onClick={onToggleCollapse} shortcut="Space" disabled={!node.childIds.length}>{node.collapsed ? '展开分支' : '折叠分支'}</MenuItem>
           <MenuItem onClick={onCollapseDescendants} disabled={!node.childIds.length}>折叠所有次级分支</MenuItem>
           <MenuItem onClick={onExpandDescendants} disabled={!node.childIds.length}>展开所有次级分支</MenuItem>
