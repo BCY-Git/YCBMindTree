@@ -8,7 +8,7 @@
  * 左侧有 4 个隐藏的 Handle（source-left/right, target-left/right），
  * 由 tree-edge.ts 根据节点相对位置决定哪两个实际连接画布边。
  */
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react'
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
@@ -28,13 +28,14 @@ export type MindNodeData = {
   onEditingHeightChange?: (height: number | null) => void
 }
 
-export function MindNode({ id, data, selected }: NodeProps) {
+export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps) {
   const node = data as MindNodeData
   const editingNodeId = useEditorStore((state) => state.editingNodeId)
   const editNode = useEditorStore((state) => state.editNode)
   const dispatch = useEditorStore((state) => state.dispatch)
-  const document = useEditorStore((state) => state.document)
   const isEditing = editingNodeId === id
+  // 非编辑节点不订阅整份文档，避免输入一个字导致画布上每个卡片都随之重渲染。
+  const document = useEditorStore((state) => state.editingNodeId === id ? state.document : null)
   const [topic, setTopic] = useState(node.label)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
@@ -46,6 +47,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const [composing, setComposing] = useState(false)
   const [isHovering, setIsHovering] = useState(false)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
+  const reportedHeightRef = useRef<number | null>(null)
 
   useEffect(() => setTopic(node.label), [node.label])
   useLayoutEffect(() => {
@@ -61,7 +63,10 @@ export function MindNode({ id, data, selected }: NodeProps) {
   useLayoutEffect(() => {
     if (!isEditing) {
       setEditorHeight(null)
-      node.onEditingHeightChange?.(null)
+      if (reportedHeightRef.current !== null) {
+        reportedHeightRef.current = null
+        node.onEditingHeightChange?.(null)
+      }
       return
     }
     const input = inputRef.current
@@ -72,15 +77,21 @@ export function MindNode({ id, data, selected }: NodeProps) {
     setEditorHeight((current) => current === nextHeight ? current : nextHeight)
     // 节点本体有 6px 内边距与边框；把编辑内容的实际高度交给画布临时布局，
     // 让同级节点随之平滑让位，而不是把幽灵文本裁在旧卡片高度内。
-    node.onEditingHeightChange?.(nextHeight + 16)
-  }, [isEditing, node, suggestion, topic])
+    const layoutHeight = nextHeight + 16
+    // Canvas 会因临时高度重新计算 node data；不能每次重新渲染都再回报相同高度，
+    // 否则编辑态会在 React Flow 与画布布局之间形成无限更新循环。
+    if (reportedHeightRef.current !== layoutHeight) {
+      reportedHeightRef.current = layoutHeight
+      node.onEditingHeightChange?.(layoutHeight)
+    }
+  }, [isEditing, node.onEditingHeightChange, suggestion, topic])
   useEffect(() => {
     requestRef.current?.abort()
     setSuggestion('')
     setIsCompleting(false)
     setCompletionError(false)
     const settings = loadAiSettings()
-    if (!isEditing || composing || !cursorAtEnd || !isGhostCompletionEnabled() || topic.trim().length < 3 || !settings.endpoint.trim() || !settings.model.trim() || (!settings.apiKey.trim() && !import.meta.env.DEV)) return
+    if (!isEditing || !document || composing || !cursorAtEnd || !isGhostCompletionEnabled() || topic.trim().length < 3 || !settings.endpoint.trim() || !settings.model.trim() || (!settings.apiKey.trim() && !import.meta.env.DEV)) return
     const controller = new AbortController()
     requestRef.current = controller
     const timer = window.setTimeout(() => {
@@ -182,4 +193,4 @@ export function MindNode({ id, data, selected }: NodeProps) {
       <Handle id="source-right" type="source" position={Position.Right} className="node-handle" />
     </div>
   )
-}
+})

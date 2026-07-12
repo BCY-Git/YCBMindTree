@@ -130,6 +130,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
   setSelectedNodes: (ids) => set((state) => {
     const selectedNodeIds = [...new Set(ids)].filter((id) => Boolean(state.document.nodes[id]))
+    const unchanged = selectedNodeIds.length === state.selectedNodeIds.length
+      && selectedNodeIds.every((id, index) => id === state.selectedNodeIds[index])
+      && state.selectedNodeId === (selectedNodeIds.at(-1) ?? null)
+      && state.selectedRelationId === null
+      && state.editingNodeId === null
+    // React Flow 会在 nodes props 同步时重复通知选择状态；相同选择必须是无操作，
+    // 否则会产生「同步节点 → 通知选择 → 重算节点」的更新循环。
+    if (unchanged) return state
     return { selectedNodeId: selectedNodeIds.at(-1) ?? null, selectedNodeIds, selectedRelationId: null, editingNodeId: null }
   }),
   selectRelation: (id) => set({ selectedRelationId: id, selectedNodeId: null, selectedNodeIds: [], editingNodeId: null }),

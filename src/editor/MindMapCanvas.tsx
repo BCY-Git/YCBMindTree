@@ -262,7 +262,7 @@ export function MindMapCanvas() {
 
   useEffect(() => {
     setFlowNodes((current) => {
-      if (!dragPreview) return baseNodes
+      if (!dragPreview) return current === baseNodes ? current : baseNodes
       const dragged = current.find((node) => node.id === dragPreview.nodeId)
       return baseNodes.map((node) => node.id === dragPreview.nodeId && dragged
         ? { ...node, position: dragged.position, dragging: dragged.dragging }
@@ -314,6 +314,12 @@ export function MindMapCanvas() {
     }
     selectNode(node.id, event.metaKey || event.ctrlKey)
   }, [dispatch, relationSourceId, selectNode])
+  const commitSelectionBox = useCallback(() => {
+    const nextIds = flowInstance?.getNodes().filter((node) => node.selected).map((node) => node.id) ?? []
+    const currentIds = useEditorStore.getState().selectedNodeIds
+    if (nextIds.length === currentIds.length && nextIds.every((id, index) => id === currentIds[index])) return
+    setSelectedNodes(nextIds)
+  }, [flowInstance, setSelectedNodes])
   // ── React Flow 节点拖拽结束：计算相对于自动布局基准位置的偏移量 ──────────────
   const getDragOffset = useCallback((node: Node<MindNodeData>) => {
     const original = basePositionsById.get(node.id)
@@ -612,7 +618,8 @@ export function MindMapCanvas() {
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onNodeDrag={onNodeDrag}
-        onSelectionChange={({ nodes }) => setSelectedNodes(nodes.map((node) => node.id))}
+        // 仅在框选手势结束时读取内部选择，避免 React Flow 的 nodes 同步通知反向写回状态。
+        onSelectionEnd={commitSelectionBox}
         onNodeContextMenu={(event, node) => openContextMenu(event.nativeEvent, node.id)}
         onPaneContextMenu={(event) => openContextMenu('nativeEvent' in event ? event.nativeEvent : event, null)}
         onEdgeClick={(event, edge) => { event.stopPropagation(); selectRelation(edge.id) }}
@@ -634,6 +641,8 @@ export function MindMapCanvas() {
         panOnScrollMode={PanOnScrollMode.Vertical}
         panOnDrag={[2]}
         zoomOnDoubleClick={false}
+        // 大图仅挂载当前视口附近的节点，避免远处卡片参与每次输入与拖拽的渲染。
+        onlyRenderVisibleElements
         minZoom={0.25}
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}

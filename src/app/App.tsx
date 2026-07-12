@@ -22,12 +22,14 @@ import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument,
 import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
 import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
+import { saveDocumentToLocalFile } from '../export/document-file'
 import { GhostNoteEditor } from '../ai/GhostNoteEditor'
 import { LoginDialog } from '../auth/LoginDialog'
 import { clearAccountSession, loadAccountSession, loginAccount, registerAccount, revokeAccountSession, saveAccountSession, type AuthSession } from '../auth/account-client'
 import { TaskCenterDialog } from '../tasks/TaskCenterDialog'
 import { collectTasks, type MindTreeTask } from '../tasks/task-index'
 import { executeCommand } from '../domain/commands'
+import { QuickAssistant } from '../ai/QuickAssistant'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -114,6 +116,8 @@ export function App() {
   const [draftTitle, setDraftTitle] = useState('')
   const [draftCategoryId, setDraftCategoryId] = useState('uncategorized')
   const [taskCenterOpen, setTaskCenterOpen] = useState(false)
+  const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
+  const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
@@ -128,6 +132,14 @@ export function App() {
   const visibleDocuments = useMemo(() => activeCategoryId === 'all'
     ? savedDocuments
     : savedDocuments.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, savedDocuments])
+  const matchingDocuments = useMemo(() => {
+    const query = documentQuery.trim().toLocaleLowerCase()
+    return query ? visibleDocuments.filter((item) => item.title.toLocaleLowerCase().includes(query)) : visibleDocuments
+  }, [documentQuery, visibleDocuments])
+  const matchingDrafts = useMemo(() => {
+    const query = documentQuery.trim().toLocaleLowerCase()
+    return query ? draftDocuments.filter((item) => item.title.toLocaleLowerCase().includes(query)) : draftDocuments
+  }, [documentQuery, draftDocuments])
   const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
   const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
   const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
@@ -247,6 +259,24 @@ export function App() {
     }
     await persistDocument(useEditorStore.getState().document)
   }, [hydrated, persistDocument])
+
+  const saveCurrentToLocalFile = useCallback(async () => {
+    // 必须在快捷键/点击的同步用户手势中立即打开选择框；若先 await IndexedDB，
+    // Chromium 会认为用户手势已经失效并拒绝 showSaveFilePicker。
+    const snapshot = useEditorStore.getState().document
+    const localFileSave = saveDocumentToLocalFile(snapshot)
+    try {
+      await flushCurrentDocument()
+      const result = await localFileSave
+      setLocalSaveStatus(result === 'picker' ? '已保存到所选本机位置，并写入本地数据库。' : '已写入本地数据库，浏览器已开始下载导图文件。')
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setLocalSaveStatus('已取消本机文件保存；本地数据库仍已保存。')
+        return
+      }
+      setLocalSaveStatus('本机文件保存失败，但本地数据库已保留当前内容。')
+    }
+  }, [flushCurrentDocument])
 
   const refreshVersions = useCallback(() => {
     void listDocumentVersions(useEditorStore.getState().document.id).then(setVersions).catch(console.warn)
@@ -383,6 +413,16 @@ export function App() {
     window.addEventListener('keydown', handleQuickNoteShortcut)
     return () => window.removeEventListener('keydown', handleQuickNoteShortcut)
   }, [startQuickNote])
+
+  useEffect(() => {
+    const handleSaveShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      void saveCurrentToLocalFile()
+    }
+    window.addEventListener('keydown', handleSaveShortcut)
+    return () => window.removeEventListener('keydown', handleSaveShortcut)
+  }, [saveCurrentToLocalFile])
 
   const saveSyncSettings = useCallback((nextConfig: SyncConfig) => {
     saveSyncConfig(nextConfig)
@@ -655,6 +695,7 @@ export function App() {
           </div>
         </nav>
         <div className="topbar-utility">
+          <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown" aria-label="导出"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
@@ -697,13 +738,14 @@ export function App() {
 
             {sidebarPanel === 'maps' && <section className="sidebar-panel" aria-label="导图列表">
               <div className="sidebar-panel__heading"><span>导图记录</span><small>{activeCategoryId === 'all' ? '全部' : categoryName(activeCategoryId)}</small></div>
-              {draftDocuments.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{draftDocuments.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>已自动保存到本机</small></span></button>)}</div>}
-              {visibleDocuments.map((item) => (
+              <input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" />
+              {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>草稿 · 已自动保存到本机</small></span></button>)}</div>}
+              {matchingDocuments.map((item) => (
                 <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => { void openDocument(item) }}>
                   <span className="sidebar-document__icon">◈</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>{categoryName(item.categoryId)}</small></span>
                 </button>
               ))}
-              {!visibleDocuments.length && <p className="sidebar-empty">此分类暂时没有导图</p>}
+              {!matchingDocuments.length && !matchingDrafts.length && <p className="sidebar-empty">没有匹配的导图或随手记</p>}
               <label className="sidebar-category-select">当前导图分类
                 <select value={document.categoryId} onChange={(event) => { dispatch({ type: 'SET_CATEGORY', categoryId: event.target.value }); setActiveCategoryId(event.target.value) }}>
                   {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
@@ -764,6 +806,7 @@ export function App() {
         {document.relations.length > 0 && <span>{document.relations.length} 条关系</span>}
         <span>{syncRemoteVersion === null ? '仅本地' : `云端 v${syncRemoteVersion}`}</span>
         {syncStatus && <span>{syncStatus}</span>}
+        {localSaveStatus && <span>{localSaveStatus}</span>}
         {clipboard && <span>已复制「{clipboard.topic}」</span>}
         <span className="status-hint">拖动根节点移动整图 · 右键“创建关系”后选择目标节点 · Shift+拖动调整结构 · ⌘K 命令</span>
       </footer>
@@ -796,6 +839,7 @@ export function App() {
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
       {taskCenterOpen && <TaskCenterDialog tasks={tasks} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} />}
+      <QuickAssistant document={document} />
       {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
         <section className="draft-save-dialog">
           <span className="draft-save-dialog__mark">✦</span>
