@@ -10,12 +10,18 @@ function nodeExtras(node: MindNode, prefix = ''): string[] {
   return lines
 }
 
+function nodeMarkerPrefix(node: MindNode): string {
+  const task = node.taskStatus === 'todo' ? '☐ 待办 ' : node.taskStatus === 'doing' ? '◐ 进行中 ' : node.taskStatus === 'done' ? '☑ 已完成 ' : ''
+  const priority = node.priority > 0 ? `[P${node.priority}] ` : ''
+  return `${task}${priority}`
+}
+
 function outline(document: MindMapDocument) {
   const lines = [`# ${document.title}`, '']
   const visit = (nodeId: string, depth: number) => {
     const node = document.nodes[nodeId]
     const prefix = '  '.repeat(depth)
-    lines.push(`${prefix}- ${node.topic}`)
+    lines.push(`${prefix}- ${nodeMarkerPrefix(node)}${node.topic}`)
     lines.push(...nodeExtras(node, `${prefix}  `))
     node.childIds.forEach((childId) => visit(childId, depth + 1))
   }
@@ -28,7 +34,7 @@ function minutes(document: MindMapDocument) {
   const visit = (nodeId: string, depth: number) => {
     const node = document.nodes[nodeId]
     const heading = Math.min(depth + 2, 6)
-    lines.push(`${'#'.repeat(heading)} ${node.topic}`, '')
+    lines.push(`${'#'.repeat(heading)} ${nodeMarkerPrefix(node)}${node.topic}`, '')
     if (node.note.trim()) lines.push(node.note.trim(), '')
     if (node.links.length || node.attachments.length) lines.push(...nodeExtras(node), '')
     node.childIds.forEach((childId) => visit(childId, depth + 1))
@@ -44,7 +50,7 @@ function aiContext(document: MindMapDocument) {
   const visit = (nodeId: string, path: string[]) => {
     const node = document.nodes[nodeId]
     const nextPath = [...path, node.topic]
-    lines.push(`## ${nextPath.join(' / ')}`)
+    lines.push(`## ${nextPath.map((topic, index) => index === nextPath.length - 1 ? `${nodeMarkerPrefix(node)}${topic}` : topic).join(' / ')}`)
     if (node.note.trim()) lines.push(`Note: ${node.note.trim()}`)
     if (node.links.length) lines.push(`Links: ${node.links.map((link) => `${link.label || link.url} (${link.url})`).join('; ')}`)
     if (node.attachments.length) lines.push(`Local attachments: ${node.attachments.map((attachment) => attachment.name).join(', ')}`)

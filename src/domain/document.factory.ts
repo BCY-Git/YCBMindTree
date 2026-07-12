@@ -23,6 +23,8 @@ export function createNode(topic: string, parentId: string | null): MindNode {
     note: '',
     links: [],
     attachments: [],
+    taskStatus: 'none',
+    priority: 0,
     collapsed: false,
     offsetX: 0,
     offsetY: 0,

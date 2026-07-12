@@ -26,6 +26,8 @@ export function parseGeneratedBranch(content: string): MindNodeClipboard {
       note: '',
       links: [],
       attachments: [],
+      taskStatus: 'none',
+      priority: 0,
       collapsed: false,
       children: (node.children ?? []).map((child) => parseNode(child, depth + 1)),
     }

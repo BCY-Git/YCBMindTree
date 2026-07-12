@@ -18,6 +18,8 @@ export type MindNodeData = {
   label: string
   isRoot: boolean
   isFreeTopic: boolean
+  taskStatus: 'none' | 'todo' | 'doing' | 'done'
+  priority: 0 | 1 | 2 | 3
   isDropTarget: boolean
   hasChildren: boolean
   collapsed: boolean
@@ -71,6 +73,8 @@ export function MindNode({ id, data, selected }: NodeProps) {
     setSuggestion('')
     return true
   }
+  const taskIcon = node.taskStatus === 'todo' ? '○' : node.taskStatus === 'doing' ? '◐' : node.taskStatus === 'done' ? '✓' : null
+  const taskLabel = node.taskStatus === 'todo' ? '待办' : node.taskStatus === 'doing' ? '进行中' : node.taskStatus === 'done' ? '已完成' : ''
 
   return (
     <div className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`} style={{ '--node-accent': node.accentColor } as CSSProperties}>
@@ -105,7 +109,13 @@ export function MindNode({ id, data, selected }: NodeProps) {
           {isCompleting && <span className="node-completion-loading" aria-label="AI 正在续写">AI 续写中</span>}
           {suggestion && <span className="node-ghost-preview" aria-label="AI 续写建议"><strong>{suggestion}</strong><small>Tab 接受 · Esc 忽略</small></span>}
         </div>
-      ) : <button className="node-label" title="双击编辑主题" onDoubleClick={() => editNode(id)}>{node.label}</button>}
+      ) : <button className="node-label" title="双击编辑主题" onDoubleClick={() => editNode(id)}>
+        {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
+          {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
+          {node.priority > 0 && <i className="node-priority" aria-hidden="true">P{node.priority}</i>}
+        </span>}
+        <span>{node.label}</span>
+      </button>}
       <Handle id="source-left" type="source" position={Position.Left} className="node-handle" />
       <Handle id="source-right" type="source" position={Position.Right} className="node-handle" />
     </div>

@@ -9,6 +9,8 @@ const nodeSchema = z.object({
   note: z.string().default(''),
   links: z.array(z.object({ id: z.string().uuid(), url: z.string().url(), label: z.string() })).default([]),
   attachments: z.array(z.object({ id: z.string().uuid(), name: z.string().min(1), type: z.string(), size: z.number().nonnegative(), createdAt: z.number() })).default([]),
+  taskStatus: z.enum(['none', 'todo', 'doing', 'done']).default('none'),
+  priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).default(0),
   collapsed: z.boolean(),
   offsetX: z.number(),
   offsetY: z.number(),

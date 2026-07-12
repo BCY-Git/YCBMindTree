@@ -13,7 +13,7 @@ const branchSchema: z.ZodType<Branch> = z.object({
 type MapPayload = {
   id: string
   rootId: string
-  nodes: Record<string, { id: string; parentId: string | null; childIds: string[]; topic: string; collapsed: boolean; offsetX: number; offsetY: number; createdAt: number; updatedAt: number }>
+  nodes: Record<string, { id: string; parentId: string | null; isFreeTopic: boolean; childIds: string[]; topic: string; note: string; links: unknown[]; attachments: unknown[]; taskStatus: 'none' | 'todo' | 'doing' | 'done'; priority: 0 | 1 | 2 | 3; collapsed: boolean; offsetX: number; offsetY: number; createdAt: number; updatedAt: number }>
 }
 
 function text(value: unknown, isError = false) {
@@ -30,7 +30,7 @@ function insertBranch(payload: MapPayload, parentId: string, branch: z.infer<typ
   const now = Date.now()
   const create = (source: z.infer<typeof branchSchema>, parentNodeId: string): string => {
     const id = randomUUID()
-    const node = { id, parentId: parentNodeId, childIds: [] as string[], topic: source.topic, collapsed: false, offsetX: 0, offsetY: 0, createdAt: now, updatedAt: now }
+    const node = { id, parentId: parentNodeId, isFreeTopic: false, childIds: [] as string[], topic: source.topic, note: '', links: [], attachments: [], taskStatus: 'none' as const, priority: 0 as const, collapsed: false, offsetX: 0, offsetY: 0, createdAt: now, updatedAt: now }
     payload.nodes[id] = node
     node.childIds = source.children.map((child) => create(child, id))
     return id

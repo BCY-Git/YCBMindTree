@@ -28,12 +28,19 @@ export type MindNode = {
   note: string
   links: MindNodeLink[]
   attachments: MindNodeAttachment[]
+  /** 轻量任务状态；none 表示普通主题。 */
+  taskStatus: MindNodeTaskStatus
+  /** 0 表示未设置；1 最高，3 最低。 */
+  priority: MindNodePriority
   collapsed: boolean
   offsetX: number
   offsetY: number
   createdAt: number
   updatedAt: number
 }
+
+export type MindNodeTaskStatus = 'none' | 'todo' | 'doing' | 'done'
+export type MindNodePriority = 0 | 1 | 2 | 3
 
 export type MindNodeLink = {
   id: string

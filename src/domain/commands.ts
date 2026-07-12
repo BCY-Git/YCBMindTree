@@ -14,7 +14,7 @@
  */
 import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapDocument, MindMapRelation, MindNodeAttachment } from './document.types'
+import type { LayoutConfig, MindMapDocument, MindMapRelation, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus } from './document.types'
 import type { ThemeId } from './themes'
 
 /**
@@ -32,6 +32,8 @@ export type MindMapCommand =
   | { type: 'DELETE_NODE_LINK'; nodeId: string; linkId: string }
   | { type: 'ADD_NODE_ATTACHMENT'; nodeId: string; attachment: MindNodeAttachment }
   | { type: 'DELETE_NODE_ATTACHMENT'; nodeId: string; attachmentId: string }
+  | { type: 'SET_NODE_TASK_STATUS'; nodeId: string; taskStatus: MindNodeTaskStatus }
+  | { type: 'SET_NODE_PRIORITY'; nodeId: string; priority: MindNodePriority }
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
@@ -67,6 +69,8 @@ export type MindNodeClipboard = {
   note: string
   links: Array<{ url: string; label: string }>
   attachments: MindNodeAttachment[]
+  taskStatus: MindNodeTaskStatus
+  priority: MindNodePriority
   collapsed: boolean
   children: MindNodeClipboard[]
 }
@@ -152,6 +156,8 @@ export function createNodeClipboard(document: MindMapDocument, nodeId: string): 
     note: node.note,
     links: node.links.map(({ url, label }) => ({ url, label })),
     attachments: structuredClone(node.attachments),
+    taskStatus: node.taskStatus,
+    priority: node.priority,
     collapsed: node.collapsed,
     children: node.childIds.map((childId) => createNodeClipboard(document, childId)),
   }
@@ -166,6 +172,8 @@ function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: Mi
   node.note = clipboard.note
   node.links = clipboard.links.map((link) => ({ ...link, id: crypto.randomUUID() }))
   node.attachments = structuredClone(clipboard.attachments)
+  node.taskStatus = clipboard.taskStatus
+  node.priority = clipboard.priority
   document.nodes[node.id] = node
   node.childIds = clipboard.children.map((child) => pasteSubtree(document, node.id, child))
   return node.id
@@ -268,6 +276,20 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const node = document.nodes[command.nodeId]
       if (!node) throw new Error('节点不存在')
       node.attachments = node.attachments.filter((attachment) => attachment.id !== command.attachmentId)
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'SET_NODE_TASK_STATUS': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.taskStatus = command.taskStatus
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'SET_NODE_PRIORITY': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.priority = command.priority
       node.updatedAt = Date.now()
       break
     }

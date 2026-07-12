@@ -608,6 +608,24 @@ export function App() {
                 rows={3}
                 onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })}
               />
+              <div className="node-marker-controls">
+                <label>任务状态
+                  <select value={selectedNode.taskStatus} onChange={(event) => dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: selectedNode.id, taskStatus: event.target.value as typeof selectedNode.taskStatus })}>
+                    <option value="none">普通主题</option>
+                    <option value="todo">待办</option>
+                    <option value="doing">进行中</option>
+                    <option value="done">已完成</option>
+                  </select>
+                </label>
+                <label>优先级
+                  <select value={selectedNode.priority} onChange={(event) => dispatch({ type: 'SET_NODE_PRIORITY', nodeId: selectedNode.id, priority: Number(event.target.value) as typeof selectedNode.priority })}>
+                    <option value="0">未设置</option>
+                    <option value="1">P1 · 高</option>
+                    <option value="2">P2 · 中</option>
+                    <option value="3">P3 · 低</option>
+                  </select>
+                </label>
+              </div>
               <label className="field-label" htmlFor="node-note">备注</label>
               <GhostNoteEditor
                 value={selectedNode.note}

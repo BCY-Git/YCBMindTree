@@ -86,6 +86,17 @@ describe('MindTree command executor', () => {
     expect(deleted.nodes).toEqual(document.nodes)
   })
 
+  it('sets task state and priority without changing the tree structure', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    const todo = executeCommand(document, { type: 'SET_NODE_TASK_STATUS', nodeId, taskStatus: 'todo' }).document
+    const prioritised = executeCommand(todo, { type: 'SET_NODE_PRIORITY', nodeId, priority: 1 }).document
+
+    expect(prioritised.nodes[nodeId]).toMatchObject({ taskStatus: 'todo', priority: 1 })
+    expect(prioritised.nodes[nodeId].childIds).toEqual(document.nodes[nodeId].childIds)
+    expect(() => assertValidDocument(prioritised)).not.toThrow()
+  })
+
   it('persists a manual node offset without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

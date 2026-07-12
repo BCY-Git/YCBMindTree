@@ -124,6 +124,8 @@ export function MindMapCanvas() {
           label: mindNode.topic,
           isRoot: item.id === document.rootId,
           isFreeTopic: mindNode.isFreeTopic,
+          taskStatus: mindNode.taskStatus,
+          priority: mindNode.priority,
           isDropTarget: dropIntent?.kind === 'child' && dropIntent.parentId === item.id,
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
