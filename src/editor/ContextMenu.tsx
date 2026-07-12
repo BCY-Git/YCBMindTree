@@ -19,6 +19,8 @@ type ContextMenuProps = {
   isRoot: boolean
   onAddChild: () => void
   onAddSibling: () => void
+  onAddFreeTopic: () => void
+  onAttachToRoot: () => void
   onEdit: () => void
   onCreateRelation: () => void
   onCreateBoundary: () => void
@@ -60,7 +62,7 @@ function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
   )
 }
 
-export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onEdit, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
+export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddFreeTopic, onAttachToRoot, onEdit, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const isCanvasMenu = node === null && relation === null
 
@@ -79,7 +81,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
 
   const style = {
     left: Math.min(position.x, window.innerWidth - 238),
-    top: Math.min(position.y, window.innerHeight - (relation ? 148 : isCanvasMenu ? 346 : 670)),
+    top: Math.min(position.y, window.innerHeight - (relation ? 148 : isCanvasMenu ? 386 : 670)),
   }
 
   return (
@@ -94,6 +96,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
       ) : isCanvasMenu ? (
         <>
           <MenuItem onClick={onAddChild} shortcut="Tab">新建一级节点</MenuItem>
+          <MenuItem onClick={onAddFreeTopic}>新建自由主题</MenuItem>
           <MenuItem onClick={onEdit} shortcut="F2">编辑中心主题</MenuItem>
           <div className="context-menu__divider" />
           <MenuItem onClick={onFocusRoot}>前往中心主题</MenuItem>
@@ -103,6 +106,17 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <MenuItem onClick={onAutoArrange}>自动排列</MenuItem>
           <MenuItem onClick={onRestoreFreeform} disabled={!hasFreeformHistory}>恢复自由排布</MenuItem>
           <div className="context-menu__hint">一张导图目前保持一个中心主题</div>
+        </>
+      ) : node?.isFreeTopic ? (
+        <>
+          <MenuItem onClick={onAttachToRoot}>附加到主节点</MenuItem>
+          <div className="context-menu__hint">将自由主题归入中心主题，并自动按树形层级排列。</div>
+          <div className="context-menu__divider" />
+          <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
+          <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>
+          <MenuItem onClick={onCopy} shortcut="⌘ C">复制主题</MenuItem>
+          <MenuItem onClick={onCut} shortcut="⌘ X">剪切主题</MenuItem>
+          <MenuItem onClick={onDelete} shortcut="⌫" destructive>删除主题</MenuItem>
         </>
       ) : node ? (
         <>

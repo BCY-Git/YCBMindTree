@@ -48,6 +48,19 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(attached)).not.toThrow()
   })
 
+  it('keeps free topics isolated until they are attached to the tree', () => {
+    const document = createInitialDocument()
+    const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 420, y: 260, topic: '临时想法' })
+    const freeId = free.focusNodeId!
+
+    expect(() => executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId })).toThrow('自由主题不能创建子节点')
+
+    const attached = executeCommand(free.document, { type: 'ATTACH_FREE_TOPIC', nodeId: freeId, parentId: free.document.rootId }).document
+    expect(attached.nodes[freeId]).toMatchObject({ isFreeTopic: false, parentId: attached.rootId, offsetX: 0, offsetY: 0 })
+    expect(attached.nodes[attached.rootId].childIds).toContain(freeId)
+    expect(() => assertValidDocument(attached)).not.toThrow()
+  })
+
   it('deletes an entire branch and returns focus to its parent', () => {
     const document = createInitialDocument()
     const branchId = document.nodes[document.rootId].childIds[0]
@@ -57,6 +70,19 @@ describe('MindTree command executor', () => {
     expect(result.focusNodeId).toBe(document.rootId)
     expect(result.document.nodes[branchId]).toBeUndefined()
     descendantIds.forEach((id) => expect(result.document.nodes[id]).toBeUndefined())
+  })
+
+  it('deletes a multi-selection as one command without deleting descendants twice', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const [firstChild, secondChild] = document.nodes[branchId].childIds
+    const result = executeCommand(document, { type: 'DELETE_NODES', nodeIds: [branchId, firstChild, secondChild] })
+
+    expect(result.document.nodes[branchId]).toBeUndefined()
+    expect(result.document.nodes[firstChild]).toBeUndefined()
+    expect(result.document.nodes[secondChild]).toBeUndefined()
+    expect(result.focusNodeId).toBe(document.rootId)
+    expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
   it('protects the root node', () => {
@@ -250,6 +276,20 @@ describe('MindTree command executor', () => {
     expect(result.document.nodes[secondChild].parentId).toBe(firstChild)
     expect(result.document.nodes[branchId].childIds).not.toContain(secondChild)
     expect(() => executeCommand(result.document, { type: 'MOVE_NODE', nodeId: firstChild, newParentId: secondChild, index: 0 })).toThrow('自身子树')
+  })
+
+  it('returns every regular node to automatic layout after a structural move', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const [firstChild, secondChild] = document.nodes[branchId].childIds
+    document.nodes[branchId].offsetY = 190
+    document.nodes[firstChild].offsetX = 72
+    document.nodes[secondChild].offsetY = -44
+
+    const moved = executeCommand(document, { type: 'MOVE_NODE', nodeId: secondChild, newParentId: firstChild, index: 0 }).document
+
+    expect(Object.values(moved.nodes).filter((node) => !node.isFreeTopic).every((node) => node.offsetX === 0 && node.offsetY === 0)).toBe(true)
+    expect(moved.layout.freeformOffsets?.[branchId]).toEqual({ x: 0, y: 190 })
   })
 
   it('indents and outdents a node while preserving sibling order', () => {

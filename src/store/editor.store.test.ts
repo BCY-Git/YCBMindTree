@@ -82,4 +82,26 @@ describe('editor history', () => {
     expect(useEditorStore.getState().selectedNodeIds).toEqual([document.rootId])
     expect(useEditorStore.getState().selectedNodeId).toBe(document.rootId)
   })
+
+  it('replaces the selection from a selection rectangle', () => {
+    const { document, setSelectedNodes } = useEditorStore.getState()
+    const [branchId] = document.nodes[document.rootId].childIds
+    const childId = document.nodes[branchId].childIds[0]
+
+    setSelectedNodes([branchId, childId, 'missing-node'])
+    expect(useEditorStore.getState().selectedNodeIds).toEqual([branchId, childId])
+    expect(useEditorStore.getState().selectedNodeId).toBe(childId)
+  })
+
+  it('cuts the selected branch and restores it with undo', () => {
+    const { document, selectNode, cutNode, undo } = useEditorStore.getState()
+    const childId = document.nodes[document.rootId].childIds[0]
+
+    selectNode(childId)
+    cutNode(childId)
+    expect(useEditorStore.getState().document.nodes[childId]).toBeUndefined()
+
+    undo()
+    expect(useEditorStore.getState().document.nodes[childId]).toBeDefined()
+  })
 })

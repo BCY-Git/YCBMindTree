@@ -29,23 +29,27 @@ const HORIZONTAL_TEXT_PADDING = 44
  * - 宽度：按中英文混合文本宽度估算，受 min/max 约束
  * - 高度：根节点 58px，子节点 44px，每多一行文字 +20px
  */
-function nodeSize(node: MindNode, isRoot: boolean) {
+function nodeSize(node: MindNode, isRoot: boolean, transientHeight?: number) {
   const longestLine = Math.max(...node.topic.split('\n').map((line) => line.length), 1)
   const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * TEXT_CHARACTER_WIDTH + HORIZONTAL_TEXT_PADDING))
   const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth)
   const charactersPerLine = Math.max(8, Math.floor((width - HORIZONTAL_TEXT_PADDING) / TEXT_CHARACTER_WIDTH))
   const lines = Math.max(1, node.topic.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
   const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20
-  return { width, height: Math.max(node.height ?? 0, automaticHeight) }
+  return { width, height: Math.max(node.height ?? 0, automaticHeight, transientHeight ?? 0) }
 }
 
-export function layoutTree(document: MindMapDocument): PositionedNode[] {
+/**
+ * `transientHeights` 只服务于编辑中的节点（例如 AI 幽灵续写临时撑高卡片）。
+ * 它不写入文档，也不会污染撤销历史；结束编辑后布局自然回到持久化尺寸。
+ */
+export function layoutTree(document: MindMapDocument, transientHeights?: ReadonlyMap<string, number>): PositionedNode[] {
   // ── 第一遍：自底向上计算每棵子树的所需高度 ─────────────────────────
   // 折叠节点不展开其子节点，等同于叶子节点处理。
   const heights = new Map<string, number>()
   const measure = (id: string): number => {
     const node = document.nodes[id]
-    const ownHeight = nodeSize(node, id === document.rootId).height
+    const ownHeight = nodeSize(node, id === document.rootId, transientHeights?.get(id)).height
     const children = node.collapsed ? [] : node.childIds
     // 子树总高度 = 所有子节点高度 + (子节点数 - 1) × 同级间距
     const childrenHeight = children.reduce((sum, childId) => sum + measure(childId), 0)
@@ -60,7 +64,7 @@ export function layoutTree(document: MindMapDocument): PositionedNode[] {
   const output: PositionedNode[] = []
   const place = (id: string, x: number, top: number) => {
     const node = document.nodes[id]
-    const { width, height } = nodeSize(node, id === document.rootId)
+    const { width, height } = nodeSize(node, id === document.rootId, transientHeights?.get(id))
     const subtreeHeight = heights.get(id) ?? height
     // 节点 y = 子树顶 + (子树高度 - 节点自身高度) / 2 → 垂直居中
     const y = top + (subtreeHeight - height) / 2
@@ -77,11 +81,11 @@ export function layoutTree(document: MindMapDocument): PositionedNode[] {
       }).length
       : 0
     if (id === document.rootId && expandedBranchCount <= 1) {
-      const directChildrenHeight = children.reduce((sum, childId) => sum + nodeSize(document.nodes[childId], false).height, 0)
+      const directChildrenHeight = children.reduce((sum, childId) => sum + nodeSize(document.nodes[childId], false, transientHeights?.get(childId)).height, 0)
         + Math.max(0, children.length - 1) * document.layout.siblingGap
       let cardTop = y + height / 2 - directChildrenHeight / 2
       children.forEach((childId) => {
-        const childHeight = nodeSize(document.nodes[childId], false).height
+        const childHeight = nodeSize(document.nodes[childId], false, transientHeights?.get(childId)).height
         const childSubtreeHeight = heights.get(childId) ?? childHeight
         // place() 会把节点卡片放在 childTop + (subtreeHeight - ownHeight) / 2，
         // 因此反推 childTop，保证卡片正好落在紧凑的 cardTop 上。
@@ -105,7 +109,7 @@ export function layoutTree(document: MindMapDocument): PositionedNode[] {
   place(document.rootId, 0, 0)
   // 自由主题不属于根节点 childIds，因此独立追加到画布坐标系，不参与主树间距计算。
   Object.values(document.nodes).filter((node) => node.isFreeTopic).forEach((node) => {
-    const { width, height } = nodeSize(node, false)
+    const { width, height } = nodeSize(node, false, transientHeights?.get(node.id))
     output.push({ id: node.id, x: node.offsetX, y: node.offsetY, width, height })
   })
   return output

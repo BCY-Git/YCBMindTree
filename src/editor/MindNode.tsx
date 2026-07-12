@@ -25,6 +25,7 @@ export type MindNodeData = {
   collapsed: boolean
   accentColor: string
   isRelationSource: boolean
+  onEditingHeightChange?: (height: number | null) => void
 }
 
 export function MindNode({ id, data, selected }: NodeProps) {
@@ -36,6 +37,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const isEditing = editingNodeId === id
   const [topic, setTopic] = useState(node.label)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef<AbortController | null>(null)
   const [suggestion, setSuggestion] = useState('')
   const [isCompleting, setIsCompleting] = useState(false)
@@ -59,15 +61,19 @@ export function MindNode({ id, data, selected }: NodeProps) {
   useLayoutEffect(() => {
     if (!isEditing) {
       setEditorHeight(null)
+      node.onEditingHeightChange?.(null)
       return
     }
     const input = inputRef.current
     if (!input) return
     input.style.height = '0px'
-    const nextHeight = Math.max(19, Math.ceil(input.scrollHeight))
+    const nextHeight = Math.max(19, Math.ceil(input.scrollHeight), Math.ceil(mirrorRef.current?.scrollHeight ?? 0))
     input.style.height = ''
     setEditorHeight((current) => current === nextHeight ? current : nextHeight)
-  }, [isEditing, suggestion, topic])
+    // 节点本体有 6px 内边距与边框；把编辑内容的实际高度交给画布临时布局，
+    // 让同级节点随之平滑让位，而不是把幽灵文本裁在旧卡片高度内。
+    node.onEditingHeightChange?.(nextHeight + 16)
+  }, [isEditing, node, suggestion, topic])
   useEffect(() => {
     requestRef.current?.abort()
     setSuggestion('')
@@ -127,7 +133,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
         maxHeight={420}
         autoScale
         onResizeEnd={(_, size) => dispatch({ type: 'SET_NODE_SIZE', nodeId: id, width: size.width, height: size.height })}
-      ><span aria-hidden="true">⤢</span></NodeResizeControl>}
+      />}
       <Handle id="target-left" type="target" position={Position.Left} className="node-handle" />
       <Handle id="target-right" type="target" position={Position.Right} className="node-handle" />
       {node.hasChildren && (
@@ -140,8 +146,8 @@ export function MindNode({ id, data, selected }: NodeProps) {
         </button>
       )}
       {isEditing ? (
-        <div className="node-input-shell" style={{ minHeight: `${editorLineCount * 19}px` }}>
-          {suggestion && <div className="node-input-mirror" aria-hidden="true"><span>{topic}</span><span className="node-input-mirror__suggestion">{suggestion}</span></div>}
+        <div className="node-input-shell" style={{ minHeight: `${Math.max(editorHeight ?? 0, editorLineCount * 19)}px` }}>
+          {suggestion && <div ref={mirrorRef} className="node-input-mirror" aria-hidden="true"><span>{topic}</span><span className="node-input-mirror__suggestion">{suggestion}</span></div>}
           <textarea
             ref={inputRef}
             className={`node-input ${suggestion ? 'node-input--ghost' : ''}`}
@@ -151,9 +157,11 @@ export function MindNode({ id, data, selected }: NodeProps) {
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
             onSelect={(event) => setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length && event.currentTarget.selectionEnd === event.currentTarget.value.length)}
             onCompositionStart={() => setComposing(true)}
-            onCompositionEnd={(event) => { setComposing(false); setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length) }}
+            onCompositionEnd={(event) => { setComposing(false); setTopic(event.currentTarget.value); setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length) }}
             onBlur={commit}
             onKeyDown={(event) => {
+              // 中文、日文等输入法会用 Enter 确认候选字；组合期间不能提交节点或新建同级节点。
+              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
               if (event.key === 'Escape') { setSuggestion(''); setTopic(node.label); editNode(null) }
               if (event.key === 'Tab') { event.preventDefault(); if (!acceptSuggestion()) commit() }
               if (event.key === 'Enter') { event.preventDefault(); commit(); dispatch({ type: 'ADD_SIBLING', nodeId: id }) }

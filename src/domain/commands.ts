@@ -36,6 +36,7 @@ export type MindMapCommand =
   | { type: 'SET_NODE_PRIORITY'; nodeId: string; priority: MindNodePriority }
   | { type: 'SET_NODE_DUE_DATE'; nodeId: string; dueDate: string | null }
   | { type: 'DELETE_NODE'; nodeId: string }
+  | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
   | { type: 'DELETE_RELATION'; relationId: string }
@@ -239,6 +240,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     case 'ADD_CHILD': {
       const parent = document.nodes[command.parentId]
       if (!parent) throw new Error('父节点不存在')
+      if (parent.isFreeTopic) throw new Error('自由主题不能创建子节点')
       const child = createNode(command.topic ?? '新节点', parent.id)
       parent.childIds.push(child.id)
       // 新增子节点时自动展开父节点，让子节点立即可见。
@@ -251,6 +253,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     case 'ADD_SIBLING': {
       const node = document.nodes[command.nodeId]
       if (!node?.parentId) throw new Error('根节点不能创建同级节点')
+      if (node.isFreeTopic) throw new Error('自由主题不能创建同级节点')
       const parent = document.nodes[node.parentId]
       const sibling = createNode(command.topic ?? '新节点', parent.id)
       // 插入到当前节点之后，保持同级顺序。
@@ -361,6 +364,31 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       // 递归删除整个子树，删除后焦点回到被删节点的父节点。
       removeSubtree(document, node.id)
       focusNodeId = parent?.id ?? document.rootId
+      break
+    }
+    case 'DELETE_NODES': {
+      const selected = [...new Set(command.nodeIds)].filter((id) => id !== document.rootId && Boolean(document.nodes[id]))
+      if (!selected.length) throw new Error('没有可删除的节点')
+      const selectedSet = new Set(selected)
+      const topLevel = selected.filter((nodeId) => {
+        let current = document.nodes[nodeId]
+        while (current?.parentId) {
+          if (selectedSet.has(current.parentId)) return false
+          current = document.nodes[current.parentId]
+        }
+        return true
+      })
+      let nextFocus = document.rootId
+      topLevel.forEach((nodeId) => {
+        const node = document.nodes[nodeId]
+        const parent = node?.parentId ? document.nodes[node.parentId] : null
+        if (parent) {
+          parent.childIds = parent.childIds.filter((id) => id !== nodeId)
+          nextFocus = parent.id
+        }
+        removeSubtree(document, nodeId)
+      })
+      focusNodeId = nextFocus
       break
     }
     case 'CREATE_RELATION': {
@@ -537,9 +565,10 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     }
 
     // ── 结构调整 ──────────────────────────────────────────────
-    // 拖拽节点（非 Shift）时更新该节点的偏移；Shift+拖拽则触发结构移动。
+    // 结构变化后统一回到树形布局，避免历史自由偏移造成跨层或回连。
     case 'MOVE_NODE':
       moveNode(document, command.nodeId, command.newParentId, command.index)
+      arrangeAfterInsert(document)
       focusNodeId = command.nodeId
       break
     // 降低层级：变成前一同级节点的子节点（向右缩进）。
@@ -551,6 +580,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       if (index < 1) throw new Error('第一个同级节点不能降低层级')
       const previousSibling = document.nodes[siblings[index - 1]]
       moveNode(document, node.id, previousSibling.id, previousSibling.childIds.length)
+      arrangeAfterInsert(document)
       focusNodeId = node.id
       break
     }
@@ -562,6 +592,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       if (!parent.parentId) throw new Error('一级节点不能提升层级')
       const grandparent = document.nodes[parent.parentId]
       moveNode(document, node.id, grandparent.id, grandparent.childIds.indexOf(parent.id) + 1)
+      arrangeAfterInsert(document)
       focusNodeId = node.id
       break
     }

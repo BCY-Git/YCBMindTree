@@ -34,6 +34,7 @@ type EditorState = {
   undo: () => void
   redo: () => void
   selectNode: (id: string | null, additive?: boolean) => void
+  setSelectedNodes: (ids: string[]) => void
   selectRelation: (id: string | null) => void
   requestNodeFocus: (id: string) => void
   clearNodeFocusRequest: () => void
@@ -126,6 +127,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ? state.selectedNodeIds.filter((current) => current !== id)
       : [...state.selectedNodeIds, id]
     return { selectedNodeId: selectedNodeIds.includes(id) ? id : (selectedNodeIds.at(-1) ?? null), selectedNodeIds, selectedRelationId: null }
+  }),
+  setSelectedNodes: (ids) => set((state) => {
+    const selectedNodeIds = [...new Set(ids)].filter((id) => Boolean(state.document.nodes[id]))
+    return { selectedNodeId: selectedNodeIds.at(-1) ?? null, selectedNodeIds, selectedRelationId: null, editingNodeId: null }
   }),
   selectRelation: (id) => set({ selectedRelationId: id, selectedNodeId: null, selectedNodeIds: [], editingNodeId: null }),
   requestNodeFocus: (id) => set({ selectedNodeId: id, selectedNodeIds: [id], selectedRelationId: null, editingNodeId: null, focusRequestNodeId: id }),

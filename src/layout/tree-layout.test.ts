@@ -58,6 +58,19 @@ describe('tree layout', () => {
     expect(placed).toMatchObject({ width: 310, height: 92 })
   })
 
+  it('temporarily makes room for an editing node without persisting its size', () => {
+    const document = createInitialDocument()
+    const withFirstLeaf = executeCommand(document, { type: 'ADD_CHILD', parentId: document.rootId, topic: '叶子一' }).document
+    const withSecondLeaf = executeCommand(withFirstLeaf, { type: 'ADD_CHILD', parentId: withFirstLeaf.rootId, topic: '叶子二' }).document
+    const [, firstLeafId, secondLeafId] = withSecondLeaf.nodes[withSecondLeaf.rootId].childIds
+    const baseline = Object.fromEntries(layoutTree(withSecondLeaf).map((node) => [node.id, node]))
+    const editing = Object.fromEntries(layoutTree(withSecondLeaf, new Map([[firstLeafId, 180]])).map((node) => [node.id, node]))
+
+    expect(editing[firstLeafId].height).toBe(180)
+    expect(editing[secondLeafId].y - editing[firstLeafId].y).toBeGreaterThan(baseline[secondLeafId].y - baseline[firstLeafId].y)
+    expect(withSecondLeaf.nodes[firstLeafId].height).toBeNull()
+  })
+
   it('reserves every explicit line in a multi-line CJK title', () => {
     const document = createInitialDocument()
     document.nodes[document.rootId].topic = '第一行\n第二行\n第三行\n第四行\n第五行'
