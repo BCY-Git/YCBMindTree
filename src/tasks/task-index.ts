@@ -8,6 +8,7 @@ export type MindTreeTask = {
   topic: string
   status: Exclude<MindNodeTaskStatus, 'none'>
   priority: MindNodePriority
+  dueDate: string | null
   updatedAt: number
 }
 
@@ -23,10 +24,13 @@ export function collectTasks(documents: MindMapDocument[]): MindTreeTask[] {
     topic: node.topic,
     status: node.taskStatus,
     priority: node.priority,
+    dueDate: node.dueDate,
     updatedAt: node.updatedAt,
   }])).sort((left, right) => {
     const leftPriority = left.priority || 9
     const rightPriority = right.priority || 9
-    return statusOrder[left.status] - statusOrder[right.status] || leftPriority - rightPriority || right.updatedAt - left.updatedAt
+    const leftDate = left.status === 'done' ? '9999-12-31' : left.dueDate ?? '9999-12-31'
+    const rightDate = right.status === 'done' ? '9999-12-31' : right.dueDate ?? '9999-12-31'
+    return statusOrder[left.status] - statusOrder[right.status] || leftDate.localeCompare(rightDate) || leftPriority - rightPriority || right.updatedAt - left.updatedAt
   })
 }

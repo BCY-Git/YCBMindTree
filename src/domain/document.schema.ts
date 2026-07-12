@@ -23,6 +23,7 @@ export const mindNodeSchema = z.object({
   attachments: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), type: z.string(), size: z.number().nonnegative(), createdAt: z.number() })).default([]),
   taskStatus: z.enum(['none', 'todo', 'doing', 'done']).default('none'),
   priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).default(0),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
   collapsed: z.boolean(),
   offsetX: z.number(),
   offsetY: z.number(),

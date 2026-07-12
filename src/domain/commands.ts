@@ -34,6 +34,7 @@ export type MindMapCommand =
   | { type: 'DELETE_NODE_ATTACHMENT'; nodeId: string; attachmentId: string }
   | { type: 'SET_NODE_TASK_STATUS'; nodeId: string; taskStatus: MindNodeTaskStatus }
   | { type: 'SET_NODE_PRIORITY'; nodeId: string; priority: MindNodePriority }
+  | { type: 'SET_NODE_DUE_DATE'; nodeId: string; dueDate: string | null }
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
@@ -73,6 +74,7 @@ export type MindNodeClipboard = {
   attachments: MindNodeAttachment[]
   taskStatus: MindNodeTaskStatus
   priority: MindNodePriority
+  dueDate: string | null
   collapsed: boolean
   children: MindNodeClipboard[]
 }
@@ -85,6 +87,12 @@ function copy(document: MindMapDocument): MindMapDocument {
 // 每次状态变更后更新时间戳，供 persistence 层判断"最近修改"文档。
 function touch(document: MindMapDocument) {
   document.updatedAt = Date.now()
+}
+
+function isValidDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
 }
 
 /**
@@ -160,6 +168,7 @@ export function createNodeClipboard(document: MindMapDocument, nodeId: string): 
     attachments: structuredClone(node.attachments),
     taskStatus: node.taskStatus,
     priority: node.priority,
+    dueDate: node.dueDate,
     collapsed: node.collapsed,
     children: node.childIds.map((childId) => createNodeClipboard(document, childId)),
   }
@@ -176,6 +185,7 @@ function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: Mi
   node.attachments = structuredClone(clipboard.attachments)
   node.taskStatus = clipboard.taskStatus
   node.priority = clipboard.priority
+  node.dueDate = clipboard.dueDate
   document.nodes[node.id] = node
   node.childIds = clipboard.children.map((child) => pasteSubtree(document, node.id, child))
   return node.id
@@ -292,6 +302,15 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const node = document.nodes[command.nodeId]
       if (!node) throw new Error('节点不存在')
       node.priority = command.priority
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'SET_NODE_DUE_DATE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      const dueDate = command.dueDate?.trim() || null
+      if (dueDate && !isValidDate(dueDate)) throw new Error('截止日期格式无效')
+      node.dueDate = dueDate
       node.updatedAt = Date.now()
       break
     }

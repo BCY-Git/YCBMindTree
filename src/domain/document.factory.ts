@@ -25,6 +25,7 @@ export function createNode(topic: string, parentId: string | null): MindNode {
     attachments: [],
     taskStatus: 'none',
     priority: 0,
+    dueDate: null,
     collapsed: false,
     offsetX: 0,
     offsetY: 0,

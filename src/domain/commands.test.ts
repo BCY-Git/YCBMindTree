@@ -104,6 +104,15 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(prioritised)).not.toThrow()
   })
 
+  it('sets and validates a task due date without changing the tree structure', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    const dated = executeCommand(document, { type: 'SET_NODE_DUE_DATE', nodeId, dueDate: '2030-02-14' }).document
+
+    expect(dated.nodes[nodeId].dueDate).toBe('2030-02-14')
+    expect(() => executeCommand(document, { type: 'SET_NODE_DUE_DATE', nodeId, dueDate: '2030-02-30' })).toThrow('截止日期格式无效')
+  })
+
   it('persists a manual node offset without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

@@ -760,6 +760,9 @@ export function App() {
                     <option value="3">P3 · 低</option>
                   </select>
                 </label>
+                <label className="node-marker-controls__due-date">截止日期
+                  <input type="date" value={selectedNode.dueDate ?? ''} disabled={selectedNode.taskStatus === 'none'} onChange={(event) => dispatch({ type: 'SET_NODE_DUE_DATE', nodeId: selectedNode.id, dueDate: event.target.value || null })} />
+                </label>
               </div>
               <label className="field-label" htmlFor="node-note">备注</label>
               <GhostNoteEditor

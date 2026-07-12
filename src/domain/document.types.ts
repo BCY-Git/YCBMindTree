@@ -32,6 +32,8 @@ export type MindNode = {
   taskStatus: MindNodeTaskStatus
   /** 0 表示未设置；1 最高，3 最低。 */
   priority: MindNodePriority
+  /** 本地日期 YYYY-MM-DD；不设时间，避免跨时区意外偏移。 */
+  dueDate: string | null
   collapsed: boolean
   offsetX: number
   offsetY: number

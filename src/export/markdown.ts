@@ -4,6 +4,7 @@ export type MarkdownExportMode = 'outline' | 'minutes' | 'ai-context'
 
 function nodeExtras(node: MindNode, prefix = ''): string[] {
   const lines: string[] = []
+  if (node.dueDate) lines.push(`${prefix}- 截止日期：${node.dueDate}`)
   if (node.note.trim()) lines.push(...node.note.trim().split('\n').map((line) => `${prefix}> ${line}`))
   node.links.forEach((link) => lines.push(`${prefix}- 链接：[${link.label || link.url}](${link.url})`))
   node.attachments.forEach((attachment) => lines.push(`${prefix}- 附件：${attachment.name}（仅本机）`))
