@@ -83,9 +83,11 @@ export function MindMapCanvas() {
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedRelationId = useEditorStore((state) => state.selectedRelationId)
   const editingNodeId = useEditorStore((state) => state.editingNodeId)
+  const focusRequestNodeId = useEditorStore((state) => state.focusRequestNodeId)
   const selectNode = useEditorStore((state) => state.selectNode)
   const selectRelation = useEditorStore((state) => state.selectRelation)
   const editNode = useEditorStore((state) => state.editNode)
+  const clearNodeFocusRequest = useEditorStore((state) => state.clearNodeFocusRequest)
   const dispatch = useEditorStore((state) => state.dispatch)
   const copyNode = useEditorStore((state) => state.copyNode)
   const cutNode = useEditorStore((state) => state.cutNode)
@@ -186,6 +188,14 @@ export function MindMapCanvas() {
   }, [document, dropIntent, freeTopicAttachmentParentId, relationSourceId, selectedNodeIds, selectedRelationId, theme])
 
   useEffect(() => setFlowNodes(baseNodes), [baseNodes])
+
+  useEffect(() => {
+    if (!focusRequestNodeId) return
+    const node = baseNodes.find((item) => item.id === focusRequestNodeId)
+    if (!node || !flowInstance) return
+    flowInstance.fitView({ nodes: [node], padding: 1.15, maxZoom: 1.15, duration: 260 })
+    clearNodeFocusRequest()
+  }, [baseNodes, clearNodeFocusRequest, flowInstance, focusRequestNodeId])
 
   const focusRoot = useCallback(() => {
     const rootNode = baseNodes.find((node) => node.id === document.rootId)

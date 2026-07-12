@@ -25,6 +25,9 @@ import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
 import { GhostNoteEditor } from '../ai/GhostNoteEditor'
 import { LoginDialog } from '../auth/LoginDialog'
 import { clearAccountSession, loadAccountSession, loginAccount, registerAccount, revokeAccountSession, saveAccountSession, type AuthSession } from '../auth/account-client'
+import { TaskCenterDialog } from '../tasks/TaskCenterDialog'
+import { collectTasks, type MindTreeTask } from '../tasks/task-index'
+import { executeCommand } from '../domain/commands'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -74,6 +77,7 @@ export function App() {
   const hydrate = useEditorStore((state) => state.hydrate)
   const createDocument = useEditorStore((state) => state.createDocument)
   const createQuickNote = useEditorStore((state) => state.createQuickNote)
+  const requestNodeFocus = useEditorStore((state) => state.requestNodeFocus)
   const clipboard = useEditorStore((state) => state.clipboard)
   const [documents, setDocuments] = useState<MindMapDocument[]>([])
   const [categories, setCategories] = useState<Category[]>(loadCategories)
@@ -104,10 +108,12 @@ export function App() {
   const [draftSaveOpen, setDraftSaveOpen] = useState(false)
   const [draftTitle, setDraftTitle] = useState('')
   const [draftCategoryId, setDraftCategoryId] = useState('uncategorized')
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false)
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const pendingTaskFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
@@ -118,6 +124,9 @@ export function App() {
     ? savedDocuments
     : savedDocuments.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, savedDocuments])
   const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
+  const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
+  const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
+  const openTaskCount = useMemo(() => tasks.filter((task) => task.status !== 'done').length, [tasks])
 
   const exportCurrentDocument = (mode: MarkdownExportMode) => {
     downloadMarkdown(document, mode)
@@ -309,6 +318,31 @@ export function App() {
 
   const startNewDocument = useCallback(() => requestNavigation({ kind: 'new-map' }), [requestNavigation])
   const startQuickNote = useCallback(() => requestNavigation({ kind: 'quick-note' }), [requestNavigation])
+
+  const openTask = useCallback((task: MindTreeTask) => {
+    setTaskCenterOpen(false)
+    if (task.documentId === document.id) {
+      if (dispatch({ type: 'REVEAL_NODE', nodeId: task.nodeId })) requestNodeFocus(task.nodeId)
+      return
+    }
+    const target = taskDocuments.find((item) => item.id === task.documentId)
+    if (!target) return
+    pendingTaskFocusRef.current = { documentId: task.documentId, nodeId: task.nodeId }
+    openDocument(target)
+  }, [dispatch, document.id, openDocument, requestNodeFocus, taskDocuments])
+
+  const updateTaskStatus = useCallback(async (task: MindTreeTask, taskStatus: 'todo' | 'doing' | 'done') => {
+    const target = taskDocuments.find((item) => item.id === task.documentId)
+    if (!target) return
+    if (target.id === document.id) {
+      dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: task.nodeId, taskStatus })
+      return
+    }
+    try {
+      const updated = executeCommand(target, { type: 'SET_NODE_TASK_STATUS', nodeId: task.nodeId, taskStatus }).document
+      await persistDocument(updated)
+    } catch (error) { console.warn(error) }
+  }, [dispatch, document.id, persistDocument, taskDocuments])
 
   const closeDraftSave = () => {
     setDraftSaveOpen(false)
@@ -568,6 +602,13 @@ export function App() {
     getSyncMetadata(document.id).then((metadata) => setSyncRemoteVersion(metadata?.remoteVersion ?? null)).catch(() => setSyncRemoteVersion(null))
   }, [document.id])
 
+  useEffect(() => {
+    const pending = pendingTaskFocusRef.current
+    if (!pending || pending.documentId !== document.id) return
+    pendingTaskFocusRef.current = null
+    if (dispatch({ type: 'REVEAL_NODE', nodeId: pending.nodeId })) requestNodeFocus(pending.nodeId)
+  }, [dispatch, document.id, requestNodeFocus])
+
   // 自动同步触发：每次打开应用或切换文档后，静默拉取云端较新版本。
   useEffect(() => {
     if (!hydrated) return
@@ -657,6 +698,9 @@ export function App() {
               </label>
             </section>
 
+            <section className="sidebar-section sidebar-assistant-section">
+              <button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>任务中心</strong><small>跨导图查看待办</small></span><i>{openTaskCount}</i></button>
+            </section>
             <section className="sidebar-section sidebar-assistant-section">
               <p className="sidebar-section__title">助手</p>
               <AiAssistant document={document} targetNodeId={selectedNodeId ?? document.rootId} />
@@ -809,6 +853,7 @@ export function App() {
         onDuplicate={(version) => { void duplicateVersion(version) }}
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
+      {taskCenterOpen && <TaskCenterDialog tasks={tasks} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} />}
       {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
         <section className="draft-save-dialog">
           <span className="draft-save-dialog__mark">✦</span>
