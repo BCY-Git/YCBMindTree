@@ -116,13 +116,13 @@ export function MindNode({ id, data, selected }: NodeProps) {
           {suggestion && <span className="sr-only">按 Tab 接受 AI 续写，按 Esc 忽略</span>}
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
-      ) : <button className="node-label" title="双击编辑主题" onDoubleClick={() => editNode(id)}>
+      ) : <div className="node-label" title="双击编辑主题">
         {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
           {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
           {node.priority > 0 && <i className="node-priority" aria-hidden="true">P{node.priority}</i>}
         </span>}
         <span>{node.label}</span>
-      </button>}
+      </div>}
       <Handle id="source-left" type="source" position={Position.Left} className="node-handle" />
       <Handle id="source-right" type="source" position={Position.Right} className="node-handle" />
     </div>
