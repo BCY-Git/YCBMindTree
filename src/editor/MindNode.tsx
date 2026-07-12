@@ -43,6 +43,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const [cursorAtEnd, setCursorAtEnd] = useState(true)
   const [composing, setComposing] = useState(false)
   const [isHovering, setIsHovering] = useState(false)
+  const [editorHeight, setEditorHeight] = useState<number | null>(null)
 
   useEffect(() => setTopic(node.label), [node.label])
   useLayoutEffect(() => {
@@ -55,6 +56,18 @@ export function MindNode({ id, data, selected }: NodeProps) {
     })
     return () => window.cancelAnimationFrame(frame)
   }, [isEditing])
+  useLayoutEffect(() => {
+    if (!isEditing) {
+      setEditorHeight(null)
+      return
+    }
+    const input = inputRef.current
+    if (!input) return
+    input.style.height = '0px'
+    const nextHeight = Math.max(19, Math.ceil(input.scrollHeight))
+    input.style.height = ''
+    setEditorHeight((current) => current === nextHeight ? current : nextHeight)
+  }, [isEditing, suggestion, topic])
   useEffect(() => {
     requestRef.current?.abort()
     setSuggestion('')
@@ -87,8 +100,15 @@ export function MindNode({ id, data, selected }: NodeProps) {
   }
   const taskIcon = node.taskStatus === 'todo' ? '○' : node.taskStatus === 'doing' ? '◐' : node.taskStatus === 'done' ? '✓' : null
   const taskLabel = node.taskStatus === 'todo' ? '待办' : node.taskStatus === 'doing' ? '进行中' : node.taskStatus === 'done' ? '已完成' : ''
-  // 用预览文本估算行数，让长幽灵续写和真实长标题都能平滑扩展节点高度。
-  const editorLineCount = Math.min(5, Math.max(1, Math.ceil((topic + suggestion).length / (node.isRoot ? 20 : 16))))
+  // 保留原有换行，并按节点宽度估算自动换行，编辑态不能把长标题压回单行。
+  const charactersPerLine = node.isRoot ? 20 : 16
+  const editorLineCount = Math.max(1, (topic + suggestion).split('\n').reduce((lines, line) => lines + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
+  const beginEditing = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (isEditing || (event.target as HTMLElement).closest('.collapse-toggle, .node-resize-control')) return
+    event.preventDefault()
+    event.stopPropagation()
+    editNode(id)
+  }
 
   return (
     <div
@@ -96,6 +116,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
       style={{ '--node-accent': node.accentColor } as CSSProperties}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
+      onDoubleClick={beginEditing}
     >
       {!isEditing && (selected || isHovering) && <NodeResizeControl
         position="bottom-right"
@@ -126,6 +147,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
             className={`node-input ${suggestion ? 'node-input--ghost' : ''}`}
             value={topic}
             rows={1}
+            style={{ height: `${editorHeight ?? editorLineCount * 19}px` }}
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
             onSelect={(event) => setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length && event.currentTarget.selectionEnd === event.currentTarget.value.length)}
             onCompositionStart={() => setComposing(true)}
@@ -141,11 +163,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
           {suggestion && <span className="sr-only">按 Tab 接受 AI 续写，按 Esc 忽略</span>}
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
-      ) : <div
-        className="node-label"
-        title="双击编辑主题"
-        onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); editNode(id) }}
-      >
+      ) : <div className="node-label" title="双击编辑主题">
         {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
           {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
           {node.priority > 0 && <i className="node-priority" aria-hidden="true">P{node.priority}</i>}

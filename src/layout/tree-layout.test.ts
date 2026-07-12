@@ -57,4 +57,12 @@ describe('tree layout', () => {
     const placed = layoutTree(document).find((node) => node.id === nodeId)!
     expect(placed).toMatchObject({ width: 310, height: 92 })
   })
+
+  it('reserves every explicit line in a multi-line CJK title', () => {
+    const document = createInitialDocument()
+    document.nodes[document.rootId].topic = '第一行\n第二行\n第三行\n第四行\n第五行'
+
+    const root = layoutTree(document).find((node) => node.id === document.rootId)!
+    expect(root.height).toBe(138) // 58px 根主题 + 4 行 × 20px
+  })
 })

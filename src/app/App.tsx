@@ -41,6 +41,7 @@ type PendingNavigation =
   | { kind: 'quick-note' }
 
 type SidebarPanel = 'projects' | 'maps' | 'tasks' | 'assistant'
+type InspectorTab = 'content' | 'tasks' | 'resources' | 'map'
 
 // localStorage key for persisting user-defined categories.
 const categoryStorageKey = 'mindtree.categories.v1'
@@ -93,6 +94,7 @@ export function App() {
   const [accountSession, setAccountSession] = useState<AuthSession | null>(loadAccountSession)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>('projects')
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('content')
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(loadSyncConfig)
   const [syncRemoteVersion, setSyncRemoteVersion] = useState<number | null>(null)
@@ -730,101 +732,28 @@ export function App() {
         <MindMapCanvas />
 
         <aside className="inspector">
-          <p className="eyebrow">{selectedRelation ? '关系属性' : selectedNode ? '节点属性' : '文档设置'}</p>
-          {selectedRelation ? (
-            <>
+          <header className="inspector__header">
+            <p className="eyebrow">{selectedRelation ? '关系属性' : selectedNode ? '节点属性' : '文档设置'}</p>
+            {selectedNode && <nav className="inspector-tabs" aria-label="节点属性分类">
+              <button className={inspectorTab === 'content' ? 'is-active' : ''} onClick={() => setInspectorTab('content')}>内容</button>
+              <button className={inspectorTab === 'tasks' ? 'is-active' : ''} onClick={() => setInspectorTab('tasks')}>任务</button>
+              <button className={inspectorTab === 'resources' ? 'is-active' : ''} onClick={() => setInspectorTab('resources')}>资源</button>
+              <button className={inspectorTab === 'map' ? 'is-active' : ''} onClick={() => setInspectorTab('map')}>图谱</button>
+            </nav>}
+          </header>
+          <div className="inspector__body">
+            {selectedRelation ? <>
               <label className="field-label" htmlFor="relation-label">关系说明</label>
-              <textarea
-                id="relation-label"
-                value={selectedRelation.label}
-                rows={2}
-                onChange={(event) => dispatch({ type: 'UPDATE_RELATION_LABEL', relationId: selectedRelation.id, label: event.target.value })}
-              />
+              <textarea id="relation-label" value={selectedRelation.label} rows={2} onChange={(event) => dispatch({ type: 'UPDATE_RELATION_LABEL', relationId: selectedRelation.id, label: event.target.value })} />
               <div className="property-row"><span>起点</span><strong>{document.nodes[selectedRelation.sourceId]?.topic ?? '已删除节点'}</strong></div>
               <div className="property-row"><span>终点</span><strong>{document.nodes[selectedRelation.targetId]?.topic ?? '已删除节点'}</strong></div>
               <button className="danger-button" onClick={() => dispatch({ type: 'DELETE_RELATION', relationId: selectedRelation.id })}>删除此关系</button>
-            </>
-          ) : selectedNode ? (
-            <>
-              <label className="field-label" htmlFor="topic">主题</label>
-              <textarea
-                id="topic"
-                value={selectedNode.topic}
-                rows={3}
-                onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })}
-              />
-              <div className="node-marker-controls">
-                <label>任务状态
-                  <select value={selectedNode.taskStatus} onChange={(event) => dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: selectedNode.id, taskStatus: event.target.value as typeof selectedNode.taskStatus })}>
-                    <option value="none">普通主题</option>
-                    <option value="todo">待办</option>
-                    <option value="doing">进行中</option>
-                    <option value="done">已完成</option>
-                  </select>
-                </label>
-                <label>优先级
-                  <select value={selectedNode.priority} onChange={(event) => dispatch({ type: 'SET_NODE_PRIORITY', nodeId: selectedNode.id, priority: Number(event.target.value) as typeof selectedNode.priority })}>
-                    <option value="0">未设置</option>
-                    <option value="1">P1 · 高</option>
-                    <option value="2">P2 · 中</option>
-                    <option value="3">P3 · 低</option>
-                  </select>
-                </label>
-                <label className="node-marker-controls__due-date">截止日期
-                  <input type="date" value={selectedNode.dueDate ?? ''} disabled={selectedNode.taskStatus === 'none'} onChange={(event) => dispatch({ type: 'SET_NODE_DUE_DATE', nodeId: selectedNode.id, dueDate: event.target.value || null })} />
-                </label>
-              </div>
-              <label className="field-label" htmlFor="node-note">备注</label>
-              <GhostNoteEditor
-                value={selectedNode.note}
-                document={document}
-                nodeId={selectedNode.id}
-                onChange={(note) => dispatch({ type: 'UPDATE_NODE_NOTE', nodeId: selectedNode.id, note })}
-              />
-              <div className="node-resource-section"><p className="field-label">链接</p>
-                {selectedNode.links.map((link) => <div className="node-resource" key={link.id}><a href={link.url} target="_blank" rel="noreferrer" title={link.url}>{link.label}</a><button onClick={() => dispatch({ type: 'DELETE_NODE_LINK', nodeId: selectedNode.id, linkId: link.id })} aria-label={`删除链接 ${link.label}`}>×</button></div>)}
-                <form className="node-link-form" onSubmit={addNodeLink}><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://…" type="url" /><input value={linkLabel} onChange={(event) => setLinkLabel(event.target.value)} placeholder="链接名称（可选）" /><button type="submit">添加链接</button></form>
-              </div>
-              <div className="node-resource-section"><p className="field-label">附件</p>
-                {selectedNode.attachments.map((attachment) => <div className="node-resource" key={attachment.id}><button className="node-resource__file" onClick={() => { void downloadNodeAttachment(attachment.id) }} title="下载本机附件">⌁ {attachment.name}<small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small></button><button onClick={() => dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: selectedNode.id, attachmentId: attachment.id })} aria-label={`移除附件 ${attachment.name}`}>×</button></div>)}
-                <input ref={attachmentInputRef} className="node-attachment-input" type="file" onChange={(event) => { void uploadNodeAttachment(event) }} />
-                <button className="subtle-button" onClick={() => attachmentInputRef.current?.click()}>添加本机附件</button>
-                <small className="node-resource__hint">单个文件最大 15 MB，不会自动上传云端。</small>
-                {attachmentStatus && <small className="node-resource__hint">{attachmentStatus}</small>}
-              </div>
-              <div className="property-row"><span>子节点</span><strong>{selectedNode.childIds.length}</strong></div>
-              <div className="property-row"><span>状态</span><strong>{selectedNode.collapsed ? '已折叠' : '已展开'}</strong></div>
-              <button className="subtle-button" onClick={() => dispatch({ type: 'RESET_NODE_OFFSET', nodeId: selectedNode.id })}>重置节点位置</button>
-              <button className="danger-button" disabled={selectedNode.id === document.rootId} onClick={() => dispatch({ type: 'DELETE_NODE', nodeId: selectedNode.id })}>删除此分支</button>
-            </>
-          ) : (
-            <p className="empty-inspector">选择一个节点，即可编辑内容和查看分支信息。</p>
-          )}
-          <div className="theme-picker">
-            <p className="eyebrow">主题</p>
-            <div className="theme-grid">
-              {themes.map((candidate) => (
-                <button
-                  key={candidate.id}
-                  className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`}
-                  onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })}
-                  title={candidate.description}
-                >
-                  <span className="theme-preview" style={{ background: candidate.canvas }}>
-                    <i style={{ background: candidate.rootBackground }} />
-                    {candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}
-                  </span>
-                  <span>{candidate.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="layout-controls">
-            <p className="eyebrow">布局</p>
-            <label>层级间距 <output>{document.layout.levelGap}</output></label>
-            <input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} />
-            <label>同级间距 <output>{document.layout.siblingGap}</output></label>
-            <input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} />
+            </> : selectedNode ? <>
+              {inspectorTab === 'content' && <section className="inspector-pane"><label className="field-label" htmlFor="topic">主题</label><textarea id="topic" value={selectedNode.topic} rows={3} onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })} /><label className="field-label" htmlFor="node-note">备注</label><GhostNoteEditor value={selectedNode.note} document={document} nodeId={selectedNode.id} onChange={(note) => dispatch({ type: 'UPDATE_NODE_NOTE', nodeId: selectedNode.id, note })} /></section>}
+              {inspectorTab === 'tasks' && <section className="inspector-pane"><div className="node-marker-controls"><label>任务状态<select value={selectedNode.taskStatus} onChange={(event) => dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: selectedNode.id, taskStatus: event.target.value as typeof selectedNode.taskStatus })}><option value="none">普通主题</option><option value="todo">待办</option><option value="doing">进行中</option><option value="done">已完成</option></select></label><label>优先级<select value={selectedNode.priority} onChange={(event) => dispatch({ type: 'SET_NODE_PRIORITY', nodeId: selectedNode.id, priority: Number(event.target.value) as typeof selectedNode.priority })}><option value="0">未设置</option><option value="1">P1 · 高</option><option value="2">P2 · 中</option><option value="3">P3 · 低</option></select></label><label className="node-marker-controls__due-date">截止日期<input type="date" value={selectedNode.dueDate ?? ''} disabled={selectedNode.taskStatus === 'none'} onChange={(event) => dispatch({ type: 'SET_NODE_DUE_DATE', nodeId: selectedNode.id, dueDate: event.target.value || null })} /></label></div></section>}
+              {inspectorTab === 'resources' && <section className="inspector-pane"><div className="node-resource-section"><p className="field-label">链接</p>{selectedNode.links.map((link) => <div className="node-resource" key={link.id}><a href={link.url} target="_blank" rel="noreferrer" title={link.url}>{link.label}</a><button onClick={() => dispatch({ type: 'DELETE_NODE_LINK', nodeId: selectedNode.id, linkId: link.id })} aria-label={`删除链接 ${link.label}`}>×</button></div>)}<form className="node-link-form" onSubmit={addNodeLink}><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://…" type="url" /><input value={linkLabel} onChange={(event) => setLinkLabel(event.target.value)} placeholder="链接名称（可选）" /><button type="submit">添加链接</button></form></div><div className="node-resource-section"><p className="field-label">附件</p>{selectedNode.attachments.map((attachment) => <div className="node-resource" key={attachment.id}><button className="node-resource__file" onClick={() => { void downloadNodeAttachment(attachment.id) }} title="下载本机附件">⌁ {attachment.name}<small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small></button><button onClick={() => dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: selectedNode.id, attachmentId: attachment.id })} aria-label={`移除附件 ${attachment.name}`}>×</button></div>)}<input ref={attachmentInputRef} className="node-attachment-input" type="file" onChange={(event) => { void uploadNodeAttachment(event) }} /><button className="subtle-button" onClick={() => attachmentInputRef.current?.click()}>添加本机附件</button><small className="node-resource__hint">单个文件最大 15 MB，不会自动上传云端。</small>{attachmentStatus && <small className="node-resource__hint">{attachmentStatus}</small>}</div></section>}
+              {inspectorTab === 'map' && <section className="inspector-pane"><div className="property-row"><span>子节点</span><strong>{selectedNode.childIds.length}</strong></div><div className="property-row"><span>状态</span><strong>{selectedNode.collapsed ? '已折叠' : '已展开'}</strong></div><button className="subtle-button" onClick={() => dispatch({ type: 'RESET_NODE_OFFSET', nodeId: selectedNode.id })}>重置节点位置</button><button className="danger-button" disabled={selectedNode.id === document.rootId} onClick={() => dispatch({ type: 'DELETE_NODE', nodeId: selectedNode.id })}>删除此分支</button><div className="theme-picker"><p className="eyebrow">主题</p><div className="theme-grid">{themes.map((candidate) => <button key={candidate.id} className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`} onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })} title={candidate.description}><span className="theme-preview" style={{ background: candidate.canvas }}><i style={{ background: candidate.rootBackground }} />{candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}</span><span>{candidate.name}</span></button>)}</div></div><div className="layout-controls"><p className="eyebrow">布局</p><label>层级间距 <output>{document.layout.levelGap}</output></label><input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} /><label>同级间距 <output>{document.layout.siblingGap}</output></label><input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} /></div></section>}
+            </> : <section className="inspector-pane"><p className="empty-inspector">选择一个节点，即可编辑内容和查看分支信息。</p><div className="theme-picker"><p className="eyebrow">主题</p><div className="theme-grid">{themes.map((candidate) => <button key={candidate.id} className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`} onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })} title={candidate.description}><span className="theme-preview" style={{ background: candidate.canvas }}><i style={{ background: candidate.rootBackground }} />{candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}</span><span>{candidate.name}</span></button>)}</div></div><div className="layout-controls"><p className="eyebrow">布局</p><label>层级间距 <output>{document.layout.levelGap}</output></label><input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} /><label>同级间距 <output>{document.layout.siblingGap}</output></label><input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} /></div></section>}
           </div>
         </aside>
       </section>

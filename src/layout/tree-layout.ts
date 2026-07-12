@@ -21,17 +21,20 @@ const ROOT_WIDTH = 196
 const NODE_WIDTH = 176
 const NODE_HEIGHT = 44
 const ROOT_HEIGHT = 58
+const TEXT_CHARACTER_WIDTH = 11
+const HORIZONTAL_TEXT_PADDING = 44
 
 /**
  * 根据节点主题文本计算渲染尺寸。
- * - 宽度：按最长行 × 8.5px 估算，受 min/max 约束
+ * - 宽度：按中英文混合文本宽度估算，受 min/max 约束
  * - 高度：根节点 58px，子节点 44px，每多一行文字 +20px
  */
 function nodeSize(node: MindNode, isRoot: boolean) {
   const longestLine = Math.max(...node.topic.split('\n').map((line) => line.length), 1)
-  const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * 8.5 + 44))
+  const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * TEXT_CHARACTER_WIDTH + HORIZONTAL_TEXT_PADDING))
   const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth)
-  const lines = Math.max(1, Math.ceil(node.topic.length / Math.max(12, Math.floor((width - 36) / 8.5))))
+  const charactersPerLine = Math.max(8, Math.floor((width - HORIZONTAL_TEXT_PADDING) / TEXT_CHARACTER_WIDTH))
+  const lines = Math.max(1, node.topic.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
   const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20
   return { width, height: Math.max(node.height ?? 0, automaticHeight) }
 }

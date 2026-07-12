@@ -477,7 +477,6 @@ export function MindMapCanvas() {
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onNodeDrag={onNodeDrag}
-        onNodeDoubleClick={(_, node) => editNode(node.id)}
         onNodeContextMenu={(event, node) => openContextMenu(event.nativeEvent, node.id)}
         onPaneContextMenu={(event) => openContextMenu('nativeEvent' in event ? event.nativeEvent : event, null)}
         onEdgeClick={(event, edge) => { event.stopPropagation(); selectRelation(edge.id) }}
