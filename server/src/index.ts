@@ -2,7 +2,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { config } from './config.js'
-import { requireAccountBearer, requireAllowedHost, requireAllowedOrigin, requireDevelopmentBearer, type AuthenticatedRequest } from './auth.js'
+import { requireAccountBearer, requireAllowedHost, requireAllowedOrigin, type AuthenticatedRequest } from './auth.js'
 import { DocumentRepository } from './document-repository.js'
 import { createMindTreeMcp } from './mcp.js'
 import { mindMapDocumentSchema } from './mindmap-document.js'
@@ -43,7 +43,7 @@ app.post('/api/v1/auth/logout', requireApiBearer, (request: AuthenticatedRequest
 })
 
 // 配对凭据只存哈希、仅能兑换一次，并在五分钟后自动失效。
-app.post('/api/v1/pairings', requireDevelopmentBearer, (request: AuthenticatedRequest, response) => {
+app.post('/api/v1/pairings', requireApiBearer, (request: AuthenticatedRequest, response) => {
   const challenge = repository.createPairingChallenge(request.ownerId!)
   return response.status(201).json({ pairingId: challenge.id, secret: challenge.secret, expiresAt: challenge.expiresAt })
 })
@@ -51,10 +51,11 @@ app.post('/api/v1/pairings', requireDevelopmentBearer, (request: AuthenticatedRe
 app.post('/api/v1/pairings/:pairingId/exchange', (request, response) => {
   const secret = typeof request.body?.secret === 'string' ? request.body.secret : ''
   const pairingId = String(request.params.pairingId)
-  if (!secret || !repository.claimPairingChallenge('local-user', pairingId, secret)) {
+  const ownerId = secret ? repository.claimPairingChallenge(pairingId, secret) : null
+  if (!ownerId) {
     return response.status(401).json({ error: { code: 'INVALID_PAIRING', message: '配对二维码无效、已使用或已过期' } })
   }
-  return response.json({ token: config.devToken })
+  return response.json({ token: repository.createSession(ownerId, config.sessionLifetimeMs) })
 })
 
 app.use('/api/v1', requireApiBearer)

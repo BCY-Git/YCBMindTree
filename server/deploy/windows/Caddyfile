@@ -1,0 +1,23 @@
+{
+  email {$CADDY_EMAIL}
+}
+
+# 将 MINDTREE_DOMAIN 设为已解析到服务器公网 IP 的域名，例如 sync.example.com。
+# Caddy 会自动申请并续期 TLS 证书；Node 服务只监听 127.0.0.1:18789。
+{$MINDTREE_DOMAIN} {
+  encode zstd gzip
+
+  request_body {
+    max_size 1MB
+  }
+
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "camera=(self), microphone=()"
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  }
+
+  reverse_proxy 127.0.0.1:18789
+}

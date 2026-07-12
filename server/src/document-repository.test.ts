@@ -51,4 +51,13 @@ describe('account sessions and document ownership', () => {
     expect(repository.list(bob.id)).toEqual([])
     expect(() => repository.save({ id: documentId, ownerId: bob.id, title: '越权写入', categoryId: 'uncategorized', payload: {}, baseVersion: 1 })).toThrow('无权访问')
   })
+
+  it('claims a pairing code once for the originating account', () => {
+    const repository = createRepository()
+    const user = repository.registerAccount('owner@example.com', 'correct horse battery staple')!
+    const challenge = repository.createPairingChallenge(user.id)
+
+    expect(repository.claimPairingChallenge(challenge.id, challenge.secret)).toBe(user.id)
+    expect(repository.claimPairingChallenge(challenge.id, challenge.secret)).toBeNull()
+  })
 })

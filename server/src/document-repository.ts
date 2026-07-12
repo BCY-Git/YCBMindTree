@@ -136,12 +136,21 @@ export class DocumentRepository {
     return { id, secret, expiresAt }
   }
 
-  claimPairingChallenge(ownerId: string, id: string, secret: string): boolean {
+  /**
+   * 领取一次性配对码，并返回原设备所属账号。ownerId 仅由服务端存储的 challenge
+   * 决定，扫码端不能把自己配到任意指定账号。
+   */
+  claimPairingChallenge(id: string, secret: string): string | null {
+    const now = Date.now()
+    const challenge = this.database.prepare(`SELECT owner_id FROM pairing_challenges
+      WHERE id = ? AND secret_hash = ? AND expires_at > ? AND claimed_at IS NULL`)
+      .get(id, hashPairingSecret(secret), now) as { owner_id?: unknown } | undefined
+    if (!challenge?.owner_id) return null
     const result = this.database.prepare(`UPDATE pairing_challenges
       SET claimed_at = ?
-      WHERE id = ? AND owner_id = ? AND secret_hash = ? AND expires_at > ? AND claimed_at IS NULL`)
-      .run(Date.now(), id, ownerId, hashPairingSecret(secret), Date.now())
-    return result.changes === 1
+      WHERE id = ? AND secret_hash = ? AND expires_at > ? AND claimed_at IS NULL`)
+      .run(now, id, hashPairingSecret(secret), now)
+    return result.changes === 1 ? String(challenge.owner_id) : null
   }
 
   registerAccount(email: string, password: string): AccountUser | null {

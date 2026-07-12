@@ -22,7 +22,7 @@
 MindTree Web / MCP Host
         │ HTTPS + Bearer token
         ▼
-Nginx (TLS、限流、访问日志)
+Caddy (自动 TLS、压缩、安全响应头)
         ▼
 MindTree Server (Node.js / Express)
    ├── /api/v1/*   同步 REST API
@@ -30,7 +30,7 @@ MindTree Server (Node.js / Express)
    └── SQLite      文档、版本、变更记录
 ```
 
-服务只监听 `127.0.0.1`；Nginx 负责公网 TLS。单机 SQLite 足以支撑个人多设备同步，文档快照与变更记录应定期备份到对象存储或另一台机器。
+服务只监听 `127.0.0.1`；Caddy 负责公网 TLS。单机 SQLite 足以支撑个人多设备同步，文档快照与变更记录应定期备份到对象存储或另一台机器。Windows 部署模板见 [Caddyfile](../server/deploy/windows/Caddyfile)：域名 A 记录生效后，设置 `MINDTREE_DOMAIN`、`CADDY_EMAIL`，并让 Caddy 反代到本机 `127.0.0.1:18789`。公网只需开放 80/443，不应继续暴露 Node 端口。
 
 浏览器直连 API 时，`ALLOWED_ORIGINS` 必须明确列出前端来源（开发环境为 `http://127.0.0.1:5174`）；服务端只对名单内来源返回 CORS 响应头，且仅允许 `GET`、`POST`、`PUT` 与 `OPTIONS`，防止任意网站借用本机 Token 调用同步 API。
 
@@ -89,4 +89,4 @@ document_changes(id, document_id, version, kind, payload_json, created_at)
 
 已配置设备可以请求 `POST /api/v1/pairings`，服务端生成一个随机配对 secret，并仅保存它的 SHA-256 哈希。二维码只包含服务地址、配对 ID、随机 secret 与过期时间；它不包含长期 Bearer Token。新设备扫码后调用不需要 Bearer Token 的 `POST /api/v1/pairings/:pairingId/exchange` 兑换一次，服务端仅在 secret 匹配、未被领取且仍在五分钟有效期内时返回 Token，并立刻把该配对记录标记为已领取。
 
-二维码应被视为临时敏感信息：展示设备不应截图或转发，领取后立即失效。后续切换 HTTPS 后，配对兑换同样必须走 TLS。
+二维码应被视为临时敏感信息：展示设备不应截图或转发，领取后立即失效。配对码由已登录设备创建，服务端从一次性 challenge 中读取原设备的 ownerId，并给新设备签发独立的账号会话；二维码不再兑换共享开发 Token。配对兑换必须走 HTTPS。
