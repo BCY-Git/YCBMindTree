@@ -39,6 +39,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
   const requestRef = useRef<AbortController | null>(null)
   const [suggestion, setSuggestion] = useState('')
   const [isCompleting, setIsCompleting] = useState(false)
+  const [completionError, setCompletionError] = useState(false)
   const [cursorAtEnd, setCursorAtEnd] = useState(true)
   const [composing, setComposing] = useState(false)
 
@@ -48,6 +49,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
     requestRef.current?.abort()
     setSuggestion('')
     setIsCompleting(false)
+    setCompletionError(false)
     const settings = loadAiSettings()
     if (!isEditing || composing || !cursorAtEnd || !isGhostCompletionEnabled() || topic.trim().length < 3 || !settings.endpoint.trim() || !settings.model.trim() || (!settings.apiKey.trim() && !import.meta.env.DEV)) return
     const controller = new AbortController()
@@ -56,7 +58,7 @@ export function MindNode({ id, data, selected }: NodeProps) {
       setIsCompleting(true)
       void requestGhostCompletion(settings, document, id, topic, controller.signal, 24)
         .then((completion) => { if (!controller.signal.aborted) setSuggestion(completion) })
-        .catch(() => undefined)
+        .catch(() => { if (!controller.signal.aborted) setCompletionError(true) })
         .finally(() => { if (!controller.signal.aborted) setIsCompleting(false) })
     }, 650)
     return () => { window.clearTimeout(timer); controller.abort() }
@@ -91,9 +93,10 @@ export function MindNode({ id, data, selected }: NodeProps) {
       )}
       {isEditing ? (
         <div className="node-input-shell">
+          <div className="node-input-mirror" aria-hidden="true"><span>{topic}</span>{suggestion && <span className="node-input-mirror__suggestion">{suggestion}</span>}</div>
           <input
             ref={inputRef}
-            className="node-input"
+            className="node-input node-input--ghost"
             value={topic}
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
             onSelect={(event) => setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length && event.currentTarget.selectionEnd === event.currentTarget.value.length)}
@@ -107,7 +110,8 @@ export function MindNode({ id, data, selected }: NodeProps) {
             }}
           />
           {isCompleting && <span className="node-completion-loading" aria-label="AI 正在续写">AI 续写中</span>}
-          {suggestion && <span className="node-ghost-preview" aria-label="AI 续写建议"><strong>{suggestion}</strong><small>Tab 接受 · Esc 忽略</small></span>}
+          {suggestion && <span className="node-completion-hint" aria-label="AI 续写建议">Tab 接受 · Esc 忽略</span>}
+          {completionError && <span className="node-completion-error" role="status">AI 续写暂不可用</span>}
         </div>
       ) : <button className="node-label" title="双击编辑主题" onDoubleClick={() => editNode(id)}>
         {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
