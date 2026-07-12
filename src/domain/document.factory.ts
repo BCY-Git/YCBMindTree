@@ -17,8 +17,12 @@ export function createNode(topic: string, parentId: string | null): MindNode {
   return {
     id: id(),
     parentId,
+    isFreeTopic: false,
     childIds: [],
     topic,
+    note: '',
+    links: [],
+    attachments: [],
     collapsed: false,
     offsetX: 0,
     offsetY: 0,

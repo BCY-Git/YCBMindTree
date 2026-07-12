@@ -15,8 +15,12 @@ import { z } from 'zod'
 export const mindNodeSchema = z.object({
   id: z.string().min(1),
   parentId: z.string().nullable(),
+  isFreeTopic: z.boolean().default(false),
   childIds: z.array(z.string()),
   topic: z.string(),
+  note: z.string().default(''),
+  links: z.array(z.object({ id: z.string().min(1), url: z.string().url(), label: z.string() })).default([]),
+  attachments: z.array(z.object({ id: z.string().min(1), name: z.string().min(1), type: z.string(), size: z.number().nonnegative(), createdAt: z.number() })).default([]),
   collapsed: z.boolean(),
   offsetX: z.number(),
   offsetY: z.number(),

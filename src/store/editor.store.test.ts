@@ -13,6 +13,7 @@ describe('editor history', () => {
       past: [],
       future: [],
       selectedNodeId: document.rootId,
+      selectedNodeIds: [document.rootId],
       editingNodeId: null,
       clipboard: null,
       hydrated: true,
@@ -67,5 +68,18 @@ describe('editor history', () => {
 
     expect(dispatch({ type: 'DELETE_NODE', nodeId: document.rootId })).toBe(false)
     expect(useEditorStore.getState().document).toBe(document)
+  })
+
+  it('adds and removes nodes from a modifier selection without losing the primary node', () => {
+    const { document, selectNode } = useEditorStore.getState()
+    const childId = document.nodes[document.rootId].childIds[0]
+
+    selectNode(childId, true)
+    expect(useEditorStore.getState().selectedNodeIds).toEqual([document.rootId, childId])
+    expect(useEditorStore.getState().selectedNodeId).toBe(childId)
+
+    selectNode(childId, true)
+    expect(useEditorStore.getState().selectedNodeIds).toEqual([document.rootId])
+    expect(useEditorStore.getState().selectedNodeId).toBe(document.rootId)
   })
 })

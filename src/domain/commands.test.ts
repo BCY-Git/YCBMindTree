@@ -14,6 +14,33 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
+  it('automatically clears manual offsets after inserting nodes while retaining one freeform restore snapshot', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    document.nodes[document.rootId].offsetX = 75
+    document.nodes[branchId].offsetY = -32
+
+    const firstInsert = executeCommand(document, { type: 'ADD_CHILD', parentId: branchId }).document
+    const secondInsert = executeCommand(firstInsert, { type: 'ADD_CHILD', parentId: branchId }).document
+
+    expect(Object.values(firstInsert.nodes).every((node) => node.offsetX === 0 && node.offsetY === 0)).toBe(true)
+    expect(firstInsert.layout.freeformOffsets?.[document.rootId]).toEqual({ x: 75, y: 0 })
+    expect(secondInsert.layout.freeformOffsets?.[branchId]).toEqual({ x: 0, y: -32 })
+  })
+
+  it('creates a free topic independently and attaches it to a branch on demand', () => {
+    const document = createInitialDocument()
+    const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 420, y: 260, topic: '临时想法' })
+    const freeId = free.focusNodeId!
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const attached = executeCommand(free.document, { type: 'ATTACH_FREE_TOPIC', nodeId: freeId, parentId }).document
+
+    expect(free.document.nodes[freeId]).toMatchObject({ isFreeTopic: true, parentId: null, offsetX: 420, offsetY: 260 })
+    expect(attached.nodes[freeId]).toMatchObject({ isFreeTopic: false, parentId })
+    expect(attached.nodes[parentId].childIds).toContain(freeId)
+    expect(() => assertValidDocument(attached)).not.toThrow()
+  })
+
   it('deletes an entire branch and returns focus to its parent', () => {
     const document = createInitialDocument()
     const branchId = document.nodes[document.rootId].childIds[0]
@@ -142,6 +169,15 @@ describe('MindTree command executor', () => {
 
     expect(indented.nodes[secondChild].parentId).toBe(firstChild)
     expect(outdented.nodes[branchId].childIds).toEqual([firstChild, secondChild])
+  })
+
+  it('keeps sibling order correct when moving an item downward within the same parent', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const [first, second] = document.nodes[parentId].childIds
+    const moved = executeCommand(document, { type: 'MOVE_NODE', nodeId: first, newParentId: parentId, index: 2 }).document
+
+    expect(moved.nodes[parentId].childIds).toEqual([second, first])
   })
 
   it('copies and pastes a complete branch with fresh node ids', () => {

@@ -15,7 +15,12 @@ import type { MindMapDocument } from './document.types'
 
 export function assertValidDocument(document: MindMapDocument): void {
   const root = document.nodes[document.rootId]
-  if (!root || root.parentId !== null) throw new Error('文档根节点无效')
+  if (!root || root.parentId !== null || root.isFreeTopic) throw new Error('文档根节点无效')
+
+  const freeTopics = Object.values(document.nodes).filter((node) => node.isFreeTopic)
+  for (const topic of freeTopics) {
+    if (topic.parentId !== null || topic.childIds.length) throw new Error('自由主题不能包含父子树关系')
+  }
 
   const seen = new Set<string>()
   // DFS 遍历：从根出发，依次访问每个子节点。
@@ -33,7 +38,7 @@ export function assertValidDocument(document: MindMapDocument): void {
   }
   visit(document.rootId)
   // 确保没有节点游离于遍历之外（即没有孤岛）。
-  if (seen.size !== Object.keys(document.nodes).length) throw new Error('文档存在孤立节点')
+  if (seen.size !== Object.keys(document.nodes).length - freeTopics.length) throw new Error('文档存在孤立节点')
 
   const relationPairs = new Set<string>()
   for (const relation of document.relations) {

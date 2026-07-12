@@ -21,13 +21,33 @@ export type LayoutConfig = {
 export type MindNode = {
   id: string
   parentId: string | null
+  /** 脱离主树、可自由摆放的主题；拖到树枝附近后会重新成为普通节点。 */
+  isFreeTopic: boolean
   childIds: string[]
   topic: string
+  note: string
+  links: MindNodeLink[]
+  attachments: MindNodeAttachment[]
   collapsed: boolean
   offsetX: number
   offsetY: number
   createdAt: number
   updatedAt: number
+}
+
+export type MindNodeLink = {
+  id: string
+  url: string
+  label: string
+}
+
+/** 附件二进制保存在本地 IndexedDB；导图快照仅保存这份轻量元数据。 */
+export type MindNodeAttachment = {
+  id: string
+  name: string
+  type: string
+  size: number
+  createdAt: number
 }
 
 /** 独立于父子树结构的横向关联。sourceId / targetId 用于定位两端节点。 */

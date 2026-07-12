@@ -63,6 +63,28 @@ export function layoutTree(document: MindMapDocument): PositionedNode[] {
     output.push({ id, x: x + node.offsetX, y: y + node.offsetY, width, height })
     if (node.collapsed) return
     const children = node.childIds
+    // 根主题只有一条展开分支时，其余一级叶子并不需要为那条分支的全部后代让位。
+    // 将一级节点按自身卡片高度紧凑排列，既减少大片空白，又不会与其他分支的后代相撞。
+    const expandedBranchCount = id === document.rootId
+      ? children.filter((childId) => {
+        const child = document.nodes[childId]
+        return !child.collapsed && child.childIds.length > 0
+      }).length
+      : 0
+    if (id === document.rootId && expandedBranchCount <= 1) {
+      const directChildrenHeight = children.reduce((sum, childId) => sum + nodeSize(document.nodes[childId], false).height, 0)
+        + Math.max(0, children.length - 1) * document.layout.siblingGap
+      let cardTop = y + height / 2 - directChildrenHeight / 2
+      children.forEach((childId) => {
+        const childHeight = nodeSize(document.nodes[childId], false).height
+        const childSubtreeHeight = heights.get(childId) ?? childHeight
+        // place() 会把节点卡片放在 childTop + (subtreeHeight - ownHeight) / 2，
+        // 因此反推 childTop，保证卡片正好落在紧凑的 cardTop 上。
+        place(childId, x + width + document.layout.levelGap, cardTop - (childSubtreeHeight - childHeight) / 2)
+        cardTop += childHeight + document.layout.siblingGap
+      })
+      return
+    }
     // 计算所有子节点的子树总高度（含间距），用于垂直居中。
     const childrenHeight = children.reduce((sum, childId) => sum + (heights.get(childId) ?? 0), 0)
       + Math.max(0, children.length - 1) * document.layout.siblingGap
@@ -76,5 +98,10 @@ export function layoutTree(document: MindMapDocument): PositionedNode[] {
 
   measure(document.rootId)
   place(document.rootId, 0, 0)
+  // 自由主题不属于根节点 childIds，因此独立追加到画布坐标系，不参与主树间距计算。
+  Object.values(document.nodes).filter((node) => node.isFreeTopic).forEach((node) => {
+    const { width, height } = nodeSize(node, false)
+    output.push({ id: node.id, x: node.offsetX, y: node.offsetY, width, height })
+  })
   return output
 }

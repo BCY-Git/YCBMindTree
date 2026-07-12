@@ -23,6 +23,9 @@ export function parseGeneratedBranch(content: string): MindNodeClipboard {
     if (node.children !== undefined && !Array.isArray(node.children)) throw new Error('AI 返回的子节点格式无效')
     return {
       topic: node.topic.trim().slice(0, maxTopicLength),
+      note: '',
+      links: [],
+      attachments: [],
       collapsed: false,
       children: (node.children ?? []).map((child) => parseNode(child, depth + 1)),
     }

@@ -34,6 +34,7 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu'
 import { CommandPalette } from './CommandPalette'
 import { getTheme } from '../domain/themes'
 import { getTreeEdgeAnchors } from './tree-edge'
+import type { MindNode as DomainMindNode } from '../domain/document.types'
 
 const nodeTypes = { mindNode: MindNode }
 
@@ -56,10 +57,29 @@ function adjacentNodeId(nodeId: string, direction: string) {
   return null
 }
 
+function distanceToSegment(point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y)
+  const ratio = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+  return Math.hypot(point.x - (start.x + ratio * dx), point.y - (start.y + ratio * dy))
+}
+
+type DropIntent = { parentId: string; index: number; kind: 'child' | 'sibling' }
+
+function renderedSize(candidate: Node<MindNodeData>) {
+  return {
+    width: Number(candidate.style?.width ?? candidate.measured?.width ?? 160),
+    height: Number(candidate.style?.minHeight ?? candidate.measured?.height ?? 44),
+  }
+}
+
 export function MindMapCanvas() {
   const document = useEditorStore((state) => state.document)
   const theme = getTheme(document.theme.id)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
+  const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedRelationId = useEditorStore((state) => state.selectedRelationId)
   const editingNodeId = useEditorStore((state) => state.editingNodeId)
   const selectNode = useEditorStore((state) => state.selectNode)
@@ -75,6 +95,8 @@ export function MindMapCanvas() {
   const [contextMenu, setContextMenu] = useState<{ position: ContextMenuPosition; nodeId: string | null; relationId: string | null } | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [relationSourceId, setRelationSourceId] = useState<string | null>(null)
+  const [freeTopicAttachmentParentId, setFreeTopicAttachmentParentId] = useState<string | null>(null)
+  const [dropIntent, setDropIntent] = useState<DropIntent | null>(null)
   const [flowNodes, setFlowNodes] = useState<Node<MindNodeData>[]>([])
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
 
@@ -96,11 +118,13 @@ export function MindMapCanvas() {
         id: item.id,
         type: 'mindNode',
         position: { x: item.x, y: item.y },
-        selected: selectedNodeId === item.id,
+        selected: selectedNodeIds.includes(item.id),
         draggable: true,
         data: {
           label: mindNode.topic,
           isRoot: item.id === document.rootId,
+          isFreeTopic: mindNode.isFreeTopic,
+          isDropTarget: dropIntent?.kind === 'child' && dropIntent.parentId === item.id,
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
@@ -122,8 +146,8 @@ export function MindMapCanvas() {
             targetHandle: anchors?.targetHandle,
             type: 'default',
             style: {
-              stroke: theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch,
-              strokeWidth: 2,
+              stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : (theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch),
+              strokeWidth: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? 3.4 : 2,
               opacity: 1,
             },
           }]
@@ -154,7 +178,7 @@ export function MindMapCanvas() {
       }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(placed.map((item) => [item.id, item])) }
-  }, [document, relationSourceId, selectedNodeId, selectedRelationId, theme])
+  }, [document, dropIntent, freeTopicAttachmentParentId, relationSourceId, selectedNodeIds, selectedRelationId, theme])
 
   useEffect(() => setFlowNodes(baseNodes), [baseNodes])
 
@@ -164,12 +188,12 @@ export function MindMapCanvas() {
     if (rootNode) flowInstance?.fitView({ nodes: [rootNode], padding: 1.5, maxZoom: 1.05, duration: 280 })
   }, [baseNodes, document.rootId, flowInstance, selectNode])
 
-  const onNodeClick: NodeMouseHandler = useCallback((_, node) => {
+  const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     if (relationSourceId) {
       if (node.id !== relationSourceId && dispatch({ type: 'CREATE_RELATION', sourceId: relationSourceId, targetId: node.id })) setRelationSourceId(null)
       return
     }
-    selectNode(node.id)
+    selectNode(node.id, event.metaKey || event.ctrlKey)
   }, [dispatch, relationSourceId, selectNode])
   // ── React Flow 节点拖拽结束：计算相对于自动布局基准位置的偏移量 ──────────────
   const getDragOffset = useCallback((node: Node<MindNodeData>) => {
@@ -177,6 +201,64 @@ export function MindMapCanvas() {
     if (!original) return null
     return { x: node.position.x - original.x, y: node.position.y - original.y }
   }, [basePositionsById])
+  // 自由主题靠近树枝时，取最近树边的 source 节点作为新父节点。
+  const attachmentParentNearBranch = useCallback((dragged: Node<MindNodeData>) => {
+    const width = Number(dragged.style?.width ?? dragged.measured?.width ?? 160)
+    const height = Number(dragged.style?.minHeight ?? dragged.measured?.height ?? 44)
+    const point = { x: dragged.position.x + width / 2, y: dragged.position.y + height / 2 }
+    let closestParentId: string | null = null
+    let closestDistance = Number.POSITIVE_INFINITY
+    Object.values(document.nodes).forEach((child) => {
+      if (!child.parentId || child.isFreeTopic) return
+      const parent = basePositionsById.get(child.parentId)
+      const target = basePositionsById.get(child.id)
+      if (!parent || !target) return
+      const distance = distanceToSegment(point, { x: parent.x + parent.width, y: parent.y + parent.height / 2 }, { x: target.x, y: target.y + target.height / 2 })
+      if (distance <= 64 && distance < closestDistance) {
+        closestParentId = child.parentId
+        closestDistance = distance
+      }
+    })
+    return closestParentId
+  }, [basePositionsById, document.nodes])
+  const dropIntentNearTree = useCallback((dragged: Node<MindNodeData>): DropIntent | null => {
+    const draggedSize = renderedSize(dragged)
+    const point = { x: dragged.position.x + draggedSize.width / 2, y: dragged.position.y + draggedSize.height / 2 }
+    const wouldCreateCycle = (parentId: string) => {
+      let current: DomainMindNode | undefined = document.nodes[parentId]
+      while (current) {
+        if (current.id === dragged.id) return true
+        current = current.parentId ? document.nodes[current.parentId] : undefined
+      }
+      return false
+    }
+    const target = baseNodes.find((candidate) => {
+      if (candidate.id === dragged.id || candidate.data.isFreeTopic || wouldCreateCycle(candidate.id)) return false
+      const size = renderedSize(candidate)
+      return point.x >= candidate.position.x && point.x <= candidate.position.x + size.width
+        && point.y >= candidate.position.y && point.y <= candidate.position.y + size.height
+    })
+    if (target) return { parentId: target.id, index: document.nodes[target.id].childIds.length, kind: 'child' }
+
+    let closestParentId: string | null = null
+    let closestIndex = 0
+    let closestKind: DropIntent['kind'] = 'sibling'
+    let closestDistance = Number.POSITIVE_INFINITY
+    Object.values(document.nodes).forEach((child) => {
+      if (!child.parentId || child.isFreeTopic || wouldCreateCycle(child.parentId)) return
+      const parent = basePositionsById.get(child.parentId)
+      const targetPosition = basePositionsById.get(child.id)
+      if (!parent || !targetPosition) return
+      const distance = distanceToSegment(point, { x: parent.x + parent.width, y: parent.y + parent.height / 2 }, { x: targetPosition.x, y: targetPosition.y + targetPosition.height / 2 })
+      if (distance > 56 || distance >= closestDistance) return
+      const childIndex = document.nodes[child.parentId].childIds.indexOf(child.id)
+      closestParentId = child.parentId
+      closestIndex = childIndex + (point.y > targetPosition.y + targetPosition.height / 2 ? 1 : 0)
+      closestKind = 'sibling'
+      closestDistance = distance
+    })
+    return closestParentId ? { parentId: closestParentId, index: closestIndex, kind: closestKind } : null
+  }, [baseNodes, basePositionsById, document.nodes])
   // onNodesChange：处理 React Flow 内置的位置变化（批量移动、缩放等）。
   // 特殊处理：若根节点位置变化，将该偏移量同步到所有节点，实现"拖根平移全图"效果。
   const onNodesChange: OnNodesChange<Node<MindNodeData>> = useCallback((changes) => {
@@ -196,38 +278,30 @@ export function MindMapCanvas() {
         : { ...node, position: { x: node.position.x + deltaX, y: node.position.y + deltaY } })
     })
   }, [document.rootId])
-  // onNodeDragStop：判断当前拖拽类型，分发对应命令。
-  // - 根节点 → TRANSLATE_DOCUMENT（平移全图）
-  // - Shift+拖拽 → MOVE_NODE（结构调整）
-  // - 普通拖拽 → UPDATE_NODE_OFFSET（自由偏移微调）
+  // onNodeDragStop：拖到节点/树枝附近时调整树结构；没有落点时才保留为自由微调。
   const onNodeDragStop: OnNodeDrag<Node<MindNodeData>> = useCallback((_, node) => {
+    setFreeTopicAttachmentParentId(null)
+    setDropIntent(null)
     const offset = getDragOffset(node)
     if (node.id === document.rootId) {
       if (!offset) return
       dispatch({ type: 'TRANSLATE_DOCUMENT', deltaX: offset.x, deltaY: offset.y })
       return
     }
-    const isStructureDrag = 'shiftKey' in _ && _.shiftKey
-    if (isStructureDrag) {
-      const sizeOf = (candidate: Node<MindNodeData>) => ({
-        width: Number(candidate.style?.width ?? candidate.measured?.width ?? 160),
-        height: Number(candidate.style?.minHeight ?? candidate.measured?.height ?? 44),
-      })
-      const draggedSize = sizeOf(node)
-      const draggedCenter = { x: node.position.x + draggedSize.width / 2, y: node.position.y + draggedSize.height / 2 }
-      const target = flowNodes.find((candidate) => {
-        if (candidate.id === node.id) return false
-        const size = sizeOf(candidate)
-        return draggedCenter.x >= candidate.position.x && draggedCenter.x <= candidate.position.x + size.width
-          && draggedCenter.y >= candidate.position.y && draggedCenter.y <= candidate.position.y + size.height
-      })
-      const moved = target
-        ? dispatch({ type: 'MOVE_NODE', nodeId: node.id, newParentId: target.id, index: document.nodes[target.id].childIds.length })
-        : false
+    const mindNode = document.nodes[node.id]
+    if (mindNode?.isFreeTopic) {
+      const parentId = attachmentParentNearBranch(node)
+      if (parentId) {
+        dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: node.id, parentId })
+        return
+      }
+    }
+    const intent = dropIntentNearTree(node)
+    if (intent) {
+      const moved = dispatch({ type: 'MOVE_NODE', nodeId: node.id, newParentId: intent.parentId, index: intent.index })
       if (!moved) setFlowNodes(baseNodes)
       return
     }
-    const mindNode = document.nodes[node.id]
     if (!offset || !mindNode) return
     const moved = dispatch({
       type: 'UPDATE_NODE_OFFSET',
@@ -236,7 +310,16 @@ export function MindMapCanvas() {
       offsetY: mindNode.offsetY + offset.y,
     })
     if (!moved) setFlowNodes(baseNodes)
-  }, [baseNodes, dispatch, document.nodes, flowNodes, getDragOffset])
+  }, [attachmentParentNearBranch, baseNodes, dispatch, document.nodes, dropIntentNearTree, getDragOffset])
+  const onNodeDrag: OnNodeDrag<Node<MindNodeData>> = useCallback((_, node) => {
+    if (document.nodes[node.id]?.isFreeTopic) {
+      const next = attachmentParentNearBranch(node)
+      setFreeTopicAttachmentParentId((current) => current === next ? current : next)
+      return
+    }
+    const next = dropIntentNearTree(node)
+    setDropIntent((current) => current?.parentId === next?.parentId && current?.index === next?.index && current?.kind === next?.kind ? current : next)
+  }, [attachmentParentNearBranch, document.nodes, dropIntentNearTree])
   // ── 右键菜单：画布空白处打开画布菜单，节点上打开节点菜单 ───────────────────────
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
   const openContextMenu = useCallback((event: MouseEvent, nodeId: string | null) => {
@@ -269,7 +352,6 @@ export function MindMapCanvas() {
       if (meta && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteIntoNode(selected); return }
       if (event.key === 'Enter') { event.preventDefault(); dispatch({ type: 'ADD_SIBLING', nodeId: selected }); return }
       if (event.key === 'Tab' && event.shiftKey) { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
-      if (event.key === 'Tab') { event.preventDefault(); dispatch({ type: 'ADD_CHILD', parentId: selected }); return }
       if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'INDENT_NODE', nodeId: selected }); return }
       if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
       if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
@@ -285,7 +367,21 @@ export function MindMapCanvas() {
         }
         return
       }
-      if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); dispatch({ type: 'DELETE_NODE', nodeId: selected }); return }
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        event.preventDefault()
+        const selectedIds = editor.selectedNodeIds.filter((id) => id !== editor.document.rootId)
+        const selectedSet = new Set(selectedIds)
+        const topLevelIds = selectedIds.filter((id) => {
+          let current = editor.document.nodes[id]
+          while (current?.parentId) {
+            if (selectedSet.has(current.parentId)) return false
+            current = editor.document.nodes[current.parentId]
+          }
+          return true
+        })
+        if (topLevelIds.length) topLevelIds.forEach((id) => dispatch({ type: 'DELETE_NODE', nodeId: id }))
+        return
+      }
       if (event.key === ' ') { event.preventDefault(); dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: selected }); return }
       if (event.key.startsWith('Arrow')) {
         event.preventDefault()
@@ -309,7 +405,12 @@ export function MindMapCanvas() {
       '--root-bg': theme.rootBackground,
       '--root-text': theme.rootText,
       '--selected': theme.selected,
-    } as CSSProperties}>
+    } as CSSProperties} onDoubleClickCapture={(event) => {
+      const target = event.target as HTMLElement
+      if (relationSourceId || !flowInstance || target.closest('.react-flow__node, .react-flow__controls')) return
+      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      dispatch({ type: 'ADD_FREE_TOPIC', x: position.x, y: position.y })
+    }}>
       <ReactFlow
         nodes={flowNodes}
         edges={edges}
@@ -318,6 +419,7 @@ export function MindMapCanvas() {
         onInit={setFlowInstance}
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
+        onNodeDrag={onNodeDrag}
         onNodeDoubleClick={(_, node) => editNode(node.id)}
         onNodeContextMenu={(event, node) => openContextMenu(event.nativeEvent, node.id)}
         onPaneContextMenu={(event) => openContextMenu('nativeEvent' in event ? event.nativeEvent : event, null)}
@@ -329,6 +431,8 @@ export function MindMapCanvas() {
         }}
         onPaneClick={() => { setRelationSourceId(null); selectNode(null); closeContextMenu() }}
         fitView
+        // 新节点创建后会自动进入输入态；关闭焦点自动平移，避免每次新增节点都打断用户当前视角。
+        autoPanOnNodeFocus={false}
         minZoom={0.25}
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
@@ -337,6 +441,8 @@ export function MindMapCanvas() {
         <Controls showInteractive={false}><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
       </ReactFlow>
       {relationSourceId && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>请选择另一个节点作为目标 · Esc 取消</span></div>}
+      {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
+      {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : '松开即可插入高亮分支'}</div>}
       {contextMenu && (() => {
         const contextNode = contextMenu.nodeId ? document.nodes[contextMenu.nodeId] : null
         const contextRelation = contextMenu.relationId ? document.relations.find((relation) => relation.id === contextMenu.relationId) ?? null : null
@@ -380,7 +486,7 @@ export function MindMapCanvas() {
           <CommandPalette
             onClose={() => setCommandPaletteOpen(false)}
             actions={[
-              { label: '新建子节点', detail: '在当前节点下继续展开想法', shortcut: 'Tab', run: () => dispatch({ type: 'ADD_CHILD', parentId: selectedId }) },
+              { label: '新建子节点', detail: '在当前节点下继续展开想法', shortcut: '工具栏', run: () => dispatch({ type: 'ADD_CHILD', parentId: selectedId }) },
               { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
               { label: '创建关系', detail: '选择另一个节点建立横向关联', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceId(selectedId) } },

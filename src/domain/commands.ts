@@ -14,7 +14,7 @@
  */
 import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapDocument, MindMapRelation } from './document.types'
+import type { LayoutConfig, MindMapDocument, MindMapRelation, MindNodeAttachment } from './document.types'
 import type { ThemeId } from './themes'
 
 /**
@@ -24,7 +24,14 @@ import type { ThemeId } from './themes'
 export type MindMapCommand =
   | { type: 'ADD_CHILD'; parentId: string; topic?: string }
   | { type: 'ADD_SIBLING'; nodeId: string; topic?: string }
+  | { type: 'ADD_FREE_TOPIC'; x: number; y: number; topic?: string }
+  | { type: 'ATTACH_FREE_TOPIC'; nodeId: string; parentId: string }
   | { type: 'UPDATE_NODE_TOPIC'; nodeId: string; topic: string }
+  | { type: 'UPDATE_NODE_NOTE'; nodeId: string; note: string }
+  | { type: 'ADD_NODE_LINK'; nodeId: string; url: string; label?: string }
+  | { type: 'DELETE_NODE_LINK'; nodeId: string; linkId: string }
+  | { type: 'ADD_NODE_ATTACHMENT'; nodeId: string; attachment: MindNodeAttachment }
+  | { type: 'DELETE_NODE_ATTACHMENT'; nodeId: string; attachmentId: string }
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
@@ -57,6 +64,9 @@ export type CommandResult = { document: MindMapDocument; focusNodeId?: string; f
  */
 export type MindNodeClipboard = {
   topic: string
+  note: string
+  links: Array<{ url: string; label: string }>
+  attachments: MindNodeAttachment[]
   collapsed: boolean
   children: MindNodeClipboard[]
 }
@@ -69,6 +79,19 @@ function copy(document: MindMapDocument): MindMapDocument {
 // 每次状态变更后更新时间戳，供 persistence 层判断"最近修改"文档。
 function touch(document: MindMapDocument) {
   document.updatedAt = Date.now()
+}
+
+/**
+ * 新增结构后回归树形布局。若此前存在自由拖拽，则只在第一次自动布局时保留快照，
+ * 连续创建节点不会把最初的自由排布历史覆盖成一堆零偏移。
+ */
+function arrangeAfterInsert(document: MindMapDocument) {
+  if (!document.layout.freeformOffsets) {
+    document.layout.freeformOffsets = Object.fromEntries(
+      Object.values(document.nodes).map((node) => [node.id, { x: node.offsetX, y: node.offsetY }]),
+    )
+  }
+  Object.values(document.nodes).filter((node) => !node.isFreeTopic).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
 }
 
 // 递归删除子树：从叶子节点向上逐层删除，确保不遗漏。
@@ -105,8 +128,11 @@ function moveNode(document: MindMapDocument, nodeId: string, newParentId: string
   if (isDescendant(document, nodeId, newParentId)) throw new Error('节点不能移动到自身子树中')
 
   const previousParent = document.nodes[node.parentId]
+  const previousIndex = previousParent.childIds.indexOf(nodeId)
   previousParent.childIds = previousParent.childIds.filter((id) => id !== nodeId)
-  const targetIndex = Math.max(0, Math.min(index, newParent.childIds.length))
+  // 同一父节点内向下移动时，移除自身会让目标索引左移一格。
+  const adjustedIndex = previousParent.id === newParent.id && previousIndex >= 0 && previousIndex < index ? index - 1 : index
+  const targetIndex = Math.max(0, Math.min(adjustedIndex, newParent.childIds.length))
   newParent.childIds.splice(targetIndex, 0, nodeId)
   node.parentId = newParentId
   node.offsetX = 0
@@ -123,6 +149,9 @@ export function createNodeClipboard(document: MindMapDocument, nodeId: string): 
   if (!node) throw new Error('节点不存在')
   return {
     topic: node.topic,
+    note: node.note,
+    links: node.links.map(({ url, label }) => ({ url, label })),
+    attachments: structuredClone(node.attachments),
     collapsed: node.collapsed,
     children: node.childIds.map((childId) => createNodeClipboard(document, childId)),
   }
@@ -134,6 +163,9 @@ function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: Mi
   if (!parent) throw new Error('父节点不存在')
   const node = createNode(clipboard.topic, parentId)
   node.collapsed = clipboard.collapsed
+  node.note = clipboard.note
+  node.links = clipboard.links.map((link) => ({ ...link, id: crypto.randomUUID() }))
+  node.attachments = structuredClone(clipboard.attachments)
   document.nodes[node.id] = node
   node.childIds = clipboard.children.map((child) => pasteSubtree(document, node.id, child))
   return node.id
@@ -154,6 +186,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       // 新增子节点时自动展开父节点，让子节点立即可见。
       parent.collapsed = false
       document.nodes[child.id] = child
+      arrangeAfterInsert(document)
       focusNodeId = child.id
       break
     }
@@ -166,7 +199,29 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const index = parent.childIds.indexOf(node.id)
       parent.childIds.splice(index + 1, 0, sibling.id)
       document.nodes[sibling.id] = sibling
+      arrangeAfterInsert(document)
       focusNodeId = sibling.id
+      break
+    }
+    case 'ADD_FREE_TOPIC': {
+      const topic = createNode(command.topic ?? '自由主题', null)
+      topic.isFreeTopic = true
+      topic.offsetX = Math.round(command.x)
+      topic.offsetY = Math.round(command.y)
+      document.nodes[topic.id] = topic
+      focusNodeId = topic.id
+      break
+    }
+    case 'ATTACH_FREE_TOPIC': {
+      const topic = document.nodes[command.nodeId]
+      const parent = document.nodes[command.parentId]
+      if (!topic?.isFreeTopic || !parent || parent.isFreeTopic) throw new Error('无法吸附自由主题')
+      topic.isFreeTopic = false
+      topic.parentId = parent.id
+      parent.childIds.push(topic.id)
+      parent.collapsed = false
+      arrangeAfterInsert(document)
+      focusNodeId = topic.id
       break
     }
     case 'UPDATE_NODE_TOPIC': {
@@ -176,15 +231,55 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       node.updatedAt = Date.now()
       break
     }
+    case 'UPDATE_NODE_NOTE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.note = command.note
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'ADD_NODE_LINK': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      let url: URL
+      try { url = new URL(command.url.trim()) } catch { throw new Error('请输入有效的链接地址') }
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('链接仅支持 HTTP 或 HTTPS 地址')
+      if (node.links.some((link) => link.url === url.toString())) throw new Error('该链接已添加')
+      node.links.push({ id: crypto.randomUUID(), url: url.toString(), label: command.label?.trim() || url.hostname })
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'DELETE_NODE_LINK': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.links = node.links.filter((link) => link.id !== command.linkId)
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'ADD_NODE_ATTACHMENT': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      if (node.attachments.some((attachment) => attachment.id === command.attachment.id)) throw new Error('附件已添加')
+      node.attachments.push(command.attachment)
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'DELETE_NODE_ATTACHMENT': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.attachments = node.attachments.filter((attachment) => attachment.id !== command.attachmentId)
+      node.updatedAt = Date.now()
+      break
+    }
     case 'DELETE_NODE': {
       const node = document.nodes[command.nodeId]
       if (!node) throw new Error('节点不存在')
-      if (!node.parentId) throw new Error('根节点不能删除')
-      const parent = document.nodes[node.parentId]
-      parent.childIds = parent.childIds.filter((id) => id !== node.id)
+      if (!node.parentId && !node.isFreeTopic) throw new Error('根节点不能删除')
+      const parent = node.parentId ? document.nodes[node.parentId] : null
+      if (parent) parent.childIds = parent.childIds.filter((id) => id !== node.id)
       // 递归删除整个子树，删除后焦点回到被删节点的父节点。
       removeSubtree(document, node.id)
-      focusNodeId = parent.id
+      focusNodeId = parent?.id ?? document.rootId
       break
     }
     case 'CREATE_RELATION': {
@@ -268,7 +363,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     }
     // 清除所有节点的偏移量，回到纯自动布局状态。
     case 'RESET_LAYOUT':
-      Object.values(document.nodes).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
+      Object.values(document.nodes).filter((node) => !node.isFreeTopic).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
       break
 
     // ── 自动排列 ↔ 自由排布恢复 ────────────────────────────────
@@ -277,7 +372,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       document.layout.freeformOffsets = Object.fromEntries(
         Object.values(document.nodes).map((node) => [node.id, { x: node.offsetX, y: node.offsetY }]),
       )
-      Object.values(document.nodes).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
+      Object.values(document.nodes).filter((node) => !node.isFreeTopic).forEach((node) => { node.offsetX = 0; node.offsetY = 0 })
       break
     // 从之前保存的快照恢复自由排布偏移。
     case 'RESTORE_FREEFORM_LAYOUT': {
@@ -288,6 +383,8 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
         node.offsetX = offset?.x ?? 0
         node.offsetY = offset?.y ?? 0
       })
+      // 已恢复后清空快照；下一次自动排列会重新记录最新的自由排布。
+      document.layout.freeformOffsets = null
       break
     }
 
@@ -327,6 +424,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const rootId = pasteSubtree(document, parent.id, command.clipboard)
       parent.childIds.push(rootId)
       parent.collapsed = false
+      arrangeAfterInsert(document)
       focusNodeId = rootId
       break
     }

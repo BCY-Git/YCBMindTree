@@ -13,6 +13,8 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // 禁止代理到本地地址和私有 IP 段，防止 AI Key 被用于攻击内网服务。
 const blockedHosts = new Set(['localhost', '0.0.0.0', '::1', 'metadata.google.internal'])
@@ -46,18 +48,38 @@ function readBody(request: any): Promise<string> {
   })
 }
 
+/**
+ * 支持标准 DEEPSEEK_API_KEY=…，也兼容本项目已有的「.env 仅一行 sk-…」写法。
+ * 该值只留在 Vite 的 Node 进程中，绝不通过 VITE_ 前缀或接口下发给浏览器。
+ */
+function loadLocalAiKey() {
+  try {
+    const envFile = readFileSync(resolve(process.cwd(), '.env'), 'utf8')
+    const named = envFile.match(/^\s*(?:DEEPSEEK_API_KEY|MINDTREE_AI_API_KEY)\s*=\s*([^\r\n#]+)\s*$/m)?.[1]?.trim()
+    if (named) return named.replace(/^['"]|['"]$/g, '')
+    const legacyNamed = envFile.match(/^\s*deepseek(?:[_-]?api)?key\s*:\s*(sk-[A-Za-z0-9_-]+)\s*$/im)?.[1]
+    if (legacyNamed) return legacyNamed
+    return envFile.split(/\r?\n/).map((line) => line.trim()).find((line) => /^sk-[A-Za-z0-9_-]+$/.test(line)) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 // Vite 开发服务器中间件插件：拦截 AI 代理请求，转发到真实服务。
 // 关键安全措施：断言 endpoint 为公开 HTTPS URL，防止密钥被滥用。
 const aiDevProxy: Plugin = {
   name: 'mindtree-ai-dev-proxy',
   configureServer(server) {
+    const localAiKey = loadLocalAiKey()
     server.middlewares.use('/api/ai/chat', async (request: any, response: any, next: any) => {
       if (request.method !== 'POST') return next()
       try {
         const body = JSON.parse(await readBody(request)) as { endpoint?: unknown; request?: unknown }
         const endpoint = assertPublicHttpsEndpoint(body.endpoint)
-        const authorization = request.headers.authorization
-        if (!authorization?.startsWith('Bearer ')) throw new Error('缺少 API Key')
+        const suppliedKey = typeof request.headers.authorization === 'string' && request.headers.authorization.startsWith('Bearer ')
+          ? request.headers.authorization.slice('Bearer '.length).trim() : ''
+        const authorization = suppliedKey ? `Bearer ${suppliedKey}` : (localAiKey ? `Bearer ${localAiKey}` : '')
+        if (!authorization) throw new Error('缺少 API Key：请填写 AI 设置或在项目 .env 配置 DEEPSEEK_API_KEY')
         if (!body.request || typeof body.request !== 'object') throw new Error('请求内容无效')
 
         const fetchUpstream = (globalThis as unknown as { fetch: (input: string, init: Record<string, unknown>) => Promise<{ status: number; headers: { get: (name: string) => string | null }; text: () => Promise<string> }> }).fetch

@@ -17,12 +17,7 @@ import type { MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
 import { useEditorStore } from '../store/editor.store'
-
-type AiSettings = {
-  endpoint: string
-  model: string
-  apiKey: string
-}
+import { chatUrl, defaultAiSettings, isGhostCompletionEnabled, loadAiSettings, saveAiSettings, saveGhostCompletionEnabled, type AiSettings } from './ai-settings'
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>
@@ -30,30 +25,6 @@ type ChatResponse = {
 }
 
 // localStorage 的 key，用于持久化 AI 连接配置（端点、模型、Key）。
-const storageKey = 'mindtree.ai-settings.v1'
-const emptySettings: AiSettings = { endpoint: '', model: '', apiKey: '' }
-
-// 从 localStorage 加载配置，做类型守卫防止脏数据导致页面崩溃。
-function loadSettings(): AiSettings {
-  try {
-    const value = localStorage.getItem(storageKey)
-    if (!value) return emptySettings
-    const parsed = JSON.parse(value) as Partial<AiSettings>
-    return {
-      endpoint: typeof parsed.endpoint === 'string' ? parsed.endpoint : '',
-      model: typeof parsed.model === 'string' ? parsed.model : '',
-      apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
-    }
-  } catch {
-    return emptySettings
-  }
-}
-
-// 规范 API 路径：用户只需填根地址，自动补全 /chat/completions 后缀。
-function chatUrl(endpoint: string) {
-  const base = endpoint.trim().replace(/\/$/, '')
-  return base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
-}
 
 // 将导图结构序列化为精简 JSON，供 AI 模型理解当前导图。
 // 仅传递结构信息（id、父子关系、主题、折叠态），不包含偏移量等运行时数据。
@@ -73,25 +44,32 @@ function BranchPreview({ branch, depth = 0 }: { branch: MindNodeClipboard; depth
 
 export function AiAssistant({ document, targetNodeId }: { document: MindMapDocument; targetNodeId: string }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
-  const [settings, setSettings] = useState<AiSettings>(emptySettings)
+  const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
   const [settingsOpen, setSettingsOpen] = useState(true)
   const [prompt, setPrompt] = useState('')
   const [response, setResponse] = useState('')
   const [notice, setNotice] = useState('配置后即可让 AI 基于当前导图协助思考。')
   const [isSending, setIsSending] = useState(false)
   const [generatedBranch, setGeneratedBranch] = useState<GeneratedBranch | null>(null)
+  const [ghostCompletionEnabled, setGhostCompletionEnabled] = useState(false)
 
-  useEffect(() => setSettings(loadSettings()), [])
+  useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
 
-  const isConfigured = Boolean(settings.endpoint.trim() && settings.model.trim() && settings.apiKey.trim())
+  // 本地开发时可由 Vite 代理读取项目 .env 中的密钥；生产环境仍需用户自行配置 Key。
+  const isConfigured = Boolean(settings.endpoint.trim() && settings.model.trim() && (settings.apiKey.trim() || import.meta.env.DEV))
   const update = (field: keyof AiSettings, value: string) => setSettings((current) => ({ ...current, [field]: value }))
   const saveSettings = () => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify(settings))
+      saveAiSettings(settings)
       setNotice(isConfigured ? '连接配置已仅保存到当前浏览器。' : '请填写服务地址、模型名和 API Key。')
     } catch {
       setNotice('当前浏览器无法保存配置，请检查本地存储权限。')
     }
+  }
+
+  const toggleGhostCompletion = (enabled: boolean) => {
+    setGhostCompletionEnabled(enabled)
+    saveGhostCompletionEnabled(enabled)
   }
 
   const requestAssistant = async (intent: 'chat' | 'branch') => {
@@ -172,7 +150,8 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
           <label>模型名称<input value={settings.model} onChange={(event) => update('model', event.target.value)} placeholder="例如 gpt-4o-mini" /></label>
           <label>API Key<input type="password" value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="仅保存于此浏览器" autoComplete="off" /></label>
           <button className="ai-save-button" type="button" onClick={saveSettings}>保存连接配置</button>
-          <p className="ai-assistant__privacy">兼容 OpenAI Chat Completions；本地开发会先经本机代理转发，只有发送问题时才会请求该服务。</p>
+          <label className="ai-ghost-toggle"><input type="checkbox" checked={ghostCompletionEnabled} onChange={(event) => toggleGhostCompletion(event.target.checked)} />启用备注幽灵续写（DeepSeek Beta）</label>
+          <p className="ai-assistant__privacy">兼容 OpenAI Chat Completions；本地开发会优先使用项目 .env 中的 Key，普通对话与启用后的幽灵续写都会经本机代理转发。</p>
         </div>
       )}
 

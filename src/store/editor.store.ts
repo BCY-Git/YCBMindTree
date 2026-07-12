@@ -23,6 +23,7 @@ type EditorState = {
   past: MindMapDocument[]   // undo 栈
   future: MindMapDocument[] // redo 栈
   selectedNodeId: string | null
+  selectedNodeIds: string[]
   selectedRelationId: string | null
   editingNodeId: string | null
   clipboard: MindNodeClipboard | null
@@ -31,7 +32,7 @@ type EditorState = {
   dispatch: (command: MindMapCommand) => boolean
   undo: () => void
   redo: () => void
-  selectNode: (id: string | null) => void
+  selectNode: (id: string | null, additive?: boolean) => void
   selectRelation: (id: string | null) => void
   editNode: (id: string | null) => void
   hydrate: (document: MindMapDocument) => void
@@ -47,6 +48,7 @@ const initialDocument = createInitialDocument()
 function historyMergeKey(command: MindMapCommand): string | null {
   switch (command.type) {
     case 'UPDATE_NODE_TOPIC': return `topic:${command.nodeId}`
+    case 'UPDATE_NODE_NOTE': return `note:${command.nodeId}`
     case 'UPDATE_RELATION_LABEL': return `relation:${command.relationId}`
     case 'RENAME_DOCUMENT': return 'document-title'
     case 'UPDATE_LAYOUT': return `layout:${Object.keys(command.layout).sort().join(',')}`
@@ -61,6 +63,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   selectedNodeId: initialDocument.rootId,
+  selectedNodeIds: [initialDocument.rootId],
   selectedRelationId: null,
   editingNodeId: null,
   clipboard: null,
@@ -81,6 +84,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         past: shouldMerge ? state.past : [...state.past.slice(-49), state.document],
         future: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds.filter((id) => Boolean(result.document.nodes[id])),
         selectedRelationId: result.focusRelationId ?? (state.selectedRelationId && result.document.relations.some((relation) => relation.id === state.selectedRelationId) ? state.selectedRelationId : null),
         editingNodeId: result.focusNodeId ?? null,
         lastHistoryMerge: mergeKey ? { key: mergeKey, at: Date.now() } : null,
@@ -105,10 +109,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!next) return
     set({ document: next, past: [...state.past, state.document], future: state.future.slice(1), lastHistoryMerge: null })
   },
-  selectNode: (id) => set({ selectedNodeId: id, selectedRelationId: null }),
-  selectRelation: (id) => set({ selectedRelationId: id, selectedNodeId: null, editingNodeId: null }),
+  selectNode: (id, additive = false) => set((state) => {
+    if (!id) return { selectedNodeId: null, selectedNodeIds: [], selectedRelationId: null }
+    if (!additive) return { selectedNodeId: id, selectedNodeIds: [id], selectedRelationId: null }
+    const selectedNodeIds = state.selectedNodeIds.includes(id)
+      ? state.selectedNodeIds.filter((current) => current !== id)
+      : [...state.selectedNodeIds, id]
+    return { selectedNodeId: selectedNodeIds.includes(id) ? id : (selectedNodeIds.at(-1) ?? null), selectedNodeIds, selectedRelationId: null }
+  }),
+  selectRelation: (id) => set({ selectedRelationId: id, selectedNodeId: null, selectedNodeIds: [], editingNodeId: null }),
   // editNode：进入编辑态，同时选中该节点；传 null 则退出编辑态。
-  editNode: (id) => set({ editingNodeId: id, selectedNodeId: id, selectedRelationId: null }),
+  editNode: (id) => set({ editingNodeId: id, selectedNodeId: id, selectedNodeIds: id ? [id] : [], selectedRelationId: null }),
   // copyNode：将节点及子树序列化为剪贴板，不修改文档。
   copyNode: (nodeId) => {
     const state = get()
@@ -126,6 +137,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         past: [...state.past.slice(-49), state.document],
         future: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds,
         selectedRelationId: null,
         editingNodeId: null,
         lastHistoryMerge: null,
@@ -142,6 +154,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         past: [...state.past.slice(-49), state.document],
         future: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds,
         selectedRelationId: null,
         editingNodeId: null,
         lastHistoryMerge: null,
@@ -157,6 +170,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         past: [...state.past.slice(-49), state.document],
         future: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
+        selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds,
         selectedRelationId: null,
         editingNodeId: null,
         lastHistoryMerge: null,
@@ -174,6 +188,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: [],
       future: [],
       selectedNodeId: document.rootId,
+      selectedNodeIds: [document.rootId],
       selectedRelationId: null,
       editingNodeId: document.rootId,
       clipboard: null,
@@ -186,6 +201,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     past: [],
     future: [],
     selectedNodeId: document.rootId,
+    selectedNodeIds: [document.rootId],
     selectedRelationId: null,
     editingNodeId: null,
     clipboard: null,
