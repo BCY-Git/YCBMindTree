@@ -3,6 +3,14 @@ export function isTauriRuntime() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+/** Tauri 插件有时会抛出字符串或序列化对象，保留实际错误便于用户处理配置问题。 */
+export function platformErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (typeof error === 'string' && error.trim()) return error
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' && error.message.trim()) return error.message
+  return fallback
+}
+
 export async function platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (isTauriRuntime()) {
     // 原生 HTTP 客户端不受 WebView CORS 限制，但仍只由受控业务代码调用。

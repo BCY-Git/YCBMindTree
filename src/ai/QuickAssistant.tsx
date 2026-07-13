@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { MindMapDocument } from '../domain/document.types'
 import { chatUrl, loadAiSettings } from './ai-settings'
-import { requestAiChat } from '../platform/tauri'
+import { platformErrorMessage, requestAiChat } from '../platform/tauri'
 
 type QuickMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
 type ChatResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
@@ -80,7 +80,7 @@ export function QuickAssistant({ document }: { document: MindMapDocument }) {
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: answer, createdAt: Date.now() }].slice(-40))
       setNotice('已记录到本机对话历史。')
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '暂时无法连接助手。')
+      setNotice(platformErrorMessage(error, '暂时无法连接助手。'))
     } finally {
       setSending(false)
     }

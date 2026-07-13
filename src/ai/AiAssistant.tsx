@@ -18,7 +18,7 @@ import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
 import { parseMapReorganization, type MapReorganization } from './map-reorganization'
 import { useEditorStore } from '../store/editor.store'
-import { requestAiChat } from '../platform/tauri'
+import { platformErrorMessage, requestAiChat } from '../platform/tauri'
 import { chatUrl, defaultAiSettings, isGhostCompletionEnabled, loadAiSettings, saveAiSettings, saveGhostCompletionEnabled, type AiSettings } from './ai-settings'
 
 type ChatResponse = {
@@ -138,7 +138,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
         setNotice('已收到模型回复。')
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '连接失败，请检查服务地址、模型名、Key 或跨域设置。')
+      setNotice(platformErrorMessage(error, '连接失败，请检查服务地址、模型名、Key 或跨域设置。'))
     } finally {
       setIsSending(false)
     }
