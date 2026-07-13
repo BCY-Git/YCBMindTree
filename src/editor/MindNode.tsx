@@ -45,6 +45,9 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const [completionError, setCompletionError] = useState(false)
   const [cursorAtEnd, setCursorAtEnd] = useState(true)
   const [composing, setComposing] = useState(false)
+  const composingRef = useRef(false)
+  const skipNextEnterRef = useRef(false)
+  const compositionTimerRef = useRef<number | null>(null)
   const [isHovering, setIsHovering] = useState(false)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const reportedHeightRef = useRef<number | null>(null)
@@ -105,8 +108,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   }, [composing, cursorAtEnd, document, id, isEditing, topic])
 
   // 提交编辑：仅当内容实际变化时才派发 UPDATE_NODE_TOPIC 命令，然后退出编辑态。
-  const commit = () => {
-    if (topic !== node.label) dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: id, topic })
+  const commit = (nextTopic = inputRef.current?.value ?? topic) => {
+    if (nextTopic !== node.label) dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: id, topic: nextTopic })
     editNode(null)
   }
   const acceptSuggestion = () => {
@@ -125,6 +128,11 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     event.preventDefault()
     event.stopPropagation()
     editNode(id)
+  }
+  const keepEditingGesture = (event: React.SyntheticEvent) => {
+    // React Flow 会把节点上的普通指针手势解释为拖拽；编辑态必须把它留给 textarea，
+    // 否则文字选择会变成拖图，且指针落下时可能触发 blur 导致中文输入被提前提交。
+    event.stopPropagation()
   }
 
   return (
@@ -161,21 +169,39 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {suggestion && <div ref={mirrorRef} className="node-input-mirror" aria-hidden="true"><span>{topic}</span><span className="node-input-mirror__suggestion">{suggestion}</span></div>}
           <textarea
             ref={inputRef}
-            className={`node-input ${suggestion ? 'node-input--ghost' : ''}`}
+            className={`node-input nodrag nowheel ${suggestion ? 'node-input--ghost' : ''}`}
             value={topic}
             rows={1}
             style={{ height: `${editorHeight ?? editorLineCount * 19}px` }}
+            onPointerDown={keepEditingGesture}
+            onMouseDown={keepEditingGesture}
+            onDoubleClick={keepEditingGesture}
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
             onSelect={(event) => setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length && event.currentTarget.selectionEnd === event.currentTarget.value.length)}
-            onCompositionStart={() => setComposing(true)}
-            onCompositionEnd={(event) => { setComposing(false); setTopic(event.currentTarget.value); setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length) }}
-            onBlur={commit}
+            onCompositionStart={() => { composingRef.current = true; setComposing(true) }}
+            onCompositionEnd={(event) => {
+              composingRef.current = false
+              // WebKit 在输入法确认时可能先发 compositionend 再发 Enter keydown。
+              // 短暂屏蔽这一个 Enter，防止候选字刚写入就提交并创建同级节点。
+              skipNextEnterRef.current = true
+              if (compositionTimerRef.current !== null) window.clearTimeout(compositionTimerRef.current)
+              compositionTimerRef.current = window.setTimeout(() => { skipNextEnterRef.current = false; compositionTimerRef.current = null }, 0)
+              setComposing(false)
+              setTopic(event.currentTarget.value)
+              setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length)
+            }}
+            onBlur={() => commit()}
             onKeyDown={(event) => {
               // 中文、日文等输入法会用 Enter 确认候选字；组合期间不能提交节点或新建同级节点。
-              if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
-              if (event.key === 'Escape') { setSuggestion(''); setTopic(node.label); editNode(null) }
-              if (event.key === 'Tab') { event.preventDefault(); if (!acceptSuggestion()) commit() }
-              if (event.key === 'Enter') { event.preventDefault(); commit(); dispatch({ type: 'ADD_SIBLING', nodeId: id }) }
+              if (event.nativeEvent.isComposing || composingRef.current || event.nativeEvent.keyCode === 229) return
+              if (event.key === 'Escape') { event.preventDefault(); setSuggestion(''); setTopic(node.label); editNode(null); return }
+              if (event.key === 'Tab') { event.preventDefault(); if (!acceptSuggestion()) commit(event.currentTarget.value); return }
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                if (skipNextEnterRef.current) return
+                commit(event.currentTarget.value)
+                dispatch({ type: 'ADD_SIBLING', nodeId: id })
+              }
             }}
           />
           {isCompleting && <span className="sr-only" role="status">AI 正在续写</span>}
