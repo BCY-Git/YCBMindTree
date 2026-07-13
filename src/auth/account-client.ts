@@ -1,4 +1,5 @@
 import { apiBaseUrl, type SyncConfig } from '../sync/sync-client'
+import { platformFetch } from '../platform/tauri'
 
 export type Account = { id: string; email: string; createdAt: number }
 export type AuthSession = { user: Account; token: string }
@@ -22,7 +23,7 @@ export function clearAccountSession() {
 }
 
 async function authRequest(config: Pick<SyncConfig, 'serverUrl'>, action: 'login' | 'register', email: string, password: string): Promise<AuthSession> {
-  const response = await fetch(`${apiBaseUrl(config.serverUrl)}/auth/${action}`, {
+  const response = await platformFetch(`${apiBaseUrl(config.serverUrl)}/auth/${action}`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }),
   })
   const body = await response.json().catch(() => null) as { user?: Account; token?: string; error?: { message?: string } } | null
@@ -34,5 +35,5 @@ export const loginAccount = (config: Pick<SyncConfig, 'serverUrl'>, email: strin
 export const registerAccount = (config: Pick<SyncConfig, 'serverUrl'>, email: string, password: string) => authRequest(config, 'register', email, password)
 
 export async function revokeAccountSession(config: Pick<SyncConfig, 'serverUrl'>, token: string) {
-  await fetch(`${apiBaseUrl(config.serverUrl)}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+  await platformFetch(`${apiBaseUrl(config.serverUrl)}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
 }

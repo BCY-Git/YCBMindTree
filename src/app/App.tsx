@@ -268,7 +268,7 @@ export function App() {
     try {
       await flushCurrentDocument()
       const result = await localFileSave
-      setLocalSaveStatus(result === 'picker' ? '已保存到所选本机位置，并写入本地数据库。' : '已写入本地数据库，浏览器已开始下载导图文件。')
+      setLocalSaveStatus(result === 'download' ? '已写入本地数据库，浏览器已开始下载导图文件。' : '已保存到所选本机位置，并写入本地数据库。')
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         setLocalSaveStatus('已取消本机文件保存；本地数据库仍已保存。')

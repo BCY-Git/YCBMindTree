@@ -1,6 +1,7 @@
 import { mindMapDocumentSchema } from '../domain/document.schema'
 import { assertValidDocument } from '../domain/document.validator'
 import type { MindMapDocument } from '../domain/document.types'
+import { platformFetch } from '../platform/tauri'
 
 const configStorageKey = 'mindtree.sync-config.v1'
 
@@ -70,7 +71,7 @@ export function apiBaseUrl(serverUrl: string): string {
 
 async function request(config: SyncConfig, path: string, init: RequestInit): Promise<Response> {
   if (!config.token.trim()) throw new Error('请填写同步 Token')
-  return fetch(`${apiBaseUrl(config.serverUrl)}${path}`, {
+  return platformFetch(`${apiBaseUrl(config.serverUrl)}${path}`, {
     ...init,
     headers: { authorization: `Bearer ${config.token.trim()}`, 'content-type': 'application/json', ...init.headers },
   })
@@ -109,7 +110,7 @@ export async function createPairingInvite(config: SyncConfig): Promise<PairingIn
 }
 
 export async function redeemPairingInvite(invite: PairingInvite): Promise<string> {
-  const response = await fetch(`${apiBaseUrl(invite.serverUrl)}/pairings/${encodeURIComponent(invite.pairingId)}/exchange`, {
+  const response = await platformFetch(`${apiBaseUrl(invite.serverUrl)}/pairings/${encodeURIComponent(invite.pairingId)}/exchange`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ secret: invite.secret }),

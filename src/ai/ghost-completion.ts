@@ -1,5 +1,6 @@
 import type { MindMapDocument, MindNode } from '../domain/document.types'
 import { completionUrl, type AiSettings } from './ai-settings'
+import { requestAiChat } from '../platform/tauri'
 
 type CompletionResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
 
@@ -44,15 +45,7 @@ export function buildGhostCompletionRequest(settings: AiSettings, document: Mind
 
 export async function requestGhostCompletion(settings: AiSettings, document: MindMapDocument, nodeId: string, prefix: string, signal: AbortSignal, maxTokens = 72) {
   const ghostRequest = buildGhostCompletionRequest(settings, document, nodeId, prefix, maxTokens)
-  const response = await fetch('/api/ai/chat', {
-    method: 'POST',
-    signal,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` },
-    body: JSON.stringify({
-      endpoint: ghostRequest.endpoint,
-      request: ghostRequest.request,
-    }),
-  })
+  const response = await requestAiChat(ghostRequest.endpoint, ghostRequest.request, settings.apiKey, signal)
   const payload = await response.json().catch(() => ({})) as CompletionResponse
   if (!response.ok) throw new Error(payload.error?.message || `续写请求失败（${response.status}）`)
   return normalizeCompletion(prefix, payload.choices?.[0]?.message?.content ?? '')

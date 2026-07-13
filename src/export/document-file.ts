@@ -1,4 +1,5 @@
 import type { MindMapDocument } from '../domain/document.types'
+import { isTauriRuntime } from '../platform/tauri'
 
 type FilePickerWindow = Window & {
   showSaveFilePicker?: (options: {
@@ -7,7 +8,7 @@ type FilePickerWindow = Window & {
   }) => Promise<{ createWritable: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }> }>
 }
 
-export type LocalFileSaveResult = 'picker' | 'download'
+export type LocalFileSaveResult = 'native' | 'picker' | 'download'
 
 function safeFileName(title: string) {
   return (title.trim() || '未命名导图').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
@@ -26,6 +27,19 @@ export function serializeDocumentFile(document: MindMapDocument) {
 export async function saveDocumentToLocalFile(document: MindMapDocument): Promise<LocalFileSaveResult> {
   const content = serializeDocumentFile(document)
   const suggestedName = `${safeFileName(document.title)}.mindtree.json`
+  if (isTauriRuntime()) {
+    const [{ save }, { writeTextFile }] = await Promise.all([
+      import('@tauri-apps/plugin-dialog'),
+      import('@tauri-apps/plugin-fs'),
+    ])
+    const path = await save({
+      title: '保存 MindTree 导图', defaultPath: suggestedName,
+      filters: [{ name: 'MindTree 导图文件', extensions: ['mindtree.json', 'json'] }],
+    })
+    if (!path) throw new DOMException('用户取消保存', 'AbortError')
+    await writeTextFile(path, content)
+    return 'native'
+  }
   const picker = (window as FilePickerWindow).showSaveFilePicker
   if (picker) {
     const handle = await picker({

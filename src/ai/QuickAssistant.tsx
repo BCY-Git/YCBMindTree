@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { MindMapDocument } from '../domain/document.types'
 import { chatUrl, loadAiSettings } from './ai-settings'
+import { requestAiChat } from '../platform/tauri'
 
 type QuickMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
 type ChatResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
@@ -64,21 +65,14 @@ export function QuickAssistant({ document }: { document: MindMapDocument }) {
     setSending(true)
     setNotice('正在思考…')
     try {
-      const result = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` },
-        body: JSON.stringify({
-          endpoint: chatUrl(settings.endpoint),
-          request: {
+      const result = await requestAiChat(chatUrl(settings.endpoint), {
             model: settings.model.trim(),
             temperature: 0.55,
             messages: [
               { role: 'system', content: `你是 MindTree 的轻量随手助手。用简洁中文帮助用户拆解想法、提出下一步或澄清问题。用户记忆：${memory || '无'}。当前导图：${mapSnapshot(document)}` },
               ...history.map((message) => ({ role: message.role, content: message.content })),
             ],
-          },
-        }),
-      })
+          }, settings.apiKey)
       const payload = await result.json().catch(() => ({})) as ChatResponse
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const answer = payload.choices?.[0]?.message?.content?.trim()

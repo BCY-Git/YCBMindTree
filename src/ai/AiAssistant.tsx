@@ -18,6 +18,7 @@ import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
 import { parseMapReorganization, type MapReorganization } from './map-reorganization'
 import { useEditorStore } from '../store/editor.store'
+import { requestAiChat } from '../platform/tauri'
 import { chatUrl, defaultAiSettings, isGhostCompletionEnabled, loadAiSettings, saveAiSettings, saveGhostCompletionEnabled, type AiSettings } from './ai-settings'
 
 type ChatResponse = {
@@ -112,21 +113,14 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       const requestPrompt = prompt.trim() || (intent === 'reorganize'
         ? '请分析整张导图的层级与归属，仅提出确有必要的结构调整。'
         : `请围绕「${target.topic}」补全最有价值的分支。`)
-      const result = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` },
-        body: JSON.stringify({
-          endpoint: chatUrl(settings.endpoint),
-          request: {
+      const result = await requestAiChat(chatUrl(settings.endpoint), {
             model: settings.model.trim(),
             messages: [
               { role: 'system', content: `${instruction}\n当前导图数据如下：` },
               { role: 'user', content: `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document)}` },
             ],
             temperature: 0.7,
-          },
-        }),
-      })
+          }, settings.apiKey)
       const payload = await result.json().catch(() => ({})) as ChatResponse
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const content = payload.choices?.[0]?.message?.content?.trim()
