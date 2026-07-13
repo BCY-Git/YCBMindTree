@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DocumentRepository } from './document-repository.js'
+import { DOCUMENT_CHANGE_RETENTION, DocumentRepository } from './document-repository.js'
 
 const temporaryDirectories: string[] = []
 
@@ -59,5 +59,26 @@ describe('account sessions and document ownership', () => {
 
     expect(repository.claimPairingChallenge(challenge.id, challenge.secret)).toBe(user.id)
     expect(repository.claimPairingChallenge(challenge.id, challenge.secret)).toBeNull()
+  })
+
+  it('retains only the newest document changes for each document', () => {
+    const repository = createRepository()
+    const owner = repository.registerAccount('owner@example.com', 'correct horse battery staple')!
+    const documentId = 'bounded-history-document'
+
+    for (let version = 0; version < DOCUMENT_CHANGE_RETENTION + 5; version += 1) {
+      const saved = repository.save({
+        id: documentId,
+        ownerId: owner.id,
+        title: `版本 ${version + 1}`,
+        categoryId: 'uncategorized',
+        payload: { version },
+        baseVersion: version,
+      })
+      expect('type' in saved).toBe(false)
+    }
+
+    expect(repository.changeCount(documentId)).toBe(DOCUMENT_CHANGE_RETENTION)
+    expect(repository.get(owner.id, documentId)?.version).toBe(DOCUMENT_CHANGE_RETENTION + 5)
   })
 })

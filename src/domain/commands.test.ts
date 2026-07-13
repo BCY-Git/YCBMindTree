@@ -184,6 +184,38 @@ describe('MindTree command executor', () => {
     expect(() => executeCommand(document, { type: 'SET_NODE_DUE_DATE', nodeId, dueDate: '2030-02-30' })).toThrow('截止日期格式无效')
   })
 
+  it('adds and removes node links and attachments without breaking the document', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    const linked = executeCommand(document, { type: 'ADD_NODE_LINK', nodeId, url: 'https://example.com/brief', label: '项目说明' }).document
+    const attachment = { id: crypto.randomUUID(), name: '会议纪要.pdf', type: 'application/pdf', size: 1024, createdAt: Date.now() }
+    const attached = executeCommand(linked, { type: 'ADD_NODE_ATTACHMENT', nodeId, attachment }).document
+
+    expect(attached.nodes[nodeId].links).toHaveLength(1)
+    expect(attached.nodes[nodeId].attachments).toContainEqual(attachment)
+    const cleaned = executeCommand(
+      executeCommand(attached, { type: 'DELETE_NODE_LINK', nodeId, linkId: attached.nodes[nodeId].links[0].id }).document,
+      { type: 'DELETE_NODE_ATTACHMENT', nodeId, attachmentId: attachment.id },
+    ).document
+    expect(cleaned.nodes[nodeId]).toMatchObject({ links: [], attachments: [] })
+    expect(() => assertValidDocument(cleaned)).not.toThrow()
+  })
+
+  it('explicitly deletes boundaries and summaries while retaining their source nodes', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const nodeIds = document.nodes[parentId].childIds.slice(0, 2)
+    const withBoundary = executeCommand(document, { type: 'CREATE_BOUNDARY', nodeIds, label: '待确认' }).document
+    const withSummary = executeCommand(withBoundary, { type: 'CREATE_SUMMARY', nodeIds, topic: '形成结论' }).document
+
+    const withoutBoundary = executeCommand(withSummary, { type: 'DELETE_BOUNDARY', boundaryId: withSummary.boundaries[0].id }).document
+    const withoutSummary = executeCommand(withoutBoundary, { type: 'DELETE_SUMMARY', summaryId: withoutBoundary.summaries[0].id }).document
+    expect(withoutSummary.boundaries).toEqual([])
+    expect(withoutSummary.summaries).toEqual([])
+    expect(nodeIds.every((nodeId) => Boolean(withoutSummary.nodes[nodeId]))).toBe(true)
+    expect(() => assertValidDocument(withoutSummary)).not.toThrow()
+  })
+
   it('persists a manual node size while rejecting invalid dimensions', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

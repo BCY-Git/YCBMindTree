@@ -106,5 +106,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // 服务端测试需要 Node 环境和独立数据库；由 server/ 下的 Vitest 单独执行。
+    exclude: ['**/node_modules/**', '**/dist/**', 'server/**'],
   },
 })

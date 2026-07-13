@@ -1,30 +1,38 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { randomUUID } from 'node:crypto'
 import express from 'express'
-import { config } from './config.js'
 import { requireAccountBearer, requireAllowedHost, requireAllowedOrigin, type AuthenticatedRequest } from './auth.js'
-import { DocumentRepository } from './document-repository.js'
+import { DocumentAccessError, DocumentRepository } from './document-repository.js'
 import { createMindTreeMcp } from './mcp.js'
 import { mindMapDocumentSchema } from './mindmap-document.js'
 
-const repository = new DocumentRepository(config.databasePath)
-const app = express()
-app.disable('x-powered-by')
-app.use(requireAllowedHost)
-app.use(requireAllowedOrigin)
-app.use(express.json({ limit: '1mb' }))
+export type AppOptions = {
+  devToken: string
+  allowRegistration: boolean
+  sessionLifetimeMs: number
+  allowedHosts: readonly string[]
+  allowedOrigins: readonly string[]
+}
 
-app.get('/healthz', (_request, response) => response.json({ ok: true, service: 'mindtree-server', mcp: '/mcp' }))
+/** Creates the HTTP API without binding a port, so it can be tested or embedded safely. */
+export function createApp(repository: DocumentRepository, options: AppOptions) {
+  const app = express()
+  app.disable('x-powered-by')
+  app.use(requireAllowedHost(options.allowedHosts))
+  app.use(requireAllowedOrigin(options.allowedOrigins))
+  app.use(express.json({ limit: '1mb' }))
 
-const requireApiBearer = requireAccountBearer(repository)
-app.post('/api/v1/auth/register', (request, response) => {
-  if (!config.allowRegistration) return response.status(403).json({ error: { code: 'REGISTRATION_DISABLED', message: '服务器暂未开放注册，请联系管理员。' } })
+  app.get('/healthz', (_request, response) => response.json({ ok: true, service: 'mindtree-server', mcp: '/mcp' }))
+
+  const requireApiBearer = requireAccountBearer(repository, options.devToken)
+  app.post('/api/v1/auth/register', (request, response) => {
+  if (!options.allowRegistration) return response.status(403).json({ error: { code: 'REGISTRATION_DISABLED', message: '服务器暂未开放注册，请联系管理员。' } })
   const email = typeof request.body?.email === 'string' ? request.body.email : ''
   const password = typeof request.body?.password === 'string' ? request.body.password : ''
   try {
     const user = repository.registerAccount(email, password)
     if (!user) return response.status(409).json({ error: { code: 'EMAIL_EXISTS', message: '该邮箱已注册，请直接登录。' } })
-    return response.status(201).json({ user, token: repository.createSession(user.id, config.sessionLifetimeMs) })
+    return response.status(201).json({ user, token: repository.createSession(user.id, options.sessionLifetimeMs) })
   } catch {
     return response.status(400).json({ error: { code: 'INVALID_ACCOUNT', message: '请输入有效邮箱，且密码至少 8 位。' } })
   }
@@ -34,11 +42,11 @@ app.post('/api/v1/auth/login', (request, response) => {
   const password = typeof request.body?.password === 'string' ? request.body.password : ''
   const user = repository.authenticateAccount(email, password)
   if (!user) return response.status(401).json({ error: { code: 'INVALID_CREDENTIALS', message: '邮箱或密码错误。' } })
-  return response.json({ user, token: repository.createSession(user.id, config.sessionLifetimeMs) })
+  return response.json({ user, token: repository.createSession(user.id, options.sessionLifetimeMs) })
 })
 app.post('/api/v1/auth/logout', requireApiBearer, (request: AuthenticatedRequest, response) => {
   const token = request.header('authorization')?.replace(/^Bearer\s+/i, '')
-  if (token && token !== config.devToken) repository.revokeSession(token)
+  if (token && token !== options.devToken) repository.revokeSession(token)
   return response.status(204).end()
 })
 
@@ -55,7 +63,7 @@ app.post('/api/v1/pairings/:pairingId/exchange', (request, response) => {
   if (!ownerId) {
     return response.status(401).json({ error: { code: 'INVALID_PAIRING', message: '配对二维码无效、已使用或已过期' } })
   }
-  return response.json({ token: repository.createSession(ownerId, config.sessionLifetimeMs) })
+  return response.json({ token: repository.createSession(ownerId, options.sessionLifetimeMs) })
 })
 
 app.use('/api/v1', requireApiBearer)
@@ -71,14 +79,19 @@ app.put('/api/v1/documents/:documentId', (request: AuthenticatedRequest, respons
   if (typeof body.baseVersion !== 'number' || !payload.success || payload.data.id !== documentId) {
     return response.status(400).json({ error: { code: 'INVALID_DOCUMENT', message: '导图快照、路径 ID 或 baseVersion 无效' } })
   }
-  const saved = repository.save({ id: documentId, ownerId: request.ownerId!, title: payload.data.title, categoryId: payload.data.categoryId, payload: payload.data, baseVersion: body.baseVersion })
-  return 'type' in saved ? response.status(409).json({ error: { code: saved.type }, document: saved.document }) : response.status(201).json(saved)
+  try {
+    const saved = repository.save({ id: documentId, ownerId: request.ownerId!, title: payload.data.title, categoryId: payload.data.categoryId, payload: payload.data, baseVersion: body.baseVersion })
+    return 'type' in saved ? response.status(409).json({ error: { code: saved.type }, document: saved.document }) : response.status(201).json(saved)
+  } catch (error) {
+    if (error instanceof DocumentAccessError) return response.status(404).json({ error: { code: 'NOT_FOUND', message: '导图不存在' } })
+    throw error
+  }
 })
 
-app.use('/mcp', requireApiBearer)
-const mcpSessions = new Map<string, { transport: StreamableHTTPServerTransport; close: () => Promise<void> }>()
+  app.use('/mcp', requireApiBearer)
+  const mcpSessions = new Map<string, { transport: StreamableHTTPServerTransport; close: () => Promise<void> }>()
 
-async function createMcpSession() {
+  async function createMcpSession() {
   const mcp = createMindTreeMcp(repository)
   let transport!: StreamableHTTPServerTransport
   transport = new StreamableHTTPServerTransport({
@@ -93,9 +106,9 @@ async function createMcpSession() {
   })
   await mcp.connect(transport)
   return transport
-}
+  }
 
-app.all('/mcp', async (request: AuthenticatedRequest, response) => {
+  app.all('/mcp', async (request: AuthenticatedRequest, response) => {
   try {
     const sessionId = request.header('mcp-session-id')
     const session = sessionId ? mcpSessions.get(sessionId) : undefined
@@ -106,8 +119,7 @@ app.all('/mcp', async (request: AuthenticatedRequest, response) => {
     console.error('MCP request failed', error)
     if (!response.headersSent) response.status(500).json({ error: { code: 'MCP_REQUEST_FAILED', message: error instanceof Error ? error.message : 'MCP 请求失败' } })
   }
-})
+  })
 
-app.listen(config.port, config.host, () => {
-  console.log(`MindTree server listening on http://${config.host}:${config.port}`)
-})
+  return app
+}

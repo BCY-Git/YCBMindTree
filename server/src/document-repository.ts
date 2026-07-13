@@ -16,6 +16,13 @@ export type DocumentRecord = {
 
 export type VersionConflict = { type: 'VERSION_CONFLICT'; document: DocumentRecord }
 
+export class DocumentAccessError extends Error {
+  constructor() {
+    super('导图不存在或无权访问')
+    this.name = 'DocumentAccessError'
+  }
+}
+
 export type PairingChallenge = {
   id: string
   secret: string
@@ -23,6 +30,9 @@ export type PairingChallenge = {
 }
 
 export type AccountUser = { id: string; email: string; createdAt: number }
+
+/** 每张导图只保留最近的变更快照，避免长期同步导致 SQLite 无限增长。 */
+export const DOCUMENT_CHANGE_RETENTION = 200
 
 export class DocumentRepository {
   private readonly database: Database.Database
@@ -87,7 +97,7 @@ export class DocumentRepository {
 
   save(input: Omit<DocumentRecord, 'version' | 'createdAt' | 'updatedAt'> & { baseVersion: number; kind?: string }): DocumentRecord | VersionConflict {
     const existing = this.getById(input.id)
-    if (existing && existing.ownerId !== input.ownerId) throw new Error('导图不存在或无权访问')
+    if (existing && existing.ownerId !== input.ownerId) throw new DocumentAccessError()
     const current = existing
     if (current && current.version !== input.baseVersion) return { type: 'VERSION_CONFLICT', document: current }
     if (!current && input.baseVersion !== 0) throw new Error('新文档的 baseVersion 必须为 0')
@@ -110,6 +120,10 @@ export class DocumentRepository {
         payload_json = excluded.payload_json, updated_at = excluded.updated_at`).run({ ...next, payloadJson: JSON.stringify(next.payload) })
       this.database.prepare('INSERT INTO document_changes (document_id, version, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(next.id, next.version, input.kind ?? 'snapshot', JSON.stringify(next.payload), now)
+      this.database.prepare(`DELETE FROM document_changes
+        WHERE document_id = ? AND id NOT IN (
+          SELECT id FROM document_changes WHERE document_id = ? ORDER BY id DESC LIMIT ?
+        )`).run(next.id, next.id, DOCUMENT_CHANGE_RETENTION)
     })
     transaction()
     return next
@@ -187,6 +201,11 @@ export class DocumentRepository {
 
   revokeSession(token: string) {
     this.database.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').run(hashToken(token))
+  }
+
+  changeCount(documentId: string): number {
+    const row = this.database.prepare('SELECT COUNT(*) AS count FROM document_changes WHERE document_id = ?').get(documentId) as { count: number }
+    return Number(row.count)
   }
 
   private fromRow(row: Record<string, unknown>): DocumentRecord {
