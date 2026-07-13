@@ -38,9 +38,14 @@ import { CommandPalette } from './CommandPalette'
 import { NodeSearchDialog } from './NodeSearchDialog'
 import { getTheme } from '../domain/themes'
 import { getTreeEdgeAnchors } from './tree-edge'
+import { retainDraggingNodePosition } from './drag-state'
+import { resolveRegularTreeDragIntent, type TreeDropIntent } from './drag-intent'
 import type { MindNode as DomainMindNode } from '../domain/document.types'
 
 const nodeTypes = { mindNode: MindNode }
+// 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
+const FREE_TOPIC_ATTACH_ENTER_DISTANCE = 116
+const FREE_TOPIC_ATTACH_RETAIN_DISTANCE = 164
 
 /**
  * 根据方向返回相邻节点 id。
@@ -76,7 +81,7 @@ function distanceToRect(point: { x: number; y: number }, rect: { x: number; y: n
   return Math.hypot(dx, dy)
 }
 
-type DropIntent = { parentId: string; index: number; kind: 'child' | 'sibling' }
+type DropIntent = TreeDropIntent
 type DragPreview = { nodeId: string; intent: DropIntent }
 
 function renderedSize(candidate: Node<MindNodeData>) {
@@ -114,6 +119,7 @@ export function MindMapCanvas() {
   const [freeTopicAttachmentParentId, setFreeTopicAttachmentParentId] = useState<string | null>(null)
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null)
   const [flowNodes, setFlowNodes] = useState<Node<MindNodeData>[]>([])
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
@@ -264,14 +270,8 @@ export function MindMapCanvas() {
   }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, freeTopicAttachmentParentId, relationSourceId, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, theme])
 
   useEffect(() => {
-    setFlowNodes((current) => {
-      if (!dragPreview) return current === baseNodes ? current : baseNodes
-      const dragged = current.find((node) => node.id === dragPreview.nodeId)
-      return baseNodes.map((node) => node.id === dragPreview.nodeId && dragged
-        ? { ...node, position: dragged.position, dragging: dragged.dragging }
-        : node)
-    })
-  }, [baseNodes, dragPreview])
+    setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId))
+  }, [baseNodes, draggingNodeId])
 
   // 仅在首次打开或切换到另一张导图时自动适应视图；节点增删、编辑和布局更新都必须保留用户当前视角。
   useEffect(() => {
@@ -351,13 +351,13 @@ export function MindMapCanvas() {
       const distance = distanceToSegment(point, { x: parent.x + parent.width, y: parent.y + parent.height / 2 }, { x: target.x, y: target.y + target.height / 2 })
       consider(child.parentId, distance)
     })
-    if (retainedParentId && (distances.get(retainedParentId) ?? Number.POSITIVE_INFINITY) <= 132) return retainedParentId
+    if (retainedParentId && (distances.get(retainedParentId) ?? Number.POSITIVE_INFINITY) <= FREE_TOPIC_ATTACH_RETAIN_DISTANCE) return retainedParentId
     let closestParentId: string | null = null
     let closestDistance = Number.POSITIVE_INFINITY
     distances.forEach((distance, parentId) => {
       if (distance < closestDistance) { closestParentId = parentId; closestDistance = distance }
     })
-    return closestDistance <= 86 ? closestParentId : null
+    return closestDistance <= FREE_TOPIC_ATTACH_ENTER_DISTANCE ? closestParentId : null
   }, [basePositionsById, document.nodes])
   const dropIntentNearTree = useCallback((dragged: Node<MindNodeData>): DropIntent | null => {
     const draggedSize = renderedSize(dragged)
@@ -437,7 +437,8 @@ export function MindMapCanvas() {
     })
   }, [document.rootId])
   // 普通树节点只会重排或调整层级；仅自由主题保留自由位置。
-  const onNodeDragStop: OnNodeDrag<Node<MindNodeData>> = useCallback((_, node) => {
+  const onNodeDragStop: OnNodeDrag<Node<MindNodeData>> = useCallback((event, node) => {
+    setDraggingNodeId(null)
     setFreeTopicAttachmentParentId(null)
     setDropIntent(null)
     setDragPreview(null)
@@ -458,21 +459,20 @@ export function MindMapCanvas() {
       else setFlowNodes(baseNodes)
       return
     }
-    const intent = dropIntentNearTree(node)
+    const intent = resolveRegularTreeDragIntent({
+      shiftKey: Boolean((event as MouseEvent).shiftKey),
+      siblingIntent: siblingReorderIntent(node),
+      structuralIntent: dropIntentNearTree(node),
+    })
     if (intent) {
       const moved = dispatch({ type: 'MOVE_NODE', nodeId: node.id, newParentId: intent.parentId, index: intent.index })
       if (!moved) setFlowNodes(baseNodes)
       return
     }
-    const reorder = siblingReorderIntent(node)
-    if (reorder) {
-      const moved = dispatch({ type: 'MOVE_NODE', nodeId: node.id, newParentId: reorder.parentId, index: reorder.index })
-      if (!moved) setFlowNodes(baseNodes)
-      return
-    }
     setFlowNodes(baseNodes)
   }, [attachmentParentNearBranch, baseNodes, dispatch, document.nodes, dropIntentNearTree, freeTopicAttachmentParentId, getDragOffset, siblingReorderIntent])
-  const onNodeDrag: OnNodeDrag<Node<MindNodeData>> = useCallback((_, node) => {
+  const onNodeDrag: OnNodeDrag<Node<MindNodeData>> = useCallback((event, node) => {
+    setDraggingNodeId((current) => current === node.id ? current : node.id)
     if (document.nodes[node.id]?.isFreeTopic) {
       setFreeTopicAttachmentParentId((current) => {
         const next = attachmentParentNearBranch(node, current)
@@ -481,7 +481,11 @@ export function MindMapCanvas() {
       setDragPreview(null)
       return
     }
-    const next = dropIntentNearTree(node) ?? siblingReorderIntent(node)
+    const next = resolveRegularTreeDragIntent({
+      shiftKey: Boolean((event as MouseEvent).shiftKey),
+      siblingIntent: siblingReorderIntent(node),
+      structuralIntent: dropIntentNearTree(node),
+    })
     setDropIntent((current) => current?.parentId === next?.parentId && current?.index === next?.index && current?.kind === next?.kind ? current : next)
     const currentParentId = document.nodes[node.id]?.parentId
     const preview = next?.kind === 'sibling' && next.parentId === currentParentId ? { nodeId: node.id, intent: next } : null

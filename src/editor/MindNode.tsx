@@ -213,6 +213,14 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
             }}
             onBlur={() => commit()}
             onKeyDown={(event) => {
+              // 编辑框内的全选必须留在当前节点，不能冒泡给画布或浏览器页面。
+              if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+                event.preventDefault()
+                event.stopPropagation()
+                event.currentTarget.select()
+                setCursorAtEnd(false)
+                return
+              }
               // 中文、日文等输入法会用 Enter 确认候选字；组合期间不能提交节点或新建同级节点。
               if (event.nativeEvent.isComposing || composingRef.current || event.nativeEvent.keyCode === 229) return
               if (event.key === 'Escape') { event.preventDefault(); setSuggestion(''); setTopic(node.label); editNode(null); return }

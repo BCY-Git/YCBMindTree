@@ -1,0 +1,48 @@
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ReactFlowProvider } from '@xyflow/react'
+import { MindNode, type MindNodeData } from './MindNode'
+import { useEditorStore } from '../store/editor.store'
+
+const nodeId = 'node-under-edit'
+
+function renderEditingNode() {
+  act(() => useEditorStore.getState().editNode(nodeId))
+  const data: MindNodeData = {
+    label: '需要全选的节点文本',
+    isRoot: false,
+    isFreeTopic: false,
+    taskStatus: 'none',
+    priority: 0,
+    isDropTarget: false,
+    hasChildren: false,
+    collapsed: false,
+    accentColor: '#467566',
+    isRelationSource: false,
+    layoutHeight: 44,
+  }
+  return render(<ReactFlowProvider><MindNode id={nodeId} type="mind" data={data} selected={true} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
+}
+
+afterEach(() => act(() => useEditorStore.getState().editNode(null)))
+
+describe('MindNode text editing', () => {
+  it('uses Command+A inside an editing node to select only its text', () => {
+    const onWindowKeyDown = vi.fn()
+    window.addEventListener('keydown', onWindowKeyDown)
+    try {
+      renderEditingNode()
+      const input = screen.getByRole('textbox') as HTMLTextAreaElement
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+
+      fireEvent.keyDown(input, { key: 'a', metaKey: true })
+
+      expect(input.selectionStart).toBe(0)
+      expect(input.selectionEnd).toBe(input.value.length)
+      expect(onWindowKeyDown).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('keydown', onWindowKeyDown)
+    }
+  })
+})
