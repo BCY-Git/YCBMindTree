@@ -191,6 +191,7 @@ export function MindMapCanvas() {
           collapsed: mindNode.collapsed,
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
           isRelationSource: relationSourceId === item.id,
+          layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
         },
         style: { width: item.width, height: item.height },

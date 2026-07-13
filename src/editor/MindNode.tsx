@@ -25,6 +25,8 @@ export type MindNodeData = {
   collapsed: boolean
   accentColor: string
   isRelationSource: boolean
+  /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
+  layoutHeight: number
   onEditingHeightChange?: (height: number | null) => void
 }
 
@@ -54,13 +56,23 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   useEffect(() => setTopic(node.label), [node.label])
   useLayoutEffect(() => {
     if (!isEditing) return
+    let settleFrame = 0
     const frame = window.requestAnimationFrame(() => {
       const input = inputRef.current
       if (!input) return
       input.focus({ preventScroll: true })
       input.setSelectionRange(input.value.length, input.value.length)
+      // WebKit 有时会在 setSelectionRange 后异步把 textarea 卷到末尾；
+      // 卡片已经为全文预留高度，因此保持从首行显示，不能让首尾几行被截掉。
+      settleFrame = window.requestAnimationFrame(() => {
+        input.scrollTop = 0
+        input.scrollLeft = 0
+      })
     })
-    return () => window.cancelAnimationFrame(frame)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.cancelAnimationFrame(settleFrame)
+    }
   }, [isEditing])
   useLayoutEffect(() => {
     if (!isEditing) {
@@ -73,20 +85,34 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     }
     const input = inputRef.current
     if (!input) return
-    input.style.height = '0px'
-    const nextHeight = Math.max(19, Math.ceil(input.scrollHeight), Math.ceil(mirrorRef.current?.scrollHeight ?? 0))
-    input.style.height = ''
-    setEditorHeight((current) => current === nextHeight ? current : nextHeight)
-    // 节点本体有 6px 内边距与边框；把编辑内容的实际高度交给画布临时布局，
-    // 让同级节点随之平滑让位，而不是把幽灵文本裁在旧卡片高度内。
-    const layoutHeight = nextHeight + 16
-    // Canvas 会因临时高度重新计算 node data；不能每次重新渲染都再回报相同高度，
-    // 否则编辑态会在 React Flow 与画布布局之间形成无限更新循环。
-    if (reportedHeightRef.current !== layoutHeight) {
-      reportedHeightRef.current = layoutHeight
-      node.onEditingHeightChange?.(layoutHeight)
+    const measure = () => {
+      // 先解除已写入的高度，再读取真实排版后的 scrollHeight。不能按字符数猜测：
+      // 缩放、CJK 字体和手动调整宽度都会使猜测与实际换行不一致。
+      input.style.height = 'auto'
+      const contentHeight = Math.max(
+        19,
+        Math.ceil(input.scrollHeight),
+        Math.ceil(mirrorRef.current?.scrollHeight ?? 0),
+      )
+      // 展示态本来容得下的文本，在进入编辑态时必须仍然完整可见；
+      // `layoutHeight` 已含节点边框与内边距，编辑区只取其中的内容空间。
+      const minimumVisibleHeight = Math.max(19, node.layoutHeight - 16)
+      const nextHeight = Math.max(contentHeight, minimumVisibleHeight)
+      input.style.height = `${nextHeight}px`
+      setEditorHeight((current) => current === nextHeight ? current : nextHeight)
+
+      // 节点本体有 6px 内边距与边框；把编辑内容的实际高度交给画布临时布局，
+      // 让同级节点随之平滑让位，而不是把幽灵文本裁在旧卡片高度内。
+      const layoutHeight = nextHeight + 16
+      if (reportedHeightRef.current !== layoutHeight) {
+        reportedHeightRef.current = layoutHeight
+        node.onEditingHeightChange?.(layoutHeight)
+      }
     }
-  }, [isEditing, node.onEditingHeightChange, suggestion, topic])
+    measure()
+    // 宽度只会在布局数据、输入文本或 AI 建议变化时改变，三者均是本 effect 的依赖。
+    // 不监听自身尺寸：测量过程会写回 textarea 高度，监听自身会形成 ResizeObserver 循环。
+  }, [isEditing, node.layoutHeight, node.onEditingHeightChange, suggestion, topic])
   useEffect(() => {
     requestRef.current?.abort()
     setSuggestion('')
@@ -119,9 +145,6 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   }
   const taskIcon = node.taskStatus === 'todo' ? '○' : node.taskStatus === 'doing' ? '◐' : node.taskStatus === 'done' ? '✓' : null
   const taskLabel = node.taskStatus === 'todo' ? '待办' : node.taskStatus === 'doing' ? '进行中' : node.taskStatus === 'done' ? '已完成' : ''
-  // 保留原有换行，并按节点宽度估算自动换行，编辑态不能把长标题压回单行。
-  const charactersPerLine = node.isRoot ? 20 : 16
-  const editorLineCount = Math.max(1, (topic + suggestion).split('\n').reduce((lines, line) => lines + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
   const beginEditing = (event: React.MouseEvent<HTMLDivElement>) => {
     if (isEditing || (event.target as HTMLElement).closest('.collapse-toggle, .node-resize-control')) return
     event.preventDefault()
@@ -164,14 +187,15 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         </button>
       )}
       {isEditing ? (
-        <div className="node-input-shell" style={{ minHeight: `${Math.max(editorHeight ?? 0, editorLineCount * 19)}px` }}>
+        <div className="node-input-shell" style={{ minHeight: `${Math.max(editorHeight ?? 0, node.layoutHeight - 16)}px` }}>
           {suggestion && <div ref={mirrorRef} className="node-input-mirror" aria-hidden="true"><span>{topic}</span><span className="node-input-mirror__suggestion">{suggestion}</span></div>}
           <textarea
             ref={inputRef}
             className={`node-input nodrag nowheel ${suggestion ? 'node-input--ghost' : ''}`}
             value={topic}
             rows={1}
-            style={{ height: `${editorHeight ?? editorLineCount * 19}px` }}
+            wrap="soft"
+            style={{ height: `${editorHeight ?? Math.max(19, node.layoutHeight - 16)}px` }}
             onPointerDown={keepEditingGesture}
             onMouseDown={keepEditingGesture}
             onDoubleClick={keepEditingGesture}
