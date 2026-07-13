@@ -3,7 +3,7 @@
  *
  * 每个节点是一个带左边框高亮色的卡片，支持两种状态：
  * - 显示态（默认）：双击进入编辑态；子节点超过 0 个时显示折叠/展开按钮
- * - 编辑态：在输入框内直接修改主题文字，支持 AI 幽灵续写（Tab 接受）、Enter 创建同级、Escape 取消
+ * - 编辑态：在输入框内直接修改主题文字，支持 AI 幽灵续写（Tab 接受）、Enter 提交、Escape 取消
  *
  * 左侧有 4 个隐藏的 Handle（source-left/right, target-left/right），
  * 由 tree-edge.ts 根据节点相对位置决定哪两个实际连接画布边。
@@ -46,8 +46,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const [cursorAtEnd, setCursorAtEnd] = useState(true)
   const [composing, setComposing] = useState(false)
   const composingRef = useRef(false)
-  const skipNextEnterRef = useRef(false)
-  const compositionTimerRef = useRef<number | null>(null)
+  const lastCompositionEndAtRef = useRef(0)
   const [isHovering, setIsHovering] = useState(false)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const reportedHeightRef = useRef<number | null>(null)
@@ -181,11 +180,9 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
             onCompositionStart={() => { composingRef.current = true; setComposing(true) }}
             onCompositionEnd={(event) => {
               composingRef.current = false
-              // WebKit 在输入法确认时可能先发 compositionend 再发 Enter keydown。
-              // 短暂屏蔽这一个 Enter，防止候选字刚写入就提交并创建同级节点。
-              skipNextEnterRef.current = true
-              if (compositionTimerRef.current !== null) window.clearTimeout(compositionTimerRef.current)
-              compositionTimerRef.current = window.setTimeout(() => { skipNextEnterRef.current = false; compositionTimerRef.current = null }, 0)
+              // WebKit 对输入法确认的事件顺序并不稳定：compositionend 可能在 Enter 前或后。
+              // 记录结束时间，在很短窗口内一律把 Enter 视为候选字确认，而不是编辑命令。
+              lastCompositionEndAtRef.current = Date.now()
               setComposing(false)
               setTopic(event.currentTarget.value)
               setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length)
@@ -198,9 +195,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
               if (event.key === 'Tab') { event.preventDefault(); if (!acceptSuggestion()) commit(event.currentTarget.value); return }
               if (event.key === 'Enter') {
                 event.preventDefault()
-                if (skipNextEnterRef.current) return
+                if (Date.now() - lastCompositionEndAtRef.current < 160) return
                 commit(event.currentTarget.value)
-                dispatch({ type: 'ADD_SIBLING', nodeId: id })
               }
             }}
           />
