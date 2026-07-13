@@ -177,7 +177,9 @@ export function MindMapCanvas() {
         type: 'mindNode',
         position: { x: item.x, y: item.y },
         selected: selectedNodeIds.includes(item.id),
-        draggable: true,
+        // 编辑态的节点直接关闭 React Flow 拖拽，而不只依赖子元素的 nodrag class。
+        // 这保证从文本首尾拖过时始终是浏览器原生选择，不会抢成节点拖动。
+        draggable: editingNodeId !== item.id,
         data: {
           label: mindNode.topic,
           isRoot: item.id === document.rootId,
@@ -258,7 +260,7 @@ export function MindMapCanvas() {
       return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
-  }, [document, dragPreview, dropIntent, editingNodeHeights, freeTopicAttachmentParentId, relationSourceId, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, theme])
+  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, freeTopicAttachmentParentId, relationSourceId, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, theme])
 
   useEffect(() => {
     setFlowNodes((current) => {
