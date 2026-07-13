@@ -36,10 +36,11 @@ function mapContext(document: MindMapDocument) {
   })
 }
 
-type GeneratedBranch = { branch: MindNodeClipboard; targetId: string; targetTopic: string }
+type GeneratedBranch = { branch: MindNodeClipboard; targetId: string; targetTopic: string; mode: 'branch' | 'plan' }
 
 function BranchPreview({ branch, depth = 0 }: { branch: MindNodeClipboard; depth?: number }) {
-  return <ul className={`ai-branch-preview__list depth-${depth}`}><li><span>{branch.topic}</span>{branch.children.map((child, index) => <BranchPreview key={`${child.topic}-${index}`} branch={child} depth={depth + 1} />)}</li></ul>
+  const taskMeta = [branch.taskStatus !== 'none' ? (branch.taskStatus === 'done' ? '已完成' : branch.taskStatus === 'doing' ? '进行中' : '待办') : '', branch.priority ? `P${branch.priority}` : '', branch.dueDate ?? ''].filter(Boolean).join(' · ')
+  return <ul className={`ai-branch-preview__list depth-${depth}`}><li><span>{branch.topic}</span>{taskMeta && <small>{taskMeta}</small>}{branch.children.map((child, index) => <BranchPreview key={`${child.topic}-${index}`} branch={child} depth={depth + 1} />)}</li></ul>
 }
 
 export function AiAssistant({ document, targetNodeId }: { document: MindMapDocument; targetNodeId: string }) {
@@ -72,7 +73,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     saveGhostCompletionEnabled(enabled)
   }
 
-  const requestAssistant = async (intent: 'chat' | 'branch') => {
+  const requestAssistant = async (intent: 'chat' | 'branch' | 'plan') => {
     if (!isConfigured) {
       setSettingsOpen(true)
       setNotice('请先完成并保存连接配置。')
@@ -81,13 +82,15 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     if (!prompt.trim() && intent === 'chat') return
 
     setIsSending(true)
-    setNotice(intent === 'branch' ? '正在生成可插入的分支…' : '正在请求你的模型…')
+    setNotice(intent === 'branch' ? '正在生成可插入的分支…' : intent === 'plan' ? '正在生成可确认的执行计划…' : '正在请求你的模型…')
     setResponse('')
-    if (intent === 'branch') setGeneratedBranch(null)
+    if (intent !== 'chat') setGeneratedBranch(null)
     try {
       const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
       const instruction = intent === 'branch'
         ? '你是 MindTree 的思维导图助手。根据用户要求扩展当前节点。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"topic":"分支主题","children":[{"topic":"子主题","children":[]}]}; 最多 6 层、60 个节点。'
+        : intent === 'plan'
+          ? '你是 MindTree 的执行计划助手。根据用户要求把当前节点拆成可执行任务。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"topic":"计划名称","children":[{"topic":"任务","taskStatus":"todo","priority":1,"dueDate":"YYYY-MM-DD","children":[]}]}; 任务最多 12 项。priority 只能为 1、2、3；没有明确日期时省略 dueDate。'
         : '你是 MindTree 的思维导图助手。请用简洁中文协助用户梳理、扩展或优化导图。'
       const requestPrompt = prompt.trim() || `请围绕「${target.topic}」补全最有价值的分支。`
       const result = await fetch('/api/ai/chat', {
@@ -109,10 +112,10 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const content = payload.choices?.[0]?.message?.content?.trim()
       if (!content) throw new Error('模型没有返回可显示的内容。')
-      if (intent === 'branch') {
+      if (intent !== 'chat') {
         const branch = parseGeneratedBranch(content)
-        setGeneratedBranch({ branch, targetId: target.id, targetTopic: target.topic })
-        setNotice(`已生成 ${branchNodeCount(branch)} 个待插入节点，请先确认预览。`)
+        setGeneratedBranch({ branch, targetId: target.id, targetTopic: target.topic, mode: intent })
+        setNotice(intent === 'plan' ? `已生成 ${branchNodeCount(branch)} 个待插入计划节点，请先确认预览。` : `已生成 ${branchNodeCount(branch)} 个待插入节点，请先确认预览。`)
       } else {
         setResponse(content)
         setNotice('已收到模型回复。')
@@ -157,9 +160,9 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
 
       <form className="ai-prompt" onSubmit={sendPrompt}>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="例如：帮我找出这张导图缺少的分支" />
-        <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button></div>
+        <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button></div>
       </form>
-      {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>待插入到「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
+      {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
       {response && <div className="ai-response" aria-live="polite">{response}</div>}
     </section>
   )
