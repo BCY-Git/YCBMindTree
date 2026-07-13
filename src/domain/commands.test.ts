@@ -153,6 +153,17 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(moved)).not.toThrow()
   })
 
+  it('applies an AI reorganization as one valid and undoable structure command', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const [firstChild, secondChild] = document.nodes[parentId].childIds
+    const result = executeCommand(document, { type: 'REORGANIZE_NODES', moves: [{ nodeId: secondChild, newParentId: document.rootId, index: 0 }, { nodeId: firstChild, newParentId: secondChild, index: 0 }] })
+
+    expect(result.document.nodes[secondChild].parentId).toBe(document.rootId)
+    expect(result.document.nodes[firstChild].parentId).toBe(secondChild)
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
   it('sets task state and priority without changing the tree structure', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

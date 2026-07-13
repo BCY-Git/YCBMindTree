@@ -61,6 +61,8 @@ export type MindMapCommand =
   /** 从快照恢复自由排布 */
   | { type: 'RESTORE_FREEFORM_LAYOUT' }
   | { type: 'MOVE_NODE'; nodeId: string; newParentId: string; index: number }
+  /** AI 全图整理：在一次可撤销操作内批量调整节点归属与顺序。 */
+  | { type: 'REORGANIZE_NODES'; moves: Array<{ nodeId: string; newParentId: string; index: number }> }
   | { type: 'INDENT_NODE'; nodeId: string }
   | { type: 'OUTDENT_NODE'; nodeId: string }
   | { type: 'PASTE_SUBTREE'; parentId: string; clipboard: MindNodeClipboard }
@@ -191,6 +193,44 @@ function moveNode(document: MindMapDocument, nodeId: string, newParentId: string
   node.offsetX = 0
   node.offsetY = 0
   newParent.collapsed = false
+}
+
+/**
+ * 分批移动时优先执行「当前不会落入自身子树」的移动。
+ * 这样 AI 可以同时给出“先把子节点提出来，再调整父节点”的最终结构，而不受 JSON 顺序影响。
+ */
+function reorganizeNodes(document: MindMapDocument, moves: Array<{ nodeId: string; newParentId: string; index: number }>) {
+  const uniqueMoves = [...new Map(moves.map((move) => [move.nodeId, move])).values()]
+  if (!uniqueMoves.length) throw new Error('没有可应用的整理建议')
+  uniqueMoves.forEach((move) => {
+    const node = document.nodes[move.nodeId]
+    const parent = document.nodes[move.newParentId]
+    if (!node || !parent) throw new Error('整理建议引用了不存在的节点')
+    if (!node.parentId || node.isFreeTopic || parent.isFreeTopic) throw new Error('整理建议不能调整根节点或自由主题')
+    if (!Number.isInteger(move.index) || move.index < 0) throw new Error('整理建议中的顺序无效')
+  })
+
+  // 先对「最终父级」做一次环检测，拒绝看似合理但最终会形成循环的模型输出。
+  const intendedParent = new Map(Object.values(document.nodes).map((node) => [node.id, node.parentId]))
+  uniqueMoves.forEach((move) => intendedParent.set(move.nodeId, move.newParentId))
+  uniqueMoves.forEach((move) => {
+    const visited = new Set<string>()
+    let current: string | null | undefined = move.nodeId
+    while (current) {
+      if (visited.has(current)) throw new Error('整理建议会形成循环层级')
+      visited.add(current)
+      current = intendedParent.get(current)
+    }
+  })
+
+  const pending = [...uniqueMoves]
+  while (pending.length) {
+    const readyIndex = pending.findIndex((move) => !isDescendant(document, move.nodeId, move.newParentId))
+    if (readyIndex < 0) throw new Error('整理建议无法安全应用')
+    const [move] = pending.splice(readyIndex, 1)
+    moveNode(document, move.nodeId, move.newParentId, move.index)
+  }
+  arrangeAfterInsert(document)
 }
 
 /**
@@ -570,6 +610,10 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       moveNode(document, command.nodeId, command.newParentId, command.index)
       arrangeAfterInsert(document)
       focusNodeId = command.nodeId
+      break
+    case 'REORGANIZE_NODES':
+      reorganizeNodes(document, command.moves)
+      focusNodeId = command.moves[0]?.nodeId
       break
     // 降低层级：变成前一同级节点的子节点（向右缩进）。
     case 'INDENT_NODE': {

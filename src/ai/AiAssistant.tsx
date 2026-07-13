@@ -16,6 +16,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
+import { parseMapReorganization, type MapReorganization } from './map-reorganization'
 import { useEditorStore } from '../store/editor.store'
 import { chatUrl, defaultAiSettings, isGhostCompletionEnabled, loadAiSettings, saveAiSettings, saveGhostCompletionEnabled, type AiSettings } from './ai-settings'
 
@@ -37,14 +38,26 @@ function mapContext(document: MindMapDocument) {
 }
 
 type GeneratedBranch = { branch: MindNodeClipboard; targetId: string; targetTopic: string; mode: 'branch' | 'plan' }
+type GeneratedReorganization = { plan: MapReorganization; sourceUpdatedAt: number }
 
 function BranchPreview({ branch, depth = 0 }: { branch: MindNodeClipboard; depth?: number }) {
   const taskMeta = [branch.taskStatus !== 'none' ? (branch.taskStatus === 'done' ? '已完成' : branch.taskStatus === 'doing' ? '进行中' : '待办') : '', branch.priority ? `P${branch.priority}` : '', branch.dueDate ?? ''].filter(Boolean).join(' · ')
   return <ul className={`ai-branch-preview__list depth-${depth}`}><li><span>{branch.topic}</span>{taskMeta && <small>{taskMeta}</small>}{branch.children.map((child, index) => <BranchPreview key={`${child.topic}-${index}`} branch={child} depth={depth + 1} />)}</li></ul>
 }
 
+function ReorganizationPreview({ plan, document }: { plan: MapReorganization; document: MindMapDocument }) {
+  if (!plan.moves.length) return <div className="ai-reorganization-preview__empty">AI 认为当前层级已经足够清晰，无需调整。</div>
+  return <ul className="ai-reorganization-preview__list">{plan.moves.map((move) => {
+    const node = document.nodes[move.nodeId]
+    const from = node?.parentId ? document.nodes[node.parentId] : null
+    const to = document.nodes[move.newParentId]
+    return <li key={move.nodeId}><strong>{node?.topic ?? '已删除节点'}</strong><span>{from?.topic ?? '根主题'} → {to?.topic ?? '根主题'}</span></li>
+  })}</ul>
+}
+
 export function AiAssistant({ document, targetNodeId }: { document: MindMapDocument; targetNodeId: string }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
+  const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
   const [settingsOpen, setSettingsOpen] = useState(true)
   const [prompt, setPrompt] = useState('')
@@ -52,6 +65,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
   const [notice, setNotice] = useState('配置后即可让 AI 基于当前导图协助思考。')
   const [isSending, setIsSending] = useState(false)
   const [generatedBranch, setGeneratedBranch] = useState<GeneratedBranch | null>(null)
+  const [reorganization, setReorganization] = useState<GeneratedReorganization | null>(null)
   const [ghostCompletionEnabled, setGhostCompletionEnabled] = useState(false)
 
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
@@ -73,7 +87,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     saveGhostCompletionEnabled(enabled)
   }
 
-  const requestAssistant = async (intent: 'chat' | 'branch' | 'plan') => {
+  const requestAssistant = async (intent: 'chat' | 'branch' | 'plan' | 'reorganize') => {
     if (!isConfigured) {
       setSettingsOpen(true)
       setNotice('请先完成并保存连接配置。')
@@ -82,17 +96,22 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     if (!prompt.trim() && intent === 'chat') return
 
     setIsSending(true)
-    setNotice(intent === 'branch' ? '正在生成可插入的分支…' : intent === 'plan' ? '正在生成可确认的执行计划…' : '正在请求你的模型…')
+    setNotice(intent === 'branch' ? '正在生成可插入的分支…' : intent === 'plan' ? '正在生成可确认的执行计划…' : intent === 'reorganize' ? '正在分析全图结构并生成预览…' : '正在请求你的模型…')
     setResponse('')
     if (intent !== 'chat') setGeneratedBranch(null)
+    if (intent !== 'reorganize') setReorganization(null)
     try {
       const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
       const instruction = intent === 'branch'
         ? '你是 MindTree 的思维导图助手。根据用户要求扩展当前节点。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"topic":"分支主题","children":[{"topic":"子主题","children":[]}]}; 最多 6 层、60 个节点。'
         : intent === 'plan'
           ? '你是 MindTree 的执行计划助手。根据用户要求把当前节点拆成可执行任务。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"topic":"计划名称","children":[{"topic":"任务","taskStatus":"todo","priority":1,"dueDate":"YYYY-MM-DD","children":[]}]}; 任务最多 12 项。priority 只能为 1、2、3；没有明确日期时省略 dueDate。'
+          : intent === 'reorganize'
+            ? '你是 MindTree 的导图结构编辑助手。审查整张导图的层级是否有重复、错位或归属不清的节点。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"summary":"一句整理说明","moves":[{"nodeId":"现有节点ID","newParentId":"现有父节点ID","index":0}]}. 只能使用输入中已有的 ID；不要移动根节点、自由主题；没有必要调整时返回空 moves 数组；最多 24 项。'
         : '你是 MindTree 的思维导图助手。请用简洁中文协助用户梳理、扩展或优化导图。'
-      const requestPrompt = prompt.trim() || `请围绕「${target.topic}」补全最有价值的分支。`
+      const requestPrompt = prompt.trim() || (intent === 'reorganize'
+        ? '请分析整张导图的层级与归属，仅提出确有必要的结构调整。'
+        : `请围绕「${target.topic}」补全最有价值的分支。`)
       const result = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey.trim()}` },
@@ -112,7 +131,11 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const content = payload.choices?.[0]?.message?.content?.trim()
       if (!content) throw new Error('模型没有返回可显示的内容。')
-      if (intent !== 'chat') {
+      if (intent === 'reorganize') {
+        const plan = parseMapReorganization(content, document)
+        setReorganization({ plan, sourceUpdatedAt: document.updatedAt })
+        setNotice(plan.moves.length ? `已生成 ${plan.moves.length} 项全图整理建议，请先核对预览。` : 'AI 认为当前结构无需调整。')
+      } else if (intent !== 'chat') {
         const branch = parseGeneratedBranch(content)
         setGeneratedBranch({ branch, targetId: target.id, targetTopic: target.topic, mode: intent })
         setNotice(intent === 'plan' ? `已生成 ${branchNodeCount(branch)} 个待插入计划节点，请先确认预览。` : `已生成 ${branchNodeCount(branch)} 个待插入节点，请先确认预览。`)
@@ -139,6 +162,18 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     if (inserted) setGeneratedBranch(null)
   }
 
+  const confirmReorganization = () => {
+    if (!reorganization?.plan.moves.length) return
+    if (document.updatedAt !== reorganization.sourceUpdatedAt) {
+      setReorganization(null)
+      setNotice('导图在预览期间已变更，请重新生成整理建议。')
+      return
+    }
+    const applied = dispatch({ type: 'REORGANIZE_NODES', moves: reorganization.plan.moves })
+    setNotice(applied ? `已应用 ${reorganization.plan.moves.length} 项结构调整，可按 ⌘Z 撤销。` : '应用失败：导图在预览期间已发生变化，请重新生成。')
+    if (applied) setReorganization(null)
+  }
+
   return (
     <section className="ai-assistant" aria-label="AI 助手">
       <div className="ai-assistant__heading">
@@ -160,9 +195,10 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
 
       <form className="ai-prompt" onSubmit={sendPrompt}>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="例如：帮我找出这张导图缺少的分支" />
-        <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button></div>
+        <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button><button type="button" className="ai-generate-button ai-generate-button--reorganize" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}>整理全图</button></div>
       </form>
       {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
+      {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
       {response && <div className="ai-response" aria-live="polite">{response}</div>}
     </section>
   )
