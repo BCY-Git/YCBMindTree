@@ -90,6 +90,7 @@ export function App() {
   const createDocument = useEditorStore((state) => state.createDocument)
   const createQuickNote = useEditorStore((state) => state.createQuickNote)
   const requestNodeFocus = useEditorStore((state) => state.requestNodeFocus)
+  const requestRelatedTopic = useEditorStore((state) => state.requestRelatedTopic)
   const clipboard = useEditorStore((state) => state.clipboard)
   const [documents, setDocuments] = useState<MindMapDocument[]>([])
   const [categories, setCategories] = useState<Category[]>(loadCategories)
@@ -739,6 +740,7 @@ export function App() {
           <div className="floating-toolbar__cluster">
             <button className="floating-toolbar__button" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建子节点' : '新建子节点 (Tab)'}><Icon>＋</Icon><span>子节点</span></button>
             <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon>↳</Icon><span>同级</span></button>
+            <button className="floating-toolbar__button" disabled={!selectedNode} onClick={() => selectedNode && requestRelatedTopic(selectedNode.id)} title={selectedNode ? '建立一条指向新主题的关系线' : '先选中一个节点'}><Icon>⌁</Icon><span>建立联系</span></button>
             <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon><span>排列</span></button>
           </div>
         </nav>
@@ -837,7 +839,11 @@ export function App() {
               <label className="field-label" htmlFor="relation-label">关系说明</label>
               <textarea id="relation-label" value={selectedRelation.label} rows={2} onChange={(event) => dispatch({ type: 'UPDATE_RELATION_LABEL', relationId: selectedRelation.id, label: event.target.value })} />
               <div className="property-row"><span>起点</span><strong>{document.nodes[selectedRelation.sourceId]?.topic ?? '已删除节点'}</strong></div>
-              <div className="property-row"><span>终点</span><strong>{document.nodes[selectedRelation.targetId]?.topic ?? '已删除节点'}</strong></div>
+              <label className="field-label" htmlFor="relation-target">指向节点</label>
+              <select id="relation-target" className="relation-target-select" value={selectedRelation.targetId} onChange={(event) => dispatch({ type: 'RETARGET_RELATION', relationId: selectedRelation.id, targetId: event.target.value })}>
+                {Object.values(document.nodes).filter((node) => node.id !== selectedRelation.sourceId).map((node) => <option key={node.id} value={node.id}>{node.topic || '未命名节点'}{node.isFreeTopic ? ' · 自由主题' : ''}</option>)}
+              </select>
+              <small className="relation-target-hint">可改为导图中任一已有节点；默认目标为新建自由主题。</small>
               <button className="danger-button" onClick={() => dispatch({ type: 'DELETE_RELATION', relationId: selectedRelation.id })}>删除此关系</button>
             </> : selectedNode ? <>
               {inspectorTab === 'content' && <section className="inspector-pane"><label className="field-label" htmlFor="topic">主题</label><textarea id="topic" value={selectedNode.topic} rows={3} onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })} /><label className="field-label" htmlFor="node-note">备注</label><GhostNoteEditor value={selectedNode.note} document={document} nodeId={selectedNode.id} onChange={(note) => dispatch({ type: 'UPDATE_NODE_NOTE', nodeId: selectedNode.id, note })} /></section>}

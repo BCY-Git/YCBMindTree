@@ -40,6 +40,9 @@ export type MindMapCommand =
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
+  /** 一次创建自由主题与关联线，避免用户得到半完成的“悬空关系”。 */
+  | { type: 'CREATE_RELATED_FREE_TOPIC'; sourceId: string; x: number; y: number; topic?: string; label?: string }
+  | { type: 'RETARGET_RELATION'; relationId: string; targetId: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
   | { type: 'DELETE_RELATION'; relationId: string }
   | { type: 'CREATE_BOUNDARY'; nodeIds: string[]; label?: string }
@@ -464,6 +467,30 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
         || (relation.sourceId === command.targetId && relation.targetId === command.sourceId))) throw new Error('节点之间已存在关系')
       const relation = createRelation(command.sourceId, command.targetId, command.label ?? '关联')
       document.relations.push(relation)
+      focusRelationId = relation.id
+      break
+    }
+    case 'CREATE_RELATED_FREE_TOPIC': {
+      if (!document.nodes[command.sourceId]) throw new Error('关系节点不存在')
+      const target = createNode(command.topic ?? '新主题', null)
+      target.isFreeTopic = true
+      target.offsetX = Math.round(command.x)
+      target.offsetY = Math.round(command.y)
+      document.nodes[target.id] = target
+      const relation = createRelation(command.sourceId, target.id, command.label ?? '关联')
+      document.relations.push(relation)
+      focusRelationId = relation.id
+      break
+    }
+    case 'RETARGET_RELATION': {
+      const relation = document.relations.find((item) => item.id === command.relationId)
+      if (!relation) throw new Error('关系不存在')
+      if (!document.nodes[command.targetId]) throw new Error('关系节点不存在')
+      if (command.targetId === relation.sourceId) throw new Error('关系不能连接节点自身')
+      if (document.relations.some((item) => item.id !== relation.id && ((item.sourceId === relation.sourceId && item.targetId === command.targetId)
+        || (item.sourceId === command.targetId && item.targetId === relation.sourceId)))) throw new Error('节点之间已存在关系')
+      relation.targetId = command.targetId
+      relation.updatedAt = Date.now()
       focusRelationId = relation.id
       break
     }

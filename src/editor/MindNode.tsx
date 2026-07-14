@@ -5,8 +5,8 @@
  * - 显示态（默认）：双击进入编辑态；子节点超过 0 个时显示折叠/展开按钮
  * - 编辑态：在输入框内直接修改主题文字，支持 AI 幽灵续写（Tab 接受）、Enter 提交、Escape 取消
  *
- * 左侧有 4 个隐藏的 Handle（source-left/right, target-left/right），
- * 由 tree-edge.ts 根据节点相对位置决定哪两个实际连接画布边。
+ * 树枝与关系线分别使用一组隐藏 Handle：树枝稳定连到卡片中线，
+ * 关系线则从上侧区域出发，避免与折叠按钮和主树枝重叠。
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react'
@@ -179,8 +179,10 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         autoScale
         onResizeEnd={(_, size) => dispatch({ type: 'SET_NODE_SIZE', nodeId: id, width: size.width, height: size.height })}
       />}
-      <Handle id="target-left" type="target" position={Position.Left} className="node-handle node-handle--target" style={{ top: '35%' }} isConnectable={!isEditing} />
-      <Handle id="target-right" type="target" position={Position.Right} className="node-handle node-handle--target" style={{ top: '35%' }} isConnectable={!isEditing} />
+      <Handle id="target-left" type="target" position={Position.Left} className="node-handle node-handle--target" style={{ top: '50%' }} isConnectable={false} />
+      <Handle id="target-right" type="target" position={Position.Right} className="node-handle node-handle--target" style={{ top: '50%' }} isConnectable={false} />
+      <Handle id="relation-target-left" type="target" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
+      <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
       {node.hasChildren && (
         <button
           className="collapse-toggle"
@@ -249,8 +251,10 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         </span>}
         <span>{node.label}</span>
       </div>}
-      <Handle id="source-left" type="source" position={Position.Left} className="node-handle node-handle--source" style={{ top: '65%' }} isConnectable={!isEditing} />
-      <Handle id="source-right" type="source" position={Position.Right} className="node-handle node-handle--source" style={{ top: '65%' }} isConnectable={!isEditing} />
+      <Handle id="source-left" type="source" position={Position.Left} className="node-handle node-handle--source" style={{ top: '50%' }} isConnectable={false} />
+      <Handle id="source-right" type="source" position={Position.Right} className="node-handle node-handle--source" style={{ top: '50%' }} isConnectable={false} />
+      <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
+      <Handle id="relation-source-right" type="source" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
     </div>
   )
 })

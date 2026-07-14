@@ -134,6 +134,32 @@ describe('MindTree command executor', () => {
     expect(deleted.nodes).toEqual(document.nodes)
   })
 
+  it('creates a free target and a relation together as one undoable command', () => {
+    const document = createInitialDocument()
+    const sourceId = document.nodes[document.rootId].childIds[0]
+    const result = executeCommand(document, { type: 'CREATE_RELATED_FREE_TOPIC', sourceId, x: 720, y: 280 })
+    const targetId = result.document.relations[0].targetId
+
+    expect(result.document.relations).toHaveLength(1)
+    expect(result.focusRelationId).toBe(result.document.relations[0].id)
+    expect(result.document.nodes[targetId]).toMatchObject({ isFreeTopic: true, parentId: null, topic: '新主题', offsetX: 720, offsetY: 280 })
+    expect(result.document.relations[0]).toMatchObject({ sourceId, targetId, label: '关联' })
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
+  it('retargets a relation to an existing node while preserving its source and label', () => {
+    const document = createInitialDocument()
+    const sourceId = document.nodes[document.rootId].childIds[0]
+    const existingTargetId = document.nodes[sourceId].childIds[0]
+    const created = executeCommand(document, { type: 'CREATE_RELATED_FREE_TOPIC', sourceId, x: 720, y: 280 })
+    const relation = created.document.relations[0]
+    const retargeted = executeCommand(created.document, { type: 'RETARGET_RELATION', relationId: relation.id, targetId: existingTargetId })
+
+    expect(retargeted.document.relations[0]).toMatchObject({ id: relation.id, sourceId, targetId: existingTargetId, label: '关联' })
+    expect(retargeted.focusRelationId).toBe(relation.id)
+    expect(() => assertValidDocument(retargeted.document)).not.toThrow()
+  })
+
   it('groups sibling nodes in a boundary and removes the boundary when it no longer has two nodes', () => {
     const document = createInitialDocument()
     const parentId = document.nodes[document.rootId].childIds[0]

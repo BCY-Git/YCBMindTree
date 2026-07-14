@@ -22,8 +22,8 @@ import {
   ReactFlow,
   ViewportPortal,
   applyNodeChanges,
+  MarkerType,
   type Edge,
-  type Connection,
   type Node,
   type NodePositionChange,
   type OnNodeDrag,
@@ -108,6 +108,8 @@ export function MindMapCanvas() {
   const selectRelation = useEditorStore((state) => state.selectRelation)
   const editNode = useEditorStore((state) => state.editNode)
   const clearNodeFocusRequest = useEditorStore((state) => state.clearNodeFocusRequest)
+  const relationCreationRequestSourceId = useEditorStore((state) => state.relationCreationRequestSourceId)
+  const clearRelationCreationRequest = useEditorStore((state) => state.clearRelationCreationRequest)
   const dispatch = useEditorStore((state) => state.dispatch)
   const copyNode = useEditorStore((state) => state.copyNode)
   const cutNode = useEditorStore((state) => state.cutNode)
@@ -263,16 +265,17 @@ export function MindMapCanvas() {
         id: relation.id,
         source: relation.sourceId,
         target: relation.targetId,
-        sourceHandle: targetIsRight ? 'source-right' : 'source-left',
-        targetHandle: targetIsRight ? 'target-left' : 'target-right',
-        type: 'smoothstep',
+        sourceHandle: targetIsRight ? 'relation-source-right' : 'relation-source-left',
+        targetHandle: targetIsRight ? 'relation-target-left' : 'relation-target-right',
+        type: 'default',
         label: relation.label,
         className: `mind-relation-edge ${isSelected ? 'is-selected' : ''}`,
         selectable: true,
-        style: { stroke: isSelected ? theme.selected : theme.branch, strokeWidth: isSelected ? 2.4 : 1.5, strokeDasharray: '7 5', opacity: isSelected ? 1 : (!hasActiveFilter(filter) || matchedById.get(relation.sourceId) || matchedById.get(relation.targetId) ? .82 : .14) },
-        labelStyle: { fill: theme.nodeText, fontSize: 11, fontWeight: 620 },
-        labelBgStyle: { fill: theme.nodeBackground, fillOpacity: .94 },
-        labelBgPadding: [5, 3] as [number, number],
+        style: { stroke: isSelected ? theme.selected : theme.branch, strokeWidth: isSelected ? 2.5 : 1.7, strokeDasharray: isSelected ? '0' : '8 6', strokeLinecap: 'round', opacity: isSelected ? 1 : (!hasActiveFilter(filter) || matchedById.get(relation.sourceId) || matchedById.get(relation.targetId) ? .82 : .14) },
+        markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? theme.selected : theme.branch, width: 16, height: 16 },
+        labelStyle: { fill: theme.nodeText, fontSize: 12, fontWeight: 680 },
+        labelBgStyle: { fill: theme.nodeBackground, fillOpacity: .98, stroke: theme.nodeBorder, strokeWidth: 1 },
+        labelBgPadding: [7, 4] as [number, number],
         labelBgBorderRadius: 4,
         zIndex: 2,
       }]
@@ -340,6 +343,25 @@ export function MindMapCanvas() {
     setSearchFocusNodeId(null)
   }, [baseNodes, flowInstance, searchFocusNodeId])
 
+  // 顶部“建立联系”只发出意图；画布掌握布局坐标，因而在源节点右侧创建默认自由主题。
+  // 该命令原子地写入主题和关系线，撤销时不会留下半截关系或孤立的历史状态。
+  useEffect(() => {
+    if (!relationCreationRequestSourceId) return
+    const source = baseNodes.find((node) => node.id === relationCreationRequestSourceId)
+    if (!source) {
+      clearRelationCreationRequest()
+      return
+    }
+    const width = source.measured?.width ?? source.width ?? 180
+    dispatch({
+      type: 'CREATE_RELATED_FREE_TOPIC',
+      sourceId: relationCreationRequestSourceId,
+      x: source.position.x + width + 220,
+      y: source.position.y,
+    })
+    clearRelationCreationRequest()
+  }, [baseNodes, clearRelationCreationRequest, dispatch, relationCreationRequestSourceId])
+
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     if (relationSourceId) {
       if (node.id !== relationSourceId && dispatch({ type: 'CREATE_RELATION', sourceId: relationSourceId, targetId: node.id })) setRelationSourceId(null)
@@ -347,10 +369,6 @@ export function MindMapCanvas() {
     }
     selectNode(node.id, event.metaKey || event.ctrlKey)
   }, [dispatch, relationSourceId, selectNode])
-  const onConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return
-    dispatch({ type: 'CREATE_RELATION', sourceId: connection.source, targetId: connection.target, label: '关系' })
-  }, [dispatch])
   const commitSelectionBox = useCallback(() => {
     const nextIds = flowInstance?.getNodes().filter((node) => node.selected).map((node) => node.id) ?? []
     const currentIds = useEditorStore.getState().selectedNodeIds
@@ -682,7 +700,6 @@ export function MindMapCanvas() {
         onNodesChange={onNodesChange}
         onInit={setFlowInstance}
         onNodeClick={onNodeClick}
-        onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         onNodeDrag={onNodeDrag}
         // 仅在框选手势结束时读取内部选择，避免 React Flow 的 nodes 同步通知反向写回状态。
@@ -690,6 +707,14 @@ export function MindMapCanvas() {
         onNodeContextMenu={(event, node) => openContextMenu(event.nativeEvent, node.id)}
         onPaneContextMenu={(event) => openContextMenu('nativeEvent' in event ? event.nativeEvent : event, null)}
         onEdgeClick={(event, edge) => { event.stopPropagation(); selectRelation(edge.id) }}
+        onEdgeDoubleClick={(event, edge) => {
+          event.stopPropagation()
+          const relation = document.relations.find((item) => item.id === edge.id)
+          if (!relation) return
+          selectRelation(relation.id)
+          const label = window.prompt('关系名称', relation.label)
+          if (label !== null) dispatch({ type: 'UPDATE_RELATION_LABEL', relationId: relation.id, label })
+        }}
         onEdgeContextMenu={(event, edge) => {
           event.preventDefault()
           selectRelation(edge.id)
@@ -707,7 +732,6 @@ export function MindMapCanvas() {
         panOnScroll
         panOnScrollMode={PanOnScrollMode.Vertical}
         panOnDrag={[2]}
-        nodesConnectable
         zoomOnDoubleClick={false}
         // 大图仅挂载当前视口附近的节点，避免远处卡片参与每次输入与拖拽的渲染。
         onlyRenderVisibleElements

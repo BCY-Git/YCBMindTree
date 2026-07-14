@@ -44,3 +44,16 @@
 .quick-assistant form { gap: 8px; }
 .quick-assistant form textarea { min-height: 46px; padding: 9px; font-size: 13px; }
 .quick-assistant form button { min-width: 58px; font-size: 13px; }
+
+/* 顶栏菜单要跨过工作区与左右面板，但仍低于真正的模态对话框。 */
+.topbar { z-index: 40; }
+.topbar-utility, .export-menu-wrap { z-index: 41; }
+.filter-menu, .export-menu { z-index: 42; }
+
+/* 树枝与折叠按钮共用中心锚点；关系从右键的“创建关系”进入，避免暴露第二套蓝色端点。 */
+.node-handle { opacity: 0 !important; pointer-events: none; }
+
+.relation-target-select { width: 100%; height: 36px; border: 1px solid var(--line, #d9dad0); border-radius: 7px; background: var(--node-bg, #fffefa); color: var(--node-text, #40423b); padding: 0 9px; font-size: 13px; outline-color: var(--accent, #47766a); }
+.relation-target-hint { display: block; margin-top: 6px; color: var(--muted-text, #85867c); font-size: 11px; line-height: 1.45; }
+.mind-relation-edge path { stroke-linecap: round; }
+.mind-relation-edge .react-flow__edge-text { cursor: text; }
