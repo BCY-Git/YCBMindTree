@@ -21,6 +21,21 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
+  it('toggles built-in marks in a stable order and replaces custom tag references', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+
+    const flagged = executeCommand(document, { type: 'TOGGLE_NODE_MARK', nodeId, mark: 'flag' }).document
+    const marked = executeCommand(flagged, { type: 'TOGGLE_NODE_MARK', nodeId, mark: 'idea' }).document
+    const tagged = executeCommand(marked, { type: 'SET_NODE_TAGS', nodeId, tagIds: ['work', 'important', 'work'] }).document
+    const unflagged = executeCommand(tagged, { type: 'TOGGLE_NODE_MARK', nodeId, mark: 'flag' }).document
+
+    expect(marked.nodes[nodeId].marks).toEqual(['flag', 'idea'])
+    expect(tagged.nodes[nodeId].tagIds).toEqual(['work', 'important'])
+    expect(unflagged.nodes[nodeId].marks).toEqual(['idea'])
+    expect(() => assertValidDocument(unflagged)).not.toThrow()
+  })
+
   it('automatically clears manual offsets after inserting nodes while retaining one freeform restore snapshot', () => {
     const document = createInitialDocument()
     const branchId = document.nodes[document.rootId].childIds[0]

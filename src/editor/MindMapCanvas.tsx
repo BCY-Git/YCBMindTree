@@ -41,6 +41,8 @@ import { getTreeEdgeAnchors } from './tree-edge'
 import { retainDraggingNodePosition } from './drag-state'
 import { resolveRegularTreeDragIntent, type TreeDropIntent } from './drag-intent'
 import type { MindNode as DomainMindNode } from '../domain/document.types'
+import { loadTags, type Tag } from '../domain/tag-library'
+import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 
 const nodeTypes = { mindNode: MindNode }
 // 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
@@ -111,6 +113,8 @@ export function MindMapCanvas() {
   const clipboard = useEditorStore((state) => state.clipboard)
   const undo = useEditorStore((state) => state.undo)
   const redo = useEditorStore((state) => state.redo)
+  const filter = useNodeFilterStore((state) => state.filter)
+  const [tags, setTags] = useState<Tag[]>(loadTags)
   const [contextMenu, setContextMenu] = useState<{ position: ContextMenuPosition; nodeId: string | null; relationId: string | null } | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -126,6 +130,12 @@ export function MindMapCanvas() {
   const fittedDocumentIdRef = useRef<string | null>(null)
   const rightPointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const suppressContextMenuRef = useRef(false)
+
+  useEffect(() => {
+    const reload = () => setTags(loadTags())
+    window.addEventListener('mindtree:tags-changed', reload)
+    return () => window.removeEventListener('mindtree:tags-changed', reload)
+  }, [])
 
   const reportEditingNodeHeight = useCallback((nodeId: string, height: number | null) => {
     setEditingNodeHeights((current) => {
@@ -175,9 +185,21 @@ export function MindMapCanvas() {
       while (current.parentId) { depth += 1; current = document.nodes[current.parentId] }
       return depth
     }
+    const tagById = new Map(tags.map((tag) => [tag.id, tag]))
+    const matchesFilter = (mindNode: DomainMindNode) => {
+      if (!hasActiveFilter(filter)) return true
+      const tagMatches = filter.tags.length === 0 || filter.tags.some((tagId) => mindNode.tagIds.includes(tagId))
+      const markMatches = filter.marks.length === 0 || filter.marks.some((mark) => mindNode.marks.includes(mark))
+      const statusMatches = filter.statuses.length === 0 || filter.statuses.includes(mindNode.taskStatus)
+      const priorityMatches = filter.priorities.length === 0 || filter.priorities.includes(mindNode.priority)
+      return tagMatches && markMatches && statusMatches && priorityMatches
+    }
+    const matchedById = new Map<string, boolean>()
     const baseNodes: Node<MindNodeData>[] = placed.map((item) => {
       const mindNode = document.nodes[item.id]
       const depth = depthOf(item.id)
+      const matched = matchesFilter(mindNode)
+      matchedById.set(item.id, matched)
       return {
         id: item.id,
         type: 'mindNode',
@@ -192,6 +214,11 @@ export function MindMapCanvas() {
           isFreeTopic: mindNode.isFreeTopic,
           taskStatus: mindNode.taskStatus,
           priority: mindNode.priority,
+          marks: mindNode.marks,
+          tags: mindNode.tagIds.flatMap((id) => {
+            const tag = tagById.get(id)
+            return tag ? [tag] : []
+          }),
           isDropTarget: (dropIntent?.kind === 'child' && dropIntent.parentId === item.id) || freeTopicAttachmentParentId === item.id,
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
@@ -200,7 +227,7 @@ export function MindMapCanvas() {
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
         },
-        style: { width: item.width, height: item.height },
+        style: { width: item.width, height: item.height, opacity: matched ? 1 : .18 },
       }
     })
     const treeEdges: Edge[] = placed.flatMap((item) => {
@@ -218,7 +245,7 @@ export function MindMapCanvas() {
             style: {
               stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : (theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch),
               strokeWidth: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? 3.4 : 2,
-              opacity: 1,
+              opacity: !hasActiveFilter(filter) || matchedById.get(mindNode.parentId) || matchedById.get(item.id) ? 1 : .14,
             },
           }]
         : []
@@ -239,7 +266,7 @@ export function MindMapCanvas() {
         label: relation.label,
         className: `mind-relation-edge ${isSelected ? 'is-selected' : ''}`,
         selectable: true,
-        style: { stroke: isSelected ? theme.selected : theme.branch, strokeWidth: isSelected ? 2.4 : 1.5, strokeDasharray: '7 5', opacity: isSelected ? 1 : .82 },
+        style: { stroke: isSelected ? theme.selected : theme.branch, strokeWidth: isSelected ? 2.4 : 1.5, strokeDasharray: '7 5', opacity: isSelected ? 1 : (!hasActiveFilter(filter) || matchedById.get(relation.sourceId) || matchedById.get(relation.targetId) ? .82 : .14) },
         labelStyle: { fill: theme.nodeText, fontSize: 11, fontWeight: 620 },
         labelBgStyle: { fill: theme.nodeBackground, fillOpacity: .94 },
         labelBgPadding: [5, 3] as [number, number],
@@ -267,7 +294,7 @@ export function MindMapCanvas() {
       return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
-  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, freeTopicAttachmentParentId, relationSourceId, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, theme])
+  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceId, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme])
 
   useEffect(() => {
     setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId))
@@ -720,6 +747,7 @@ export function MindMapCanvas() {
             })}
             onAttachToRoot={() => runContextAction(() => dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: targetNodeId, parentId: document.rootId }))}
             onEdit={() => runContextAction(() => editNode(targetNodeId))}
+            onToggleMark={(mark) => runContextAction(() => dispatch({ type: 'TOGGLE_NODE_MARK', nodeId: targetNodeId, mark }))}
             onCreateRelation={() => runContextAction(() => { selectNode(targetNodeId); setRelationSourceId(targetNodeId) })}
             onCreateBoundary={() => runContextAction(() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }))}
             onCreateSummary={() => runContextAction(() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds }))}

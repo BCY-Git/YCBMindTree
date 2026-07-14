@@ -26,6 +26,8 @@ export function createNode(topic: string, parentId: string | null): MindNode {
     taskStatus: 'none',
     priority: 0,
     dueDate: null,
+    marks: [],
+    tagIds: [],
     collapsed: false,
     width: null,
     height: null,

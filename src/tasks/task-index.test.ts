@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createInitialDocument } from '../domain/document.factory'
-import { collectTasks } from './task-index'
+import { collectTasks, subtreeTaskProgress } from './task-index'
 
 describe('task index', () => {
   it('collects tasks across documents and puts unfinished high priorities first', () => {
@@ -19,5 +19,16 @@ describe('task index', () => {
 
     expect(tasks.map((task) => task.nodeId)).toEqual([secondTask, firstTask])
     expect(tasks[0].dueDate).toBe('2030-01-01')
+    expect(tasks[0].path.at(-1)).toBe(tasks[0].topic)
+  })
+
+  it('derives a parent progress summary from every task in its subtree', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const [first, second] = document.nodes[branchId].childIds
+    document.nodes[first].taskStatus = 'done'
+    document.nodes[second].taskStatus = 'todo'
+
+    expect(subtreeTaskProgress(document, branchId)).toEqual({ done: 1, total: 2 })
   })
 })

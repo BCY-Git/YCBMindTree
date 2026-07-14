@@ -8,7 +8,8 @@
  * 菜单在视口边缘自动收缩，防止溢出；点击菜单外部或按 Escape 关闭。
  */
 import { useEffect, useRef } from 'react'
-import type { MindMapRelation, MindNode } from '../domain/document.types'
+import type { MindMapRelation, MindNode, NodeMark } from '../domain/document.types'
+import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
 
 export type ContextMenuPosition = { x: number; y: number }
 
@@ -22,6 +23,7 @@ type ContextMenuProps = {
   onAddFreeTopic: () => void
   onAttachToRoot: () => void
   onEdit: () => void
+  onToggleMark: (mark: NodeMark) => void
   onCreateRelation: () => void
   onCreateBoundary: () => void
   onCreateSummary: () => void
@@ -62,7 +64,7 @@ function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
   )
 }
 
-export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddFreeTopic, onAttachToRoot, onEdit, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
+export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddFreeTopic, onAttachToRoot, onEdit, onToggleMark, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const isCanvasMenu = node === null && relation === null
 
@@ -81,7 +83,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
 
   const style = {
     left: Math.min(position.x, window.innerWidth - 238),
-    top: Math.min(position.y, window.innerHeight - (relation ? 148 : isCanvasMenu ? 386 : 670)),
+    top: Math.min(position.y, window.innerHeight - (relation ? 148 : isCanvasMenu ? 386 : 790)),
   }
 
   return (
@@ -113,6 +115,8 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <div className="context-menu__hint">将自由主题归入中心主题，并自动按树形层级排列。</div>
           <div className="context-menu__divider" />
           <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
+          <div className="context-menu__hint">标记</div>
+          {nodeMarkOrder.map((mark) => <MenuItem key={mark} onClick={() => onToggleMark(mark)}>{`${node.marks.includes(mark) ? '✓ ' : ''}${nodeMarkMeta[mark].icon} ${nodeMarkMeta[mark].label}`}</MenuItem>)}
           <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>
           <MenuItem onClick={onCopy} shortcut="⌘ C">复制主题</MenuItem>
           <MenuItem onClick={onCut} shortcut="⌘ X">剪切主题</MenuItem>
@@ -124,6 +128,8 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <MenuItem onClick={onAddSibling} shortcut="Enter" disabled={isRoot}>新建同级节点</MenuItem>
           <div className="context-menu__divider" />
           <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
+          <div className="context-menu__hint">标记</div>
+          {nodeMarkOrder.map((mark) => <MenuItem key={mark} onClick={() => onToggleMark(mark)}>{`${node.marks.includes(mark) ? '✓ ' : ''}${nodeMarkMeta[mark].icon} ${nodeMarkMeta[mark].label}`}</MenuItem>)}
           <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>
           <MenuItem onClick={onCreateBoundary} disabled={!canCreateBoundary}>为所选节点创建边界</MenuItem>
           <MenuItem onClick={onCreateSummary} disabled={!canCreateBoundary}>为所选节点创建摘要</MenuItem>

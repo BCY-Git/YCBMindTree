@@ -44,6 +44,8 @@ export function parseGeneratedBranch(content: string): MindNodeClipboard {
       taskStatus: parseTaskStatus(node.taskStatus),
       priority: parsePriority(node.priority),
       dueDate: parseDueDate(node.dueDate),
+      marks: [],
+      tagIds: [],
       collapsed: false,
       children: (node.children ?? []).map((child) => parseNode(child, depth + 1)),
     }

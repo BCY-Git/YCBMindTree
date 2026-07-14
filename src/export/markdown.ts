@@ -1,6 +1,8 @@
 import type { MindMapDocument, MindNode } from '../domain/document.types'
+import { loadTags } from '../domain/tag-library'
+import { nodeMarkMeta } from '../domain/node-semantics'
 
-export type MarkdownExportMode = 'outline' | 'minutes' | 'ai-context'
+export type MarkdownExportMode = 'outline' | 'minutes' | 'ai-context' | 'tasks'
 
 function nodeExtras(node: MindNode, prefix = ''): string[] {
   const lines: string[] = []
@@ -14,7 +16,13 @@ function nodeExtras(node: MindNode, prefix = ''): string[] {
 function nodeMarkerPrefix(node: MindNode): string {
   const task = node.taskStatus === 'todo' ? '☐ 待办 ' : node.taskStatus === 'doing' ? '◐ 进行中 ' : node.taskStatus === 'done' ? '☑ 已完成 ' : ''
   const priority = node.priority > 0 ? `[P${node.priority}] ` : ''
-  return `${task}${priority}`
+  const marks = node.marks.map((mark) => `[${nodeMarkMeta[mark].label}]`).join(' ')
+  const tags = node.tagIds.map((id) => `#${tagName(id)}`).join(' ')
+  return `${task}${priority}${marks}${marks && tags ? ' ' : ''}${tags}${(marks || tags) ? ' ' : ''}`
+}
+
+function tagName(id: string) {
+  return loadTags().find((tag) => tag.id === id)?.name ?? id
 }
 
 function outline(document: MindMapDocument) {
@@ -63,7 +71,24 @@ function aiContext(document: MindMapDocument) {
   return lines.join('\n').trimEnd()
 }
 
+function tasks(document: MindMapDocument) {
+  const lines = [`# ${document.title} · 任务清单`, '']
+  const visit = (nodeId: string, path: string[]) => {
+    const node = document.nodes[nodeId]
+    const nextPath = [...path, node.topic]
+    if (node.taskStatus !== 'none') {
+      const checked = node.taskStatus === 'done' ? 'x' : ' '
+      const details = [node.priority > 0 ? `P${node.priority}` : '', node.dueDate ? `截止 ${node.dueDate}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tagIds.map((id) => `#${tagName(id)}`)].filter(Boolean)
+      lines.push(`- [${checked}] ${nextPath.join(' › ')}${details.length ? ` · ${details.join(' · ')}` : ''}`)
+    }
+    node.childIds.forEach((childId) => visit(childId, nextPath))
+  }
+  visit(document.rootId, [])
+  return lines.join('\n')
+}
+
 export function exportMarkdown(document: MindMapDocument, mode: MarkdownExportMode): string {
+  if (mode === 'tasks') return tasks(document)
   if (mode === 'minutes') return minutes(document)
   if (mode === 'ai-context') return aiContext(document)
   return outline(document)

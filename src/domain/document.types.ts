@@ -34,6 +34,10 @@ export type MindNode = {
   priority: MindNodePriority
   /** 本地日期 YYYY-MM-DD；不设时间，避免跨时区意外偏移。 */
   dueDate: string | null
+  /** 固定语义标记，适合快速扫读；与任务状态、优先级保持独立。 */
+  marks: NodeMark[]
+  /** 用户标签库的引用；找不到标签定义时保留引用但不渲染。 */
+  tagIds: string[]
   collapsed: boolean
   /** 用户从右下角拖拽后的尺寸；null 时由标题内容自动计算。 */
   width: number | null
@@ -46,6 +50,7 @@ export type MindNode = {
 
 export type MindNodeTaskStatus = 'none' | 'todo' | 'doing' | 'done'
 export type MindNodePriority = 0 | 1 | 2 | 3
+export type NodeMark = 'flag' | 'star' | 'risk' | 'idea'
 
 export type MindNodeLink = {
   id: string

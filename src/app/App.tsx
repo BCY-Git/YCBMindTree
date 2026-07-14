@@ -16,7 +16,7 @@ import { getNodeAttachment, getSyncMetadata, listDocumentVersions, listDocuments
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
-import type { MindMapDocument } from '../domain/document.types'
+import type { MindMapDocument, NodeMark } from '../domain/document.types'
 import { SyncDialog } from '../sync/SyncDialog'
 import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
 import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
@@ -30,6 +30,9 @@ import { TaskCenterDialog } from '../tasks/TaskCenterDialog'
 import { collectTasks, type MindTreeTask } from '../tasks/task-index'
 import { executeCommand } from '../domain/commands'
 import { QuickAssistant } from '../ai/QuickAssistant'
+import { createTag, deleteTag, loadTags, recolorTag, renameTag, saveTags, type Tag } from '../domain/tag-library'
+import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
+import { emptyNodeFilter, hasActiveFilter, useNodeFilterStore } from '../editor/filter-store'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -44,6 +47,10 @@ type PendingNavigation =
 
 type SidebarPanel = 'projects' | 'maps' | 'tasks' | 'assistant'
 type InspectorTab = 'content' | 'tasks' | 'resources' | 'map'
+
+function toggleValue<T>(values: T[], value: T) {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
+}
 
 // localStorage key for persisting user-defined categories.
 const categoryStorageKey = 'mindtree.categories.v1'
@@ -116,6 +123,9 @@ export function App() {
   const [draftTitle, setDraftTitle] = useState('')
   const [draftCategoryId, setDraftCategoryId] = useState('uncategorized')
   const [taskCenterOpen, setTaskCenterOpen] = useState(false)
+  const [tags, setTags] = useState<Tag[]>(loadTags)
+  const [tagDraft, setTagDraft] = useState('')
+  const [filterOpen, setFilterOpen] = useState(false)
   const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
   const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
@@ -124,6 +134,9 @@ export function App() {
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const pendingTaskFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
+  const nodeFilter = useNodeFilterStore((state) => state.filter)
+  const setNodeFilter = useNodeFilterStore((state) => state.setFilter)
+  const clearNodeFilter = useNodeFilterStore((state) => state.clearFilter)
   const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
   const libraryDocuments = useMemo(() => documents.filter((item) => !isBackgroundBackup(item)), [documents])
@@ -144,7 +157,28 @@ export function App() {
   const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
   const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
   const openTaskCount = useMemo(() => tasks.filter((task) => task.status !== 'done').length, [tasks])
+  const tagReferenceCount = (tagId: string) => taskDocuments.reduce((count, item) => count + Object.values(item.nodes).filter((node) => node.tagIds.includes(tagId)).length, 0)
   const toggleSidebarPanel = (panel: SidebarPanel) => setSidebarPanel((current) => current === panel ? null : panel)
+
+  useEffect(() => {
+    const refresh = () => setTags(loadTags())
+    window.addEventListener('mindtree:tags-changed', refresh)
+    return () => window.removeEventListener('mindtree:tags-changed', refresh)
+  }, [])
+
+  const setSelectedNodeTags = (tagIds: string[]) => {
+    if (selectedNode) dispatch({ type: 'SET_NODE_TAGS', nodeId: selectedNode.id, tagIds })
+  }
+
+  const addTagToSelectedNode = () => {
+    if (!selectedNode || !tagDraft.trim()) return
+    const normalized = tagDraft.trim()
+    const existing = tags.find((tag) => tag.name.toLocaleLowerCase() === normalized.toLocaleLowerCase())
+    const tag = existing ?? createTag(normalized)
+    if (!existing) saveTags([...tags, tag])
+    setSelectedNodeTags([...selectedNode.tagIds, tag.id])
+    setTagDraft('')
+  }
 
   const exportCurrentDocument = (mode: MarkdownExportMode) => {
     downloadMarkdown(document, mode)
@@ -697,7 +731,8 @@ export function App() {
         <div className="topbar-utility">
           <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
-          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown" aria-label="导出"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
+          <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
+          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown" aria-label="导出"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
           {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
         </div>
@@ -792,7 +827,11 @@ export function App() {
               <button className="danger-button" onClick={() => dispatch({ type: 'DELETE_RELATION', relationId: selectedRelation.id })}>删除此关系</button>
             </> : selectedNode ? <>
               {inspectorTab === 'content' && <section className="inspector-pane"><label className="field-label" htmlFor="topic">主题</label><textarea id="topic" value={selectedNode.topic} rows={3} onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })} /><label className="field-label" htmlFor="node-note">备注</label><GhostNoteEditor value={selectedNode.note} document={document} nodeId={selectedNode.id} onChange={(note) => dispatch({ type: 'UPDATE_NODE_NOTE', nodeId: selectedNode.id, note })} /></section>}
-              {inspectorTab === 'tasks' && <section className="inspector-pane"><div className="node-marker-controls"><label>任务状态<select value={selectedNode.taskStatus} onChange={(event) => dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: selectedNode.id, taskStatus: event.target.value as typeof selectedNode.taskStatus })}><option value="none">普通主题</option><option value="todo">待办</option><option value="doing">进行中</option><option value="done">已完成</option></select></label><label>优先级<select value={selectedNode.priority} onChange={(event) => dispatch({ type: 'SET_NODE_PRIORITY', nodeId: selectedNode.id, priority: Number(event.target.value) as typeof selectedNode.priority })}><option value="0">未设置</option><option value="1">P1 · 高</option><option value="2">P2 · 中</option><option value="3">P3 · 低</option></select></label><label className="node-marker-controls__due-date">截止日期<input type="date" value={selectedNode.dueDate ?? ''} disabled={selectedNode.taskStatus === 'none'} onChange={(event) => dispatch({ type: 'SET_NODE_DUE_DATE', nodeId: selectedNode.id, dueDate: event.target.value || null })} /></label></div></section>}
+              {inspectorTab === 'tasks' && <section className="inspector-pane">
+                <div className="node-marker-controls"><label>任务状态<select value={selectedNode.taskStatus} onChange={(event) => dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: selectedNode.id, taskStatus: event.target.value as typeof selectedNode.taskStatus })}><option value="none">普通主题</option><option value="todo">待办</option><option value="doing">进行中</option><option value="done">已完成</option></select></label><label>优先级<select value={selectedNode.priority} onChange={(event) => dispatch({ type: 'SET_NODE_PRIORITY', nodeId: selectedNode.id, priority: Number(event.target.value) as typeof selectedNode.priority })}><option value="0">未设置</option><option value="1">P1 · 高</option><option value="2">P2 · 中</option><option value="3">P3 · 低</option></select></label><label className="node-marker-controls__due-date">截止日期<input type="date" value={selectedNode.dueDate ?? ''} disabled={selectedNode.taskStatus === 'none'} onChange={(event) => dispatch({ type: 'SET_NODE_DUE_DATE', nodeId: selectedNode.id, dueDate: event.target.value || null })} /></label></div>
+                <div className="node-semantic-section"><p className="field-label">标记</p><div className="node-mark-picker">{nodeMarkOrder.map((mark) => <button key={mark} className={selectedNode.marks.includes(mark) ? 'is-active' : ''} onClick={() => dispatch({ type: 'TOGGLE_NODE_MARK', nodeId: selectedNode.id, mark })} title={nodeMarkMeta[mark].label}>{nodeMarkMeta[mark].icon}<span>{nodeMarkMeta[mark].label}</span></button>)}</div></div>
+                <div className="node-semantic-section"><p className="field-label">标签</p><div className="node-tag-list">{selectedNode.tagIds.flatMap((tagId) => { const tag = tags.find((item) => item.id === tagId); return tag ? [<button key={tag.id} onClick={() => setSelectedNodeTags(selectedNode.tagIds.filter((id) => id !== tag.id))}><i style={{ background: tag.color }} />{tag.name} ×</button>] : [] })}</div><form className="node-tag-add" onSubmit={(event) => { event.preventDefault(); addTagToSelectedNode() }}><input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="输入标签，如 #工作" /><button type="submit">添加</button></form>{tags.length > 0 && <div className="node-tag-library">{tags.filter((tag) => !selectedNode.tagIds.includes(tag.id)).map((tag) => <button key={tag.id} onClick={() => setSelectedNodeTags([...selectedNode.tagIds, tag.id])}><i style={{ background: tag.color }} />{tag.name}</button>)}</div>}<details className="tag-library-manager"><summary>管理标签库</summary>{tags.map((tag) => <div key={tag.id}><input type="color" value={tag.color} onChange={(event) => { recolorTag(tag.id, event.target.value) }} /><input defaultValue={tag.name} aria-label={`${tag.name} 标签名称`} onBlur={(event) => { if (event.target.value.trim() !== tag.name) renameTag(tag.id, event.target.value) }} /><button onClick={() => { const count = tagReferenceCount(tag.id); if (window.confirm(`删除“${tag.name}”？${count ? `仍有 ${count} 个节点保留该标签引用。` : ''}`)) deleteTag(tag.id) }}>删除</button></div>)}</details></div>
+              </section>}
               {inspectorTab === 'resources' && <section className="inspector-pane"><div className="node-resource-section"><p className="field-label">链接</p>{selectedNode.links.map((link) => <div className="node-resource" key={link.id}><a href={link.url} target="_blank" rel="noreferrer" title={link.url}>{link.label}</a><button onClick={() => dispatch({ type: 'DELETE_NODE_LINK', nodeId: selectedNode.id, linkId: link.id })} aria-label={`删除链接 ${link.label}`}>×</button></div>)}<form className="node-link-form" onSubmit={addNodeLink}><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://…" type="url" /><input value={linkLabel} onChange={(event) => setLinkLabel(event.target.value)} placeholder="链接名称（可选）" /><button type="submit">添加链接</button></form></div><div className="node-resource-section"><p className="field-label">附件</p>{selectedNode.attachments.map((attachment) => <div className="node-resource" key={attachment.id}><button className="node-resource__file" onClick={() => { void downloadNodeAttachment(attachment.id) }} title="下载本机附件">⌁ {attachment.name}<small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small></button><button onClick={() => dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: selectedNode.id, attachmentId: attachment.id })} aria-label={`移除附件 ${attachment.name}`}>×</button></div>)}<input ref={attachmentInputRef} className="node-attachment-input" type="file" onChange={(event) => { void uploadNodeAttachment(event) }} /><button className="subtle-button" onClick={() => attachmentInputRef.current?.click()}>添加本机附件</button><small className="node-resource__hint">单个文件最大 15 MB，不会自动上传云端。</small>{attachmentStatus && <small className="node-resource__hint">{attachmentStatus}</small>}</div></section>}
               {inspectorTab === 'map' && <section className="inspector-pane"><div className="property-row"><span>子节点</span><strong>{selectedNode.childIds.length}</strong></div><div className="property-row"><span>状态</span><strong>{selectedNode.collapsed ? '已折叠' : '已展开'}</strong></div><button className="subtle-button" onClick={() => dispatch({ type: 'RESET_NODE_OFFSET', nodeId: selectedNode.id })}>重置节点位置</button><button className="danger-button" disabled={selectedNode.id === document.rootId} onClick={() => dispatch({ type: 'DELETE_NODE', nodeId: selectedNode.id })}>删除此分支</button><div className="theme-picker"><p className="eyebrow">主题</p><div className="theme-grid">{themes.map((candidate) => <button key={candidate.id} className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`} onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })} title={candidate.description}><span className="theme-preview" style={{ background: candidate.canvas }}><i style={{ background: candidate.rootBackground }} />{candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}</span><span>{candidate.name}</span></button>)}</div></div><div className="layout-controls"><p className="eyebrow">布局</p><label>层级间距 <output>{document.layout.levelGap}</output></label><input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} /><label>同级间距 <output>{document.layout.siblingGap}</output></label><input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} /></div></section>}
             </> : <section className="inspector-pane"><p className="empty-inspector">选择一个节点，即可编辑内容和查看分支信息。</p><div className="theme-picker"><p className="eyebrow">主题</p><div className="theme-grid">{themes.map((candidate) => <button key={candidate.id} className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`} onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })} title={candidate.description}><span className="theme-preview" style={{ background: candidate.canvas }}><i style={{ background: candidate.rootBackground }} />{candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}</span><span>{candidate.name}</span></button>)}</div></div><div className="layout-controls"><p className="eyebrow">布局</p><label>层级间距 <output>{document.layout.levelGap}</output></label><input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} /><label>同级间距 <output>{document.layout.siblingGap}</output></label><input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} /></div></section>}
@@ -838,7 +877,7 @@ export function App() {
         onDuplicate={(version) => { void duplicateVersion(version) }}
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
-      {taskCenterOpen && <TaskCenterDialog tasks={tasks} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} />}
+      {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} />}
       <QuickAssistant document={document} />
       {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
         <section className="draft-save-dialog">

@@ -14,6 +14,8 @@ function renderEditingNode() {
     isFreeTopic: false,
     taskStatus: 'none',
     priority: 0,
+    marks: [],
+    tags: [],
     isDropTarget: false,
     hasChildren: false,
     collapsed: false,

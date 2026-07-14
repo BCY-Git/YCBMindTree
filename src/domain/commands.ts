@@ -14,7 +14,7 @@
  */
 import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus } from './document.types'
+import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from './document.types'
 import type { ThemeId } from './themes'
 
 /**
@@ -35,6 +35,8 @@ export type MindMapCommand =
   | { type: 'SET_NODE_TASK_STATUS'; nodeId: string; taskStatus: MindNodeTaskStatus }
   | { type: 'SET_NODE_PRIORITY'; nodeId: string; priority: MindNodePriority }
   | { type: 'SET_NODE_DUE_DATE'; nodeId: string; dueDate: string | null }
+  | { type: 'TOGGLE_NODE_MARK'; nodeId: string; mark: NodeMark }
+  | { type: 'SET_NODE_TAGS'; nodeId: string; tagIds: string[] }
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
@@ -85,6 +87,8 @@ export type MindNodeClipboard = {
   taskStatus: MindNodeTaskStatus
   priority: MindNodePriority
   dueDate: string | null
+  marks: NodeMark[]
+  tagIds: string[]
   collapsed: boolean
   children: MindNodeClipboard[]
 }
@@ -248,6 +252,8 @@ export function createNodeClipboard(document: MindMapDocument, nodeId: string): 
     taskStatus: node.taskStatus,
     priority: node.priority,
     dueDate: node.dueDate,
+    marks: [...node.marks],
+    tagIds: [...node.tagIds],
     collapsed: node.collapsed,
     children: node.childIds.map((childId) => createNodeClipboard(document, childId)),
   }
@@ -265,6 +271,8 @@ function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: Mi
   node.taskStatus = clipboard.taskStatus
   node.priority = clipboard.priority
   node.dueDate = clipboard.dueDate
+  node.marks = [...clipboard.marks]
+  node.tagIds = [...clipboard.tagIds]
   document.nodes[node.id] = node
   node.childIds = clipboard.children.map((child) => pasteSubtree(document, node.id, child))
   return node.id
@@ -392,6 +400,24 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const dueDate = command.dueDate?.trim() || null
       if (dueDate && !isValidDate(dueDate)) throw new Error('截止日期格式无效')
       node.dueDate = dueDate
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'TOGGLE_NODE_MARK': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      const marks = new Set(node.marks)
+      if (marks.has(command.mark)) marks.delete(command.mark)
+      else marks.add(command.mark)
+      const order: NodeMark[] = ['flag', 'star', 'risk', 'idea']
+      node.marks = order.filter((mark) => marks.has(mark))
+      node.updatedAt = Date.now()
+      break
+    }
+    case 'SET_NODE_TAGS': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      node.tagIds = [...new Set(command.tagIds.map((id) => id.trim()).filter(Boolean))]
       node.updatedAt = Date.now()
       break
     }

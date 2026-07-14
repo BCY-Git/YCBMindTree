@@ -13,6 +13,8 @@ import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/rea
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
+import type { NodeMark } from '../domain/document.types'
+import { nodeMarkMeta } from '../domain/node-semantics'
 
 export type MindNodeData = {
   label: string
@@ -20,6 +22,8 @@ export type MindNodeData = {
   isFreeTopic: boolean
   taskStatus: 'none' | 'todo' | 'doing' | 'done'
   priority: 0 | 1 | 2 | 3
+  marks: NodeMark[]
+  tags: Array<{ id: string; name: string; color: string }>
   isDropTarget: boolean
   hasChildren: boolean
   collapsed: boolean
@@ -237,9 +241,11 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
       ) : <div className="node-label" title="双击编辑主题">
-        {(taskIcon || node.priority > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : ''].filter(Boolean).join('，')}>
+        {(taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
           {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
           {node.priority > 0 && <i className="node-priority" aria-hidden="true">P{node.priority}</i>}
+          {node.marks.map((mark) => <i key={mark} className={`node-mark node-mark--${mark}`} title={nodeMarkMeta[mark].label} aria-hidden="true">{nodeMarkMeta[mark].icon}</i>)}
+          {node.tags.map((tag) => <i key={tag.id} className="node-tag-dot" title={tag.name} style={{ '--tag-color': tag.color } as CSSProperties} aria-hidden="true" />)}
         </span>}
         <span>{node.label}</span>
       </div>}

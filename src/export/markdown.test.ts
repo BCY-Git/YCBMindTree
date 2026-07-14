@@ -23,4 +23,15 @@ describe('Markdown export', () => {
     expect(markdown).toContain('Use the following tree as source context')
     expect(markdown).toContain('## 我的思维导图 / 从这里开始')
   })
+
+  it('exports marks, tags and a task-only checklist with path context', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    const semantic = executeCommand(document, { type: 'TOGGLE_NODE_MARK', nodeId, mark: 'idea' }).document
+    const tagged = executeCommand(semantic, { type: 'SET_NODE_TAGS', nodeId, tagIds: ['work'] }).document
+    const tasked = executeCommand(tagged, { type: 'SET_NODE_TASK_STATUS', nodeId, taskStatus: 'todo' }).document
+
+    expect(exportMarkdown(tasked, 'outline')).toContain('[灵感] #work')
+    expect(exportMarkdown(tasked, 'tasks')).toContain('- [ ] 我的思维导图 › 从这里开始')
+  })
 })
