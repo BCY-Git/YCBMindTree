@@ -23,6 +23,7 @@ import {
   ViewportPortal,
   applyNodeChanges,
   type Edge,
+  type Connection,
   type Node,
   type NodePositionChange,
   type OnNodeDrag,
@@ -43,6 +44,7 @@ import { resolveRegularTreeDragIntent, type TreeDropIntent } from './drag-intent
 import type { MindNode as DomainMindNode } from '../domain/document.types'
 import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
+import { saveNodeAttachment } from '../persistence/database'
 
 const nodeTypes = { mindNode: MindNode }
 // 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
@@ -127,6 +129,7 @@ export function MindMapCanvas() {
   const [flowNodes, setFlowNodes] = useState<Node<MindNodeData>[]>([])
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
+  const [pasteAttachmentStatus, setPasteAttachmentStatus] = useState<string | null>(null)
   const fittedDocumentIdRef = useRef<string | null>(null)
   const rightPointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const suppressContextMenuRef = useRef(false)
@@ -344,6 +347,10 @@ export function MindMapCanvas() {
     }
     selectNode(node.id, event.metaKey || event.ctrlKey)
   }, [dispatch, relationSourceId, selectNode])
+  const onConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target || connection.source === connection.target) return
+    dispatch({ type: 'CREATE_RELATION', sourceId: connection.source, targetId: connection.target, label: '关系' })
+  }, [dispatch])
   const commitSelectionBox = useCallback(() => {
     const nextIds = flowInstance?.getNodes().filter((node) => node.selected).map((node) => node.id) ?? []
     const currentIds = useEditorStore.getState().selectedNodeIds
@@ -569,7 +576,8 @@ export function MindMapCanvas() {
       if (meta && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
       if (meta && event.key.toLowerCase() === 'c') { event.preventDefault(); copyNode(selected); return }
       if (meta && event.key.toLowerCase() === 'x') { event.preventDefault(); cutNode(selected); return }
-      if (meta && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteIntoNode(selected); return }
+      // 粘贴要等 ClipboardEvent 才能分辨图片还是内部复制的节点分支。
+      if (meta && event.key.toLowerCase() === 'v') return
       if (event.key === 'Enter') { event.preventDefault(); dispatch({ type: 'ADD_SIBLING', nodeId: selected }); return }
       if (event.key === 'Tab' && event.shiftKey) { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
       if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'INDENT_NODE', nodeId: selected }); return }
@@ -615,6 +623,30 @@ export function MindMapCanvas() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, pasteIntoNode, redo, relationSourceId, selectNode, undo])
 
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return
+      const image = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'))?.getAsFile()
+      const selected = useEditorStore.getState().selectedNodeId ?? document.rootId
+      if (!image) {
+        event.preventDefault()
+        pasteIntoNode(selected)
+        return
+      }
+      event.preventDefault()
+      if (image.size > 15 * 1024 * 1024) { setPasteAttachmentStatus('图片超过 15 MB，未添加。'); return }
+      const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
+      void saveNodeAttachment(document.id, selected, file)
+        .then((attachment) => {
+          if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selected, attachment })) setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
+        })
+        .catch(() => setPasteAttachmentStatus('图片保存失败，请重试。'))
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [dispatch, document.id, document.rootId, pasteIntoNode])
+
   return (
     <div className="canvas-shell" style={{
       '--canvas': theme.canvas,
@@ -650,6 +682,7 @@ export function MindMapCanvas() {
         onNodesChange={onNodesChange}
         onInit={setFlowInstance}
         onNodeClick={onNodeClick}
+        onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         onNodeDrag={onNodeDrag}
         // 仅在框选手势结束时读取内部选择，避免 React Flow 的 nodes 同步通知反向写回状态。
@@ -674,6 +707,7 @@ export function MindMapCanvas() {
         panOnScroll
         panOnScrollMode={PanOnScrollMode.Vertical}
         panOnDrag={[2]}
+        nodesConnectable
         zoomOnDoubleClick={false}
         // 大图仅挂载当前视口附近的节点，避免远处卡片参与每次输入与拖拽的渲染。
         onlyRenderVisibleElements
@@ -728,6 +762,7 @@ export function MindMapCanvas() {
       {relationSourceId && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>请选择另一个节点作为目标 · Esc 取消</span></div>}
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : `松开即可插入此分支的第 ${dropIntent.index + 1} 个位置`}</div>}
+      {pasteAttachmentStatus && <div className="paste-attachment-hint" role="status">{pasteAttachmentStatus}</div>}
       {searchOpen && <NodeSearchDialog document={document} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const parentId = selectedNodeId ?? document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}
       {contextMenu && (() => {
         const contextNode = contextMenu.nodeId ? document.nodes[contextMenu.nodeId] : null

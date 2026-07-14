@@ -1,0 +1,46 @@
+/* 阅读优先：侧栏和随手助手不再使用微型说明字作为主要信息层。 */
+.sidebar-workspace-name { font-size: 14px; }
+.sidebar-create { min-height: 38px; font-size: 13px; }
+.sidebar-quick-note { min-height: 56px; }
+.sidebar-quick-note strong { font-size: 13px; }
+.sidebar-quick-note small, .sidebar-quick-note i { font-size: 10px; }
+.sidebar-section__title { font-size: 11px; }
+.sidebar-section__heading span { font-size: 10px; }
+.sidebar-nav-item, .sidebar-add-category { min-height: 33px; font-size: 13px; }
+.sidebar-nav-item small { font-size: 10px; }
+.sidebar-add-category { font-size: 12px; }
+.sidebar-category-form input, .sidebar-category-form button { font-size: 12px; }
+.sidebar-document { min-height: 45px; }
+.sidebar-document__copy strong { font-size: 13px; }
+.sidebar-document__copy small, .sidebar-empty, .sidebar-category-select { font-size: 11px; }
+.sidebar-category-select select { font-size: 12px; }
+.sidebar-footer-action { min-height: 32px; font-size: 12px; }
+.sidebar-account__trigger strong { font-size: 12px; }
+.sidebar-account__trigger small { font-size: 10px; }
+.sidebar-account__menu strong { font-size: 13px; }
+.sidebar-account__menu p, .sidebar-account__menu button { font-size: 11px; }
+
+.inspector-tabs button { height: 31px; font-size: 11px; }
+.field-label, .property-row { font-size: 12px; }
+.inspector textarea { font-size: 14px; }
+.empty-inspector { font-size: 13px; }
+.danger-button { font-size: 12px; }
+.tag-manager__input, .tag-manager__row input, .tag-manager__row button, .tag-manager__empty { font-size: 12px; }
+
+.quick-assistant { width: min(400px, calc(100vw - 30px)); max-height: min(680px, calc(100vh - 120px)); gap: 10px; padding: 16px; }
+.quick-assistant header > div { grid-template-columns: 23px auto; column-gap: 8px; }
+.quick-assistant__mark { width: 23px; height: 23px; font-size: 13px; }
+.quick-assistant header strong { font-size: 16px; }
+.quick-assistant header small { font-size: 11px; }
+.quick-assistant__notice { font-size: 12px; }
+.quick-assistant__quick-actions { gap: 6px; }
+.quick-assistant__quick-actions button { height: 30px; padding: 0 10px; font-size: 11px; }
+.quick-assistant__message { gap: 4px; margin-bottom: 10px; }
+.quick-assistant__message span { font-size: 10px; }
+.quick-assistant__message p { padding: 9px 10px; font-size: 13px; line-height: 1.58; }
+.quick-assistant__empty { font-size: 12px; }
+.quick-assistant__memory-toggle, .quick-assistant__clear { font-size: 12px; }
+.quick-assistant__memory { min-height: 72px; padding: 9px; font-size: 13px; }
+.quick-assistant form { gap: 8px; }
+.quick-assistant form textarea { min-height: 46px; padding: 9px; font-size: 13px; }
+.quick-assistant form button { min-width: 58px; font-size: 13px; }

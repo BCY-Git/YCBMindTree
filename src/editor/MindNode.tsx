@@ -179,8 +179,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         autoScale
         onResizeEnd={(_, size) => dispatch({ type: 'SET_NODE_SIZE', nodeId: id, width: size.width, height: size.height })}
       />}
-      <Handle id="target-left" type="target" position={Position.Left} className="node-handle" />
-      <Handle id="target-right" type="target" position={Position.Right} className="node-handle" />
+      <Handle id="target-left" type="target" position={Position.Left} className="node-handle node-handle--target" style={{ top: '35%' }} isConnectable={!isEditing} />
+      <Handle id="target-right" type="target" position={Position.Right} className="node-handle node-handle--target" style={{ top: '35%' }} isConnectable={!isEditing} />
       {node.hasChildren && (
         <button
           className="collapse-toggle"
@@ -249,8 +249,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         </span>}
         <span>{node.label}</span>
       </div>}
-      <Handle id="source-left" type="source" position={Position.Left} className="node-handle" />
-      <Handle id="source-right" type="source" position={Position.Right} className="node-handle" />
+      <Handle id="source-left" type="source" position={Position.Left} className="node-handle node-handle--source" style={{ top: '65%' }} isConnectable={!isEditing} />
+      <Handle id="source-right" type="source" position={Position.Right} className="node-handle node-handle--source" style={{ top: '65%' }} isConnectable={!isEditing} />
     </div>
   )
 })

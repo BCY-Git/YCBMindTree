@@ -414,6 +414,20 @@ export function App() {
     } catch (error) { console.warn(error) }
   }, [dispatch, document.id, persistDocument, taskDocuments])
 
+  const updateTaskPriority = useCallback(async (task: MindTreeTask, priority: 0 | 1 | 2 | 3) => {
+    const target = taskDocuments.find((item) => item.id === task.documentId)
+    if (!target) return
+    if (target.id === document.id) { dispatch({ type: 'SET_NODE_PRIORITY', nodeId: task.nodeId, priority }); return }
+    try { await persistDocument(executeCommand(target, { type: 'SET_NODE_PRIORITY', nodeId: task.nodeId, priority }).document) } catch (error) { console.warn(error) }
+  }, [dispatch, document.id, persistDocument, taskDocuments])
+
+  const updateTaskDueDate = useCallback(async (task: MindTreeTask, dueDate: string | null) => {
+    const target = taskDocuments.find((item) => item.id === task.documentId)
+    if (!target) return
+    if (target.id === document.id) { dispatch({ type: 'SET_NODE_DUE_DATE', nodeId: task.nodeId, dueDate }); return }
+    try { await persistDocument(executeCommand(target, { type: 'SET_NODE_DUE_DATE', nodeId: task.nodeId, dueDate }).document) } catch (error) { console.warn(error) }
+  }, [dispatch, document.id, persistDocument, taskDocuments])
+
   const closeDraftSave = () => {
     setDraftSaveOpen(false)
     setPendingNavigation(null)
@@ -877,7 +891,7 @@ export function App() {
         onDuplicate={(version) => { void duplicateVersion(version) }}
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
-      {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} />}
+      {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} onSetPriority={(task, priority) => { void updateTaskPriority(task, priority) }} onSetDueDate={(task, dueDate) => { void updateTaskDueDate(task, dueDate) }} />}
       <QuickAssistant document={document} />
       {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
         <section className="draft-save-dialog">
