@@ -39,25 +39,36 @@ function clipped(value: string, limit: number) {
 export function retrieveWorkspaceContext({ documents, currentDocumentId, text, focusText = '', tags = [], provenance = [], limit = 12 }: WorkspaceRetrievalInput): RetrievedWorkspaceNode[] {
   const workspaceDocuments = documents.filter((document) => document.id !== currentDocumentId && !document.isDraft)
   const tagById = new Map(tags.map((tag) => [tag.id, tag.name]))
-  const selected = new Map<string, RetrievedWorkspaceNode>()
-  for (const keyword of retrievalKeywords(`${text} ${focusText}`)) {
-    for (const result of searchWorkspaceNodes({ documents: workspaceDocuments, tags, provenance, text: keyword, limit })) {
+  const keywords = retrievalKeywords(`${text} ${focusText}`)
+  const candidates = new Map<string, { node: RetrievedWorkspaceNode; evidence: Set<string>; firstRank: number }>()
+  for (const keyword of keywords) {
+    for (const [rank, result] of searchWorkspaceNodes({ documents: workspaceDocuments, tags, provenance, text: keyword, limit }).entries()) {
       const key = `${result.documentId}\u0000${result.nodeId}`
-      if (selected.has(key)) continue
       const node = documents.find((document) => document.id === result.documentId)?.nodes[result.nodeId]
       if (!node) continue
-      selected.set(key, {
-        documentId: result.documentId,
-        documentTitle: result.documentTitle,
-        nodeId: result.nodeId,
-        topic: result.topic,
-        path: result.path,
-        note: clipped(node.note, 600),
-        taskStatus: node.taskStatus,
-        tags: node.tagIds.flatMap((tagId) => tagById.get(tagId) ?? []),
-      })
-      if (selected.size >= limit) return [...selected.values()]
+      const candidate = candidates.get(key) ?? {
+        node: {
+          documentId: result.documentId,
+          documentTitle: result.documentTitle,
+          nodeId: result.nodeId,
+          topic: result.topic,
+          path: result.path,
+          note: clipped(node.note, 600),
+          taskStatus: node.taskStatus,
+          tags: node.tagIds.flatMap((tagId) => tagById.get(tagId) ?? []),
+        },
+        evidence: new Set<string>(),
+        firstRank: rank,
+      }
+      candidate.evidence.add(keyword)
+      candidate.firstRank = Math.min(candidate.firstRank, rank)
+      candidates.set(key, candidate)
     }
   }
-  return [...selected.values()]
+  const minimumEvidence = keywords.length >= 3 ? 2 : 1
+  return [...candidates.values()]
+    .filter((candidate) => candidate.evidence.size >= minimumEvidence)
+    .sort((left, right) => right.evidence.size - left.evidence.size || left.firstRank - right.firstRank || left.node.path.localeCompare(right.node.path, 'zh-CN'))
+    .slice(0, limit)
+    .map((candidate) => candidate.node)
 }
