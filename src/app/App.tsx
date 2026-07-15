@@ -35,6 +35,7 @@ import { createTag, deleteTag, loadTags, recolorTag, renameTag, saveTags, type T
 import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
 import { emptyNodeFilter, hasActiveFilter, useNodeFilterStore } from '../editor/filter-store'
 import { PanelToggleButton } from './PanelToggleButton'
+import { OutlineView } from '../outline/OutlineView'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -142,6 +143,7 @@ export function App() {
   const [tags, setTags] = useState<Tag[]>(loadTags)
   const [tagDraft, setTagDraft] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
+  const [workspaceView, setWorkspaceView] = useState<'map' | 'outline'>(() => localStorage.getItem('mindtree.workspace-view') === 'outline' ? 'outline' : 'map')
   const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
   const [importCandidate, setImportCandidate] = useState<MindMapDocument | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
@@ -328,6 +330,12 @@ export function App() {
       return next
     })
   }
+
+  const toggleWorkspaceView = () => setWorkspaceView((current) => {
+    const next = current === 'map' ? 'outline' : 'map'
+    localStorage.setItem('mindtree.workspace-view', next)
+    return next
+  })
 
   const persistDocument = useCallback(async (documentToSave: MindMapDocument) => {
     await saveDocument(documentToSave)
@@ -942,6 +950,7 @@ export function App() {
           </div>
         </nav>
         <div className="topbar-utility">
+          <button className={`topbar-utility__button ${workspaceView === 'outline' ? 'is-active' : ''}`} onClick={toggleWorkspaceView} title={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-label={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-pressed={workspaceView === 'outline'}><Icon>{workspaceView === 'outline' ? '◇' : '≡'}</Icon></button>
           <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
@@ -1018,7 +1027,9 @@ export function App() {
           </footer>
         </aside>
 
-        <MindMapCanvas workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} />
+        {workspaceView === 'map'
+          ? <MindMapCanvas workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} />
+          : <OutlineView tags={tags} workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} />}
 
         <aside className="inspector">
           <header className="inspector__header">
