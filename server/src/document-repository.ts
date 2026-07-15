@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import type { McpDepositBatch } from './mcp-deposit.js'
 
 export type DocumentRecord = {
   id: string
@@ -82,6 +83,16 @@ export class DocumentRepository {
         payload_json TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS mcp_deposit_batches (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        source_document_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        batch_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS mcp_deposit_batches_owner_status ON mcp_deposit_batches(owner_id, status, updated_at DESC);
     `)
   }
 
@@ -138,6 +149,34 @@ export class DocumentRepository {
         ? [{ documentId: document.id, documentTitle: document.title, nodeId, topic: node.topic }]
         : [])
     })
+  }
+
+  saveMcpDepositBatch(batch: McpDepositBatch): void {
+    this.database.prepare(`INSERT INTO mcp_deposit_batches (id, owner_id, source_document_id, status, batch_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, batch_json = excluded.batch_json, updated_at = excluded.updated_at`)
+      .run(batch.id, batch.ownerId, batch.sourceDocumentId, batch.status, JSON.stringify(batch), batch.createdAt, Date.now())
+  }
+
+  getMcpDepositBatch(ownerId: string, batchId: string): McpDepositBatch | undefined {
+    const row = this.database.prepare('SELECT batch_json FROM mcp_deposit_batches WHERE id = ? AND owner_id = ?').get(batchId, ownerId) as { batch_json?: unknown } | undefined
+    return row?.batch_json ? JSON.parse(String(row.batch_json)) as McpDepositBatch : undefined
+  }
+
+  listMcpDepositBatches(ownerId: string, status?: McpDepositBatch['status']): McpDepositBatch[] {
+    const rows = (status
+      ? this.database.prepare('SELECT batch_json FROM mcp_deposit_batches WHERE owner_id = ? AND status = ? ORDER BY updated_at DESC').all(ownerId, status)
+      : this.database.prepare('SELECT batch_json FROM mcp_deposit_batches WHERE owner_id = ? ORDER BY updated_at DESC').all(ownerId)) as Array<{ batch_json: string }>
+    return rows.map((row) => JSON.parse(row.batch_json) as McpDepositBatch)
+  }
+
+  applyMcpDepositBatch(document: DocumentRecord, batch: McpDepositBatch, payload: unknown): DocumentRecord | VersionConflict {
+    return this.database.transaction(() => {
+      const saved = this.save({ id: document.id, ownerId: document.ownerId, title: document.title, categoryId: document.categoryId, payload, baseVersion: batch.expectedVersion, kind: 'mcp_deposit' })
+      if ('type' in saved) return saved
+      this.saveMcpDepositBatch({ ...batch, status: 'applied', confirmationToken: '', appliedAt: Date.now() })
+      return saved
+    })()
   }
 
   createPairingChallenge(ownerId: string, lifetimeMs = 5 * 60 * 1000): PairingChallenge {

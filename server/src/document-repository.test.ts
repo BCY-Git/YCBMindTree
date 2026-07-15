@@ -81,4 +81,14 @@ describe('account sessions and document ownership', () => {
     expect(repository.changeCount(documentId)).toBe(DOCUMENT_CHANGE_RETENTION)
     expect(repository.get(owner.id, documentId)?.version).toBe(DOCUMENT_CHANGE_RETENTION + 5)
   })
+
+  it('persists MCP deposit previews per owner without exposing another account batch', () => {
+    const repository = createRepository()
+    const batch = { id: 'batch-1', ownerId: 'owner-1', sourceDocumentId: 'document-1', sourceNodeIds: ['source-1'], targetDocumentId: 'document-1', expectedVersion: 1, status: 'pending' as const, candidates: [], changes: [], confirmationToken: 'secret-token', createdAt: 1_000, appliedAt: null }
+
+    repository.saveMcpDepositBatch(batch)
+
+    expect(repository.listMcpDepositBatches('owner-1')).toEqual([batch])
+    expect(repository.listMcpDepositBatches('owner-2')).toEqual([])
+  })
 })
