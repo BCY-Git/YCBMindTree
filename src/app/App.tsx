@@ -156,7 +156,7 @@ export function App() {
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
   const workspaceBackupInputRef = useRef<HTMLInputElement>(null)
-  const pendingTaskFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
+  const pendingNodeFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const canGroupSelection = useMemo(() => {
     if (selectedNodeIds.length < 2) return false
@@ -575,7 +575,18 @@ export function App() {
     }
     const target = taskDocuments.find((item) => item.id === task.documentId)
     if (!target) return
-    pendingTaskFocusRef.current = { documentId: task.documentId, nodeId: task.nodeId }
+    pendingNodeFocusRef.current = { documentId: task.documentId, nodeId: task.nodeId }
+    openDocument(target)
+  }, [dispatch, document.id, openDocument, requestNodeFocus, taskDocuments])
+
+  const revealWorkspaceNode = useCallback((documentId: string, nodeId: string) => {
+    if (documentId === document.id) {
+      if (dispatch({ type: 'REVEAL_NODE', nodeId })) requestNodeFocus(nodeId)
+      return
+    }
+    const target = taskDocuments.find((item) => item.id === documentId)
+    if (!target) return
+    pendingNodeFocusRef.current = { documentId, nodeId }
     openDocument(target)
   }, [dispatch, document.id, openDocument, requestNodeFocus, taskDocuments])
 
@@ -875,9 +886,9 @@ export function App() {
   }, [document.id])
 
   useEffect(() => {
-    const pending = pendingTaskFocusRef.current
+    const pending = pendingNodeFocusRef.current
     if (!pending || pending.documentId !== document.id) return
-    pendingTaskFocusRef.current = null
+    pendingNodeFocusRef.current = null
     if (dispatch({ type: 'REVEAL_NODE', nodeId: pending.nodeId })) requestNodeFocus(pending.nodeId)
   }, [dispatch, document.id, requestNodeFocus])
 
@@ -1007,7 +1018,7 @@ export function App() {
           </footer>
         </aside>
 
-        <MindMapCanvas />
+        <MindMapCanvas workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} />
 
         <aside className="inspector">
           <header className="inspector__header">

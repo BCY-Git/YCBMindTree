@@ -42,10 +42,10 @@ import { getTheme } from '../domain/themes'
 import { getTreeEdgeAnchors } from './tree-edge'
 import { retainDraggingNodePosition } from './drag-state'
 import { resolveRegularTreeDragIntent, type TreeDropIntent } from './drag-intent'
-import type { MindNode as DomainMindNode } from '../domain/document.types'
+import type { MindMapDocument, MindNode as DomainMindNode } from '../domain/document.types'
 import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
-import { saveNodeAttachment } from '../persistence/database'
+import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/database'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 
 const nodeTypes = { mindNode: MindNode }
@@ -97,7 +97,10 @@ function renderedSize(candidate: Node<MindNodeData>) {
   }
 }
 
-export function MindMapCanvas() {
+export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
+  workspaceDocuments: MindMapDocument[]
+  onRevealWorkspaceNode: (documentId: string, nodeId: string) => void
+}) {
   const document = useEditorStore((state) => state.document)
   const theme = getTheme(document.theme.id)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
@@ -124,6 +127,7 @@ export function MindMapCanvas() {
   const [contextMenu, setContextMenu] = useState<{ position: ContextMenuPosition; nodeId: string | null; relationId: string | null } | null>(null)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [searchProvenance, setSearchProvenance] = useState<Awaited<ReturnType<typeof listAllDepositProvenance>>>([])
   const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null)
   const [relationSourceIds, setRelationSourceIds] = useState<string[]>([])
   const [relationPointer, setRelationPointer] = useState<{ x: number; y: number } | null>(null)
@@ -344,10 +348,20 @@ export function MindMapCanvas() {
     if (rootNode) flowInstance?.fitView({ nodes: [rootNode], padding: 1.5, maxZoom: 1.05, duration: 280 })
   }, [baseNodes, document.rootId, flowInstance, selectNode])
 
-  const revealSearchResult = useCallback((nodeId: string) => {
+  const revealSearchResult = useCallback((documentId: string, nodeId: string) => {
+    if (documentId !== document.id) {
+      onRevealWorkspaceNode(documentId, nodeId)
+      setSearchOpen(false)
+      return
+    }
     if (dispatch({ type: 'REVEAL_NODE', nodeId })) setSearchFocusNodeId(nodeId)
     setSearchOpen(false)
-  }, [dispatch])
+  }, [dispatch, document.id, onRevealWorkspaceNode])
+
+  useEffect(() => {
+    if (!searchOpen) return
+    void listAllDepositProvenance().then(setSearchProvenance).catch(() => setSearchProvenance([]))
+  }, [searchOpen])
 
   useEffect(() => {
     if (!searchFocusNodeId) return
@@ -836,7 +850,7 @@ export function MindMapCanvas() {
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : `松开即可插入此分支的第 ${dropIntent.index + 1} 个位置`}</div>}
       {pasteAttachmentStatus && <div className="paste-attachment-hint" role="status">{pasteAttachmentStatus}</div>}
-      {searchOpen && <NodeSearchDialog document={document} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const parentId = selectedNodeId ?? document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}
+      {searchOpen && <NodeSearchDialog currentDocumentId={document.id} documents={[document, ...workspaceDocuments.filter((item) => item.id !== document.id)]} tags={tags} provenance={searchProvenance} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const parentId = selectedNodeId ?? document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}
       {contextMenu && (() => {
         const contextNode = contextMenu.nodeId ? document.nodes[contextMenu.nodeId] : null
         const contextRelation = contextMenu.relationId ? document.relations.find((relation) => relation.id === contextMenu.relationId) ?? null : null
