@@ -39,7 +39,8 @@ export type DepositMetricEvent = {
   id: string
   documentId: string
   batchId: string
-  type: 'generated' | 'accepted' | 'ignored' | 'target-reselected' | 'duplicate' | 'applied' | 'failed'
+  referenceId?: string
+  type: 'generated' | 'accepted' | 'ignored' | 'target-reselected' | 'modified' | 'duplicate' | 'applied' | 'failed' | 'confirmation-duration' | 'revisited'
   value: number
   createdAt: number
 }
@@ -95,6 +96,11 @@ export class MindTreeDatabase extends Dexie {
     this.version(8).stores({
       documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt', documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind', attachments: 'id, documentId, nodeId, createdAt',
       depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt', depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt', depositWorkspaceTransactions: 'id, batchId, status, createdAt', workflowSessions: 'id, documentId, focusNodeId, status, updatedAt',
+      depositMetrics: 'id, documentId, batchId, type, createdAt',
+    })
+    this.version(9).stores({
+      documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt', documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind', attachments: 'id, documentId, nodeId, createdAt',
+      depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt', depositProvenance: 'id, batchId, candidateId, sourceDocumentId, targetDocumentId, *targetNodeIds, createdAt', depositWorkspaceTransactions: 'id, batchId, status, createdAt', workflowSessions: 'id, documentId, focusNodeId, status, updatedAt',
       depositMetrics: 'id, documentId, batchId, type, createdAt',
     })
   }
@@ -154,15 +160,30 @@ export async function saveWorkflowSession(session: WorkflowSession): Promise<voi
 }
 
 /** 只记录本地聚合所需事件，不保存节点原文、候选标题或模型回复。 */
-export async function recordDepositMetric(event: Omit<DepositMetricEvent, 'id' | 'createdAt'>): Promise<void> {
-  await database.depositMetrics.put({ ...event, id: crypto.randomUUID(), createdAt: Date.now() })
+export async function recordDepositMetric(event: Omit<DepositMetricEvent, 'id' | 'createdAt'>, target = database): Promise<void> {
+  await target.depositMetrics.put({ ...event, id: crypto.randomUUID(), createdAt: Date.now() })
 }
 
-export async function getDepositMetricSummary(documentId: string): Promise<Record<DepositMetricEvent['type'], number>> {
-  const events = await database.depositMetrics.where('documentId').equals(documentId).toArray()
-  const summary = { generated: 0, accepted: 0, ignored: 0, 'target-reselected': 0, duplicate: 0, applied: 0, failed: 0 }
+export async function getDepositMetricSummary(documentId: string, source = database): Promise<Record<DepositMetricEvent['type'], number>> {
+  const events = await source.depositMetrics.where('documentId').equals(documentId).toArray()
+  const summary: Record<DepositMetricEvent['type'], number> = { generated: 0, accepted: 0, ignored: 0, 'target-reselected': 0, modified: 0, duplicate: 0, applied: 0, failed: 0, 'confirmation-duration': 0, revisited: 0 }
   events.forEach((event) => { summary[event.type] += event.value })
   return summary
+}
+
+export async function recordDepositMetricOnce(event: Omit<DepositMetricEvent, 'id' | 'createdAt'>, target = database): Promise<void> {
+  await target.transaction('rw', target.depositMetrics, async () => {
+    const existing = (await target.depositMetrics.where('batchId').equals(event.batchId).toArray())
+      .some((item) => item.type === event.type && item.referenceId === event.referenceId)
+    if (!existing) await recordDepositMetric(event, target)
+  })
+}
+
+/** 将用户再次选中已沉淀目标视为一次复用；同一来源记录只计一次。 */
+export async function markDepositTargetRevisited(documentId: string, nodeId: string, target = database): Promise<void> {
+  const provenance = (await target.depositProvenance.where('targetNodeIds').equals(nodeId).toArray())
+    .filter((item) => item.targetDocumentId === documentId)
+  await Promise.all(provenance.map((item) => recordDepositMetricOnce({ documentId, batchId: item.batchId, referenceId: item.id, type: 'revisited', value: 1 }, target)))
 }
 
 export async function listAppliedDepositFingerprints(sourceDocumentId: string): Promise<string[]> {

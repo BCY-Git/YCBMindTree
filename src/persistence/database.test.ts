@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createInitialDocument } from '../domain/document.factory'
-import { MindTreeDatabase } from './database'
+import { getDepositMetricSummary, markDepositTargetRevisited, MindTreeDatabase } from './database'
 
 const names: string[] = []
 
@@ -26,9 +26,28 @@ describe('MindTree IndexedDB migrations', () => {
     const current = new MindTreeDatabase(name)
     await current.open()
 
-    expect(current.verno).toBe(8)
+    expect(current.verno).toBe(9)
     expect(current.tables.map((table) => table.name)).toEqual(expect.arrayContaining(['documents', 'depositBatches', 'depositProvenance', 'depositWorkspaceTransactions', 'workflowSessions', 'depositMetrics']))
     expect(await current.documents.get(document.id)).toEqual(document)
+    current.close()
+  })
+
+  it('counts a deposited result as revisited only once when its target is selected again', async () => {
+    const name = `mindtree-metrics-${crypto.randomUUID()}`
+    names.push(name)
+    const current = new MindTreeDatabase(name)
+    await current.open()
+    await current.depositProvenance.put({
+      id: 'provenance-1', batchId: 'batch-1', candidateId: 'candidate-1',
+      sourceDocumentId: 'source-document', sourceNodeIds: ['source-node'], sourceSnapshot: '{}',
+      targetDocumentId: 'target-document', targetNodeIds: ['target-node'], action: 'create',
+      model: 'test-model', acceptedByUser: true, createdAt: 1_000,
+    })
+
+    await markDepositTargetRevisited('target-document', 'target-node', current)
+    await markDepositTargetRevisited('target-document', 'target-node', current)
+
+    expect((await getDepositMetricSummary('target-document', current)).revisited).toBe(1)
     current.close()
   })
 })
