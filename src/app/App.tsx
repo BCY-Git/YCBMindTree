@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { getNodeAttachment, getSyncMetadata, listDocumentVersions, listDocuments, loadLatestDocument, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata } from '../persistence/database'
+import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listDocumentVersions, listDocuments, loadLatestDocument, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
@@ -22,7 +22,7 @@ import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument,
 import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
 import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
-import { saveDocumentToLocalFile } from '../export/document-file'
+import { createImportedCopy, parseDocumentFile, saveDocumentToLocalFile } from '../export/document-file'
 import { GhostNoteEditor } from '../ai/GhostNoteEditor'
 import { LoginDialog } from '../auth/LoginDialog'
 import { clearAccountSession, loadAccountSession, loginAccount, registerAccount, revokeAccountSession, saveAccountSession, type AuthSession } from '../auth/account-client'
@@ -128,11 +128,15 @@ export function App() {
   const [tagDraft, setTagDraft] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
+  const [importCandidate, setImportCandidate] = useState<MindMapDocument | null>(null)
+  const [importStatus, setImportStatus] = useState<string | null>(null)
+  const [importBusy, setImportBusy] = useState(false)
   const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const pendingTaskFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const nodeFilter = useNodeFilterStore((state) => state.filter)
@@ -312,6 +316,53 @@ export function App() {
       setLocalSaveStatus('本机文件保存失败，但本地数据库已保留当前内容。')
     }
   }, [flushCurrentDocument])
+
+  /** 将已通过 schema 校验的导图写入工作区；覆盖同 ID 文档时先留下可恢复快照。 */
+  const completeDocumentImport = useCallback(async (source: MindMapDocument, mode: 'replace' | 'copy') => {
+    try {
+      setImportBusy(true)
+      setImportStatus(null)
+      await flushCurrentDocument()
+      const existing = documents.find((item) => item.id === source.id)
+      if (mode === 'replace' && existing) {
+        await saveDocumentVersion(createDocumentVersion(existing, 'manual', '导入前备份'))
+      }
+      const now = Date.now()
+      const next = mode === 'copy'
+        ? createImportedCopy(source, now)
+        : { ...structuredClone(source), updatedAt: now }
+      // 导出文件不携带远端版本；清除旧元数据后，下一次同步会先走保守冲突检查。
+      await deleteSyncMetadata(next.id)
+      await persistDocument(next)
+      await saveDocumentVersion(createDocumentVersion(next, 'manual', '导入的导图'))
+      observedVersionRef.current = { documentId: next.id, updatedAt: next.updatedAt }
+      setSyncRemoteVersion(null)
+      hydrate(next)
+      setImportCandidate(null)
+      setImportStatus(mode === 'copy' ? `已导入副本「${next.title}」` : `已导入「${next.title}」`)
+    } catch (error) {
+      setImportStatus(error instanceof Error ? `导入失败：${error.message}` : '导入失败，请重试。')
+    } finally {
+      setImportBusy(false)
+    }
+  }, [documents, flushCurrentDocument, hydrate, persistDocument])
+
+  const importDocumentFromFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const imported = parseDocumentFile(await file.text())
+      if (documents.some((item) => item.id === imported.id)) {
+        setImportCandidate(imported)
+        setImportStatus(null)
+        return
+      }
+      await completeDocumentImport(imported, 'replace')
+    } catch (error) {
+      setImportStatus(error instanceof Error ? `无法导入：${error.message}` : '无法读取导图文件。')
+    }
+  }, [completeDocumentImport, documents])
 
   const refreshVersions = useCallback(() => {
     void listDocumentVersions(useEditorStore.getState().document.id).then(setVersions).catch(console.warn)
@@ -722,6 +773,7 @@ export function App() {
       '--line': theme.nodeBorder,
       '--accent': theme.selected,
     } as CSSProperties}>
+      <input ref={importInputRef} className="document-import-input" type="file" accept=".mindtree.json,application/json" onChange={(event) => { void importDocumentFromFile(event) }} aria-hidden="true" tabIndex={-1} />
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark">M</span>
@@ -788,7 +840,8 @@ export function App() {
             </section>}
 
             {sidebarPanel === 'maps' && <section className="sidebar-panel" aria-label="导图列表">
-              <div className="sidebar-panel__heading"><span>导图记录</span><small>{activeCategoryId === 'all' ? '全部' : categoryName(activeCategoryId)}</small></div>
+              <div className="sidebar-panel__heading"><span>导图记录</span><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree 导图文件">⇧ 导入</button></div>
+              <small className="sidebar-import-hint">支持 `.mindtree.json`，同名导图可覆盖或导入副本。</small>
               <input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" />
               {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>草稿 · 已自动保存到本机</small></span></button>)}</div>}
               {matchingDocuments.map((item) => (
@@ -899,6 +952,19 @@ export function App() {
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
       {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} onSetPriority={(task, priority) => { void updateTaskPriority(task, priority) }} onSetDueDate={(task, dueDate) => { void updateTaskDueDate(task, dueDate) }} />}
       <QuickAssistant document={document} />
+      {importCandidate && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !importBusy) setImportCandidate(null) }}>
+        <section className="document-import-dialog" role="dialog" aria-modal="true" aria-labelledby="document-import-title">
+          <p className="eyebrow">导入导图</p>
+          <h2 id="document-import-title">发现同一份导图</h2>
+          <p>「{importCandidate.title}」与本机已有导图使用相同 ID。请选择安全的处理方式：</p>
+          <div className="document-import-dialog__actions">
+            <button className="document-import-dialog__primary" disabled={importBusy} onClick={() => { void completeDocumentImport(importCandidate, 'copy') }}>导入为副本</button>
+            <button className="document-import-dialog__secondary" disabled={importBusy} onClick={() => { void completeDocumentImport(importCandidate, 'replace') }}>覆盖本机并保留备份</button>
+            <button className="document-import-dialog__cancel" disabled={importBusy} onClick={() => setImportCandidate(null)}>取消</button>
+          </div>
+          <small>附件文件不会包含在导图 JSON 中；导入后同步会先检查云端版本，避免覆盖远端内容。</small>
+        </section>
+      </div>}
       {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
         <section className="draft-save-dialog">
           <span className="draft-save-dialog__mark">✦</span>
@@ -914,6 +980,7 @@ export function App() {
           </div>
         </section>
       </div>}
+      {importStatus && <div className="document-import-status" role="status"><span>{importStatus}</span><button onClick={() => setImportStatus(null)} aria-label="关闭导入提示">×</button></div>}
     </main>
   )
 }

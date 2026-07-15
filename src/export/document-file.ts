@@ -1,4 +1,6 @@
 import type { MindMapDocument } from '../domain/document.types'
+import { mindMapDocumentSchema } from '../domain/document.schema'
+import { assertValidDocument } from '../domain/document.validator'
 import { isTauriRuntime } from '../platform/tauri'
 
 type FilePickerWindow = Window & {
@@ -22,6 +24,38 @@ export function serializeDocumentFile(document: MindMapDocument) {
     exportedAt: new Date().toISOString(),
     document,
   }, null, 2)
+}
+
+/**
+ * 读取 MindTree 自己导出的单图文件。
+ * 先校验包装格式，再校验文档 schema 和树结构；不接受任意 JSON，避免坏文件进入工作区。
+ */
+export function parseDocumentFile(content: string): MindMapDocument {
+  let value: unknown
+  try {
+    value = JSON.parse(content)
+  } catch {
+    throw new Error('文件不是有效的 JSON 导图')
+  }
+  if (!value || typeof value !== 'object' || !('format' in value) || !('version' in value) || !('document' in value)
+    || value.format !== 'mindtree-document' || value.version !== 1) {
+    throw new Error('不是受支持的 MindTree 导图文件')
+  }
+  const document = mindMapDocumentSchema.parse(value.document)
+  assertValidDocument(document)
+  return structuredClone(document)
+}
+
+/** 同 ID 导图导入为副本时，保留图谱内容但切断与原文档、云端版本的身份关联。 */
+export function createImportedCopy(document: MindMapDocument, now = Date.now()): MindMapDocument {
+  const copy = structuredClone(document)
+  return {
+    ...copy,
+    id: crypto.randomUUID(),
+    title: `${copy.title}（导入副本）`,
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 export async function saveDocumentToLocalFile(document: MindMapDocument): Promise<LocalFileSaveResult> {

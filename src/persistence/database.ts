@@ -124,3 +124,8 @@ export async function getSyncMetadata(documentId: string): Promise<SyncMetadata 
 export async function saveSyncMetadata(metadata: SyncMetadata): Promise<void> {
   await database.syncMetadata.put(metadata)
 }
+
+/** 导入文件没有可信的远端版本号；清理旧绑定，避免以错误 baseVersion 覆盖云端。 */
+export async function deleteSyncMetadata(documentId: string): Promise<void> {
+  await database.syncMetadata.delete(documentId)
+}
