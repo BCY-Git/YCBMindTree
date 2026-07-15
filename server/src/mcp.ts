@@ -10,10 +10,10 @@ const branchSchema: z.ZodType<Branch> = z.object({
   children: z.array(z.lazy(() => branchSchema)).default([]),
 })
 
-type MapPayload = {
+export type MapPayload = {
   id: string
   rootId: string
-  nodes: Record<string, { id: string; parentId: string | null; isFreeTopic: boolean; childIds: string[]; topic: string; note: string; links: unknown[]; attachments: unknown[]; taskStatus: 'none' | 'todo' | 'doing' | 'done'; priority: 0 | 1 | 2 | 3; dueDate: string | null; collapsed: boolean; offsetX: number; offsetY: number; createdAt: number; updatedAt: number }>
+  nodes: Record<string, { id: string; parentId: string | null; isFreeTopic: boolean; childIds: string[]; topic: string; note: string; links: unknown[]; attachments: unknown[]; taskStatus: 'none' | 'todo' | 'doing' | 'done'; priority: 0 | 1 | 2 | 3; dueDate: string | null; marks: Array<'flag' | 'star' | 'risk' | 'idea'>; tagIds: string[]; collapsed: boolean; width: number | null; height: number | null; offsetX: number; offsetY: number; createdAt: number; updatedAt: number }>
 }
 
 function text(value: unknown, isError = false) {
@@ -24,13 +24,13 @@ function ownerId(extra: { authInfo?: { clientId: string } }) {
   return extra.authInfo?.clientId ?? 'local-user'
 }
 
-function insertBranch(payload: MapPayload, parentId: string, branch: z.infer<typeof branchSchema>) {
+export function insertBranch(payload: MapPayload, parentId: string, branch: z.infer<typeof branchSchema>) {
   const parent = payload.nodes[parentId]
   if (!parent) throw new Error('目标节点不存在')
   const now = Date.now()
   const create = (source: z.infer<typeof branchSchema>, parentNodeId: string): string => {
     const id = randomUUID()
-    const node = { id, parentId: parentNodeId, isFreeTopic: false, childIds: [] as string[], topic: source.topic, note: '', links: [], attachments: [], taskStatus: 'none' as const, priority: 0 as const, dueDate: null, collapsed: false, offsetX: 0, offsetY: 0, createdAt: now, updatedAt: now }
+    const node = { id, parentId: parentNodeId, isFreeTopic: false, childIds: [] as string[], topic: source.topic, note: '', links: [], attachments: [], taskStatus: 'none' as const, priority: 0 as const, dueDate: null, marks: [], tagIds: [], collapsed: false, width: null, height: null, offsetX: 0, offsetY: 0, createdAt: now, updatedAt: now }
     payload.nodes[id] = node
     node.childIds = source.children.map((child) => create(child, id))
     return id
