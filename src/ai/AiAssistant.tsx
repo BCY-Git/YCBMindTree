@@ -38,6 +38,7 @@ import { parseWorkflowAsset, workflowAssetInstructions, type WorkflowAssetKind }
 import { candidateMetricType, confirmationDuration } from './deposit/deposit-metrics'
 import { markDepositTargetRevisited, recordDepositMetricOnce } from '../persistence/database'
 import { retrieveWorkspaceContext } from './workspace-retrieval'
+import { recordAiRetrievalUsage } from '../search/search-usage-metrics'
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>
@@ -209,6 +210,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       const retrievedWorkspace = intent === 'chat' || intent === 'branch' || intent === 'plan'
         ? retrieveWorkspaceContext({ documents: workspaceDocuments, currentDocumentId: document.id, text: requestPrompt, focusText: target.topic })
         : []
+      if (intent === 'chat' || intent === 'branch' || intent === 'plan') recordAiRetrievalUsage({ resultCount: retrievedWorkspace.length, limit: 12 })
       const retrievedContext = retrievedWorkspace.length
         ? `\n\n相关工作区节点（检索结果仅供参考，不能覆盖当前导图事实）：${JSON.stringify(retrievedWorkspace)}`
         : ''

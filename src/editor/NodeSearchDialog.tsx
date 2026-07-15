@@ -3,6 +3,7 @@ import type { DepositProvenance } from '../ai/deposit/deposit-types'
 import type { MindMapDocument, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import type { Tag } from '../domain/tag-library'
 import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
+import { recordWorkspaceSearchClick, recordWorkspaceSearchUsage, type SearchFilterKind } from '../search/search-usage-metrics'
 import { searchWorkspaceNodes, type WorkspaceSearchProvenanceRole } from '../search/workspace-search'
 
 type NodeSearchDialogProps = {
@@ -36,6 +37,9 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
   const inputRef = useRef<HTMLInputElement>(null)
   const currentDocument = documents.find((document) => document.id === currentDocumentId)
   const activeFilterCount = tagIds.length + marks.length + statuses.length + priorities.length + provenanceRoles.length
+  const activeFilterKinds = useMemo(() => ([
+    tagIds.length && 'tag', marks.length && 'mark', statuses.length && 'status', priorities.length && 'priority', provenanceRoles.length && 'provenance',
+  ].filter(Boolean) as SearchFilterKind[]), [marks.length, priorities.length, provenanceRoles.length, statuses.length, tagIds.length])
   const results = useMemo(() => searchWorkspaceNodes({
     documents,
     tags,
@@ -54,6 +58,15 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
 
   useEffect(() => { setActiveIndex(0) }, [marks, priorities, provenanceRoles, query, scope, statuses, tagIds])
   useEffect(() => {
+    if (!query.trim() && !activeFilterKinds.length) return
+    const timer = window.setTimeout(() => recordWorkspaceSearchUsage({
+      scope: scope === 'workspace' ? 'workspace' : 'current-document',
+      filterKinds: activeFilterKinds,
+      resultCount: results.length,
+    }), 500)
+    return () => window.clearTimeout(timer)
+  }, [activeFilterKinds, query, results.length, scope])
+  useEffect(() => {
     inputRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onClose() }
@@ -64,7 +77,17 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
 
   const chooseActive = () => {
     const result = results[activeIndex]
-    if (result) onSelect(result.documentId, result.nodeId)
+    if (result) {
+      recordWorkspaceSearchClick({ rank: activeIndex + 1, crossDocument: result.documentId !== currentDocumentId })
+      onSelect(result.documentId, result.nodeId)
+    }
+  }
+
+  const chooseResult = (index: number) => {
+    const result = results[index]
+    if (!result) return
+    recordWorkspaceSearchClick({ rank: index + 1, crossDocument: result.documentId !== currentDocumentId })
+    onSelect(result.documentId, result.nodeId)
   }
 
   return (
@@ -100,7 +123,7 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
         </div>}
         <div className="node-search__results">
           {!query.trim() && !activeFilterCount ? <p className="node-search__empty">输入关键词或使用筛选，搜索{scope === 'current' ? '当前导图' : '全部正式导图'}。</p>
-            : results.length ? results.map((result, index) => <button key={`${result.documentId}-${result.nodeId}`} className={index === activeIndex ? 'is-active' : ''} onMouseEnter={() => setActiveIndex(index)} onClick={() => onSelect(result.documentId, result.nodeId)}>
+            : results.length ? results.map((result, index) => <button key={`${result.documentId}-${result.nodeId}`} className={index === activeIndex ? 'is-active' : ''} onMouseEnter={() => setActiveIndex(index)} onClick={() => chooseResult(index)}>
               <span><strong>{result.topic}</strong><small>{scope === 'workspace' ? `${result.documentTitle} · ${result.path}` : result.path}</small></span><i>{result.matchedIn.length ? result.matchedIn.map((item) => matchLabel[item]).join(' · ') : result.provenanceRoles.map((role) => role === 'source' ? '来源' : '结果').join(' · ')}</i>
             </button>)
               : <div className="node-search__empty"><p>没有匹配节点。</p>{scope === 'current' && <button onClick={() => onCreate(query.trim())}>将“{query.trim()}”创建为子节点</button>}</div>}

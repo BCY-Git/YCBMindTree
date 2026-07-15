@@ -3,6 +3,7 @@ import type { MindMapDocument } from '../domain/document.types'
 import { chatUrl, loadAiSettings } from './ai-settings'
 import { platformErrorMessage, requestAiChat } from '../platform/tauri'
 import { retrieveWorkspaceContext } from './workspace-retrieval'
+import { recordAiRetrievalUsage } from '../search/search-usage-metrics'
 
 type QuickMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
 type ChatResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
@@ -67,6 +68,7 @@ export function QuickAssistant({ document, workspaceDocuments }: { document: Min
     setNotice('正在思考…')
     try {
       const retrievedWorkspace = retrieveWorkspaceContext({ documents: workspaceDocuments, currentDocumentId: document.id, text: content, focusText: document.title })
+      recordAiRetrievalUsage({ resultCount: retrievedWorkspace.length, limit: 12 })
       const result = await requestAiChat(chatUrl(settings.endpoint), {
             model: settings.model.trim(),
             temperature: 0.55,
