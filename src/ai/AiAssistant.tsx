@@ -33,11 +33,15 @@ import { WorkflowPanel } from '../workflow/WorkflowPanel'
 import { createWorkflowSession, workflowCheckpointPrompt } from './workflow/workflow-service'
 import { parseWorkflowCheckpoint } from './workflow/workflow-schema'
 import type { WorkflowMode, WorkflowSession } from './workflow/workflow-types'
-import { listWorkflowSessions, saveWorkflowSession } from '../persistence/database'
+import { listWorkflowSessions, recordDepositMetric, saveWorkflowSession } from '../persistence/database'
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>
   error?: { message?: string }
+}
+
+function trackDepositMetric(event: Parameters<typeof recordDepositMetric>[0]) {
+  void recordDepositMetric(event).catch(() => undefined)
 }
 
 // localStorage 的 key，用于持久化 AI 连接配置（端点、模型、Key）。
@@ -240,6 +244,9 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           appliedAt: null,
         }
         await saveDepositBatch(batch)
+        trackDepositMetric({ documentId: document.id, batchId: batch.id, type: 'generated', value: batch.candidates.length })
+        const duplicateCount = batch.candidates.filter((candidate) => candidate.duplicateOfCandidateId).length
+        if (duplicateCount) trackDepositMetric({ documentId: document.id, batchId: batch.id, type: 'duplicate', value: duplicateCount })
         setDepositBatch(batch)
         const rangeNotice = depositContext.source.truncated ? `实际分析前 ${depositContext.source.nodes.length}/${depositContext.source.totalNodeCount} 个节点。` : ''
         setNotice(batch.candidates.length ? `已识别 ${batch.candidates.length} 条候选，请确认后再写入。${rangeNotice}` : `未发现需要沉淀的高价值内容。${rangeNotice}`)
@@ -287,6 +294,10 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   }
 
   const updateDepositCandidate = (candidateId: string, patch: Partial<DepositCandidate>) => {
+    if (depositBatch) {
+      const metricType = patch.status === 'accepted' ? 'accepted' : patch.status === 'ignored' ? 'ignored' : patch.suggestedDocumentId !== undefined || patch.suggestedParentId !== undefined || patch.suggestedTargetNodeId !== undefined ? 'target-reselected' : null
+      if (metricType) trackDepositMetric({ documentId: document.id, batchId: depositBatch.id, type: metricType, value: 1 })
+    }
     setDepositPreview(null)
     setDepositBatch((current) => {
       if (!current) return current
@@ -361,8 +372,10 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         setDepositPreview(null)
         setLastWorkspaceDepositBatchId(depositBatch.id)
         setNotice(`已跨导图沉淀 ${accepted.length} 条内容，所有目标已在同一事务中写入。`)
+        trackDepositMetric({ documentId: document.id, batchId: depositBatch.id, type: 'applied', value: accepted.length })
       } catch (error) {
         setNotice(platformErrorMessage(error, '跨导图写入失败，没有产生部分修改。'))
+        trackDepositMetric({ documentId: document.id, batchId: depositBatch.id, type: 'failed', value: 1 })
       }
       return
     }
@@ -386,8 +399,10 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       setDepositBatch(completed)
       setDepositPreview(null)
       setNotice(`已沉淀 ${accepted.length} 条内容${depositPreview.operations.length ? '，可按 ⌘Z 撤销导图写入。' : '。'}`)
+      trackDepositMetric({ documentId: document.id, batchId: depositBatch.id, type: 'applied', value: accepted.length })
     } catch (error) {
       setNotice(platformErrorMessage(error, '导图已更新，但来源记录保存失败，请重试。'))
+      trackDepositMetric({ documentId: document.id, batchId: depositBatch.id, type: 'failed', value: 1 })
     }
   }
 

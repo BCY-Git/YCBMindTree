@@ -35,7 +35,16 @@ export type StoredAttachment = MindNodeAttachment & {
   blob: Blob
 }
 
-class MindTreeDatabase extends Dexie {
+export type DepositMetricEvent = {
+  id: string
+  documentId: string
+  batchId: string
+  type: 'generated' | 'accepted' | 'ignored' | 'target-reselected' | 'duplicate' | 'applied' | 'failed'
+  value: number
+  createdAt: number
+}
+
+export class MindTreeDatabase extends Dexie {
   documents!: EntityTable<MindMapDocument, 'id'>
   syncMetadata!: EntityTable<SyncMetadata, 'documentId'>
   documentVersions!: EntityTable<DocumentVersion, 'id'>
@@ -44,9 +53,10 @@ class MindTreeDatabase extends Dexie {
   depositProvenance!: EntityTable<DepositProvenance, 'id'>
   depositWorkspaceTransactions!: EntityTable<DepositWorkspaceTransaction, 'id'>
   workflowSessions!: EntityTable<WorkflowSession, 'id'>
+  depositMetrics!: EntityTable<DepositMetricEvent, 'id'>
 
-  constructor() {
-    super('mindtree')
+  constructor(name = 'mindtree') {
+    super(name)
     this.version(1).stores({ documents: 'id, title, updatedAt' })
     this.version(2).stores({ documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt' })
     this.version(3).stores({
@@ -81,6 +91,11 @@ class MindTreeDatabase extends Dexie {
       documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt', documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind', attachments: 'id, documentId, nodeId, createdAt',
       depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt', depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt', depositWorkspaceTransactions: 'id, batchId, status, createdAt',
       workflowSessions: 'id, documentId, focusNodeId, status, updatedAt',
+    })
+    this.version(8).stores({
+      documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt', documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind', attachments: 'id, documentId, nodeId, createdAt',
+      depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt', depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt', depositWorkspaceTransactions: 'id, batchId, status, createdAt', workflowSessions: 'id, documentId, focusNodeId, status, updatedAt',
+      depositMetrics: 'id, documentId, batchId, type, createdAt',
     })
   }
 }
@@ -136,6 +151,18 @@ export async function listAllWorkflowSessions(): Promise<WorkflowSession[]> {
 
 export async function saveWorkflowSession(session: WorkflowSession): Promise<void> {
   await database.workflowSessions.put(workflowSessionSchema.parse(session))
+}
+
+/** 只记录本地聚合所需事件，不保存节点原文、候选标题或模型回复。 */
+export async function recordDepositMetric(event: Omit<DepositMetricEvent, 'id' | 'createdAt'>): Promise<void> {
+  await database.depositMetrics.put({ ...event, id: crypto.randomUUID(), createdAt: Date.now() })
+}
+
+export async function getDepositMetricSummary(documentId: string): Promise<Record<DepositMetricEvent['type'], number>> {
+  const events = await database.depositMetrics.where('documentId').equals(documentId).toArray()
+  const summary = { generated: 0, accepted: 0, ignored: 0, 'target-reselected': 0, duplicate: 0, applied: 0, failed: 0 }
+  events.forEach((event) => { summary[event.type] += event.value })
+  return summary
 }
 
 export async function listAppliedDepositFingerprints(sourceDocumentId: string): Promise<string[]> {
