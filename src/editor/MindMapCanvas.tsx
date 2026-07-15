@@ -203,6 +203,14 @@ export function MindMapCanvas() {
       return tagMatches && markMatches && statusMatches && priorityMatches
     }
     const matchedById = new Map<string, boolean>()
+    const descendantCountById = new Map<string, number>()
+    const countDescendants = (nodeId: string): number => {
+      const cached = descendantCountById.get(nodeId)
+      if (cached !== undefined) return cached
+      const count = document.nodes[nodeId]?.childIds.reduce((total, childId) => total + 1 + countDescendants(childId), 0) ?? 0
+      descendantCountById.set(nodeId, count)
+      return count
+    }
     const baseNodes: Node<MindNodeData>[] = placed.map((item) => {
       const mindNode = document.nodes[item.id]
       const depth = depthOf(item.id)
@@ -230,6 +238,7 @@ export function MindMapCanvas() {
           isDropTarget: (dropIntent?.kind === 'child' && dropIntent.parentId === item.id) || freeTopicAttachmentParentId === item.id,
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
+          hiddenDescendantCount: countDescendants(item.id),
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
           isRelationSource: relationSourceIds.includes(item.id),
           layoutHeight: item.height,

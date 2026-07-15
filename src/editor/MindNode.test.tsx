@@ -19,6 +19,7 @@ function renderEditingNode() {
     isDropTarget: false,
     hasChildren: false,
     collapsed: false,
+    hiddenDescendantCount: 0,
     accentColor: '#467566',
     isRelationSource: false,
     layoutHeight: 44,
@@ -38,6 +39,7 @@ function renderNode(dataOverrides: Partial<MindNodeData> = {}) {
     isDropTarget: false,
     hasChildren: false,
     collapsed: false,
+    hiddenDescendantCount: 0,
     accentColor: '#467566',
     isRelationSource: false,
     layoutHeight: 44,
@@ -70,6 +72,12 @@ describe('MindNode text editing', () => {
 })
 
 describe('MindNode tree branch anchor', () => {
+  it('shows the number of all hidden descendants when a branch is collapsed', () => {
+    renderNode({ hasChildren: true, collapsed: true, hiddenDescendantCount: 25 })
+
+    expect(screen.getByRole('button', { name: '展开节点，包含 25 个隐藏分支' }).textContent).toBe('25')
+  })
+
   it('moves the right source anchor to the outer edge of the collapse toggle', () => {
     const { container } = renderNode({ hasChildren: true })
 

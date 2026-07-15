@@ -27,6 +27,7 @@ export type MindNodeData = {
   isDropTarget: boolean
   hasChildren: boolean
   collapsed: boolean
+  hiddenDescendantCount: number
   accentColor: string
   isRelationSource: boolean
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
@@ -185,11 +186,11 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable />
       {node.hasChildren && (
         <button
-          className="collapse-toggle"
+          className={`collapse-toggle ${node.collapsed ? 'is-collapsed' : ''}`}
           onClick={(event) => { event.stopPropagation(); dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: id }) }}
-          aria-label={node.collapsed ? '展开节点' : '折叠节点'}
+          aria-label={node.collapsed ? `展开节点，包含 ${node.hiddenDescendantCount} 个隐藏分支` : '折叠节点'}
         >
-          {node.collapsed ? '+' : '−'}
+          {node.collapsed ? node.hiddenDescendantCount : '−'}
         </button>
       )}
       {isEditing ? (

@@ -40,6 +40,18 @@ function Icon({ children }: { children: ReactNode }) {
   return <span aria-hidden="true" className="toolbar-icon">{children}</span>
 }
 
+function SummaryIcon() {
+  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h3c2.2 0 3.4 1.2 3.4 3.4v7.2C10.4 17.8 11.6 19 14 19" /><rect x="14" y="9" width="7" height="6" rx="1.5" /></svg>
+}
+
+function BoundaryIcon() {
+  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" strokeDasharray="2.5 2.5" /></svg>
+}
+
+function InspectorIcon() {
+  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M14 4v16" /></svg>
+}
+
 type Category = { id: string; name: string }
 type PendingNavigation =
   | { kind: 'open'; document: MindMapDocument }
@@ -105,6 +117,10 @@ export function App() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [accountSession, setAccountSession] = useState<AuthSession | null>(loadAccountSession)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(() => {
+    const stored = localStorage.getItem('mindtree.inspector-collapsed')
+    return stored === null ? true : stored === 'true'
+  })
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>('projects')
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('content')
   const [syncOpen, setSyncOpen] = useState(false)
@@ -145,6 +161,12 @@ export function App() {
   const workspaceBackupInputRef = useRef<HTMLInputElement>(null)
   const pendingTaskFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
+  const canGroupSelection = useMemo(() => {
+    if (selectedNodeIds.length < 2) return false
+    const selected = selectedNodeIds.map((id) => document.nodes[id])
+    const parentId = selected[0]?.parentId
+    return Boolean(parentId && selected.every((node) => node && !node.isFreeTopic && node.parentId === parentId))
+  }, [document.nodes, selectedNodeIds])
   const nodeFilter = useNodeFilterStore((state) => state.filter)
   const setNodeFilter = useNodeFilterStore((state) => state.setFilter)
   const clearNodeFilter = useNodeFilterStore((state) => state.clearFilter)
@@ -298,6 +320,14 @@ export function App() {
     setSidebarCollapsed((collapsed) => {
       const next = !collapsed
       localStorage.setItem('mindtree.sidebar-collapsed', String(next))
+      return next
+    })
+  }
+
+  const toggleInspector = () => {
+    setInspectorCollapsed((collapsed) => {
+      const next = !collapsed
+      localStorage.setItem('mindtree.inspector-collapsed', String(next))
       return next
     })
   }
@@ -863,7 +893,7 @@ export function App() {
   }, [document.id, hydrated, autoSync])
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''}`} style={{
+    <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''} ${inspectorCollapsed ? 'is-inspector-collapsed' : ''}`} style={{
       '--app-bg': theme.canvas,
       '--chrome-bg': theme.chrome,
       '--panel-bg': theme.surface,
@@ -898,6 +928,8 @@ export function App() {
               onClick={() => requestRelatedTopic(selectedNodeIds)}
               title={selectedNodeIds.length > 1 ? `${selectedNodeIds.length} 个节点的关系线将跟随鼠标` : selectedNode ? '关系线跟随鼠标；单击已有节点或双击空白处' : '先选中一个节点'}
             ><Icon>⌁</Icon><span>{selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}</span></button>
+            <button className="floating-toolbar__icon" disabled={!canGroupSelection} onClick={() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds })} title={canGroupSelection ? '为所选同级节点创建摘要' : '先选择两个或以上同级节点'} aria-label="创建摘要"><Icon><SummaryIcon /></Icon></button>
+            <button className="floating-toolbar__icon" disabled={!canGroupSelection} onClick={() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds })} title={canGroupSelection ? '为所选同级节点创建边界' : '先选择两个或以上同级节点'} aria-label="创建边界"><Icon><BoundaryIcon /></Icon></button>
             <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon><span>排列</span></button>
           </div>
         </nav>
@@ -906,6 +938,7 @@ export function App() {
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
           <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
+          <button className={`topbar-utility__button ${inspectorCollapsed ? '' : 'is-active'}`} onClick={toggleInspector} title={inspectorCollapsed ? '显示属性侧栏' : '收起属性侧栏'} aria-label={inspectorCollapsed ? '显示属性侧栏' : '收起属性侧栏'} aria-pressed={!inspectorCollapsed}><Icon><InspectorIcon /></Icon></button>
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
           {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
         </div>
