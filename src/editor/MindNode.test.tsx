@@ -26,6 +26,26 @@ function renderEditingNode() {
   return render(<ReactFlowProvider><MindNode id={nodeId} type="mind" data={data} selected={true} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
 }
 
+function renderNode(dataOverrides: Partial<MindNodeData> = {}) {
+  const data: MindNodeData = {
+    label: '父节点',
+    isRoot: false,
+    isFreeTopic: false,
+    taskStatus: 'none',
+    priority: 0,
+    marks: [],
+    tags: [],
+    isDropTarget: false,
+    hasChildren: false,
+    collapsed: false,
+    accentColor: '#467566',
+    isRelationSource: false,
+    layoutHeight: 44,
+    ...dataOverrides,
+  }
+  return render(<ReactFlowProvider><MindNode id="parent-node" type="mind" data={data} selected={false} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
+}
+
 afterEach(() => act(() => useEditorStore.getState().editNode(null)))
 
 describe('MindNode text editing', () => {
@@ -46,5 +66,24 @@ describe('MindNode text editing', () => {
     } finally {
       window.removeEventListener('keydown', onWindowKeyDown)
     }
+  })
+})
+
+describe('MindNode tree branch anchor', () => {
+  it('moves the right source anchor to the outer edge of the collapse toggle', () => {
+    const { container } = renderNode({ hasChildren: true })
+
+    const sourceHandle = container.querySelector('.node-handle--source.react-flow__handle-right') as HTMLElement
+
+    expect(sourceHandle.style.right).toBe('-4px')
+    expect(sourceHandle.style.transform).toBe('translate(50%, -50%)')
+  })
+
+  it('preserves React Flow positioning for the left source anchor', () => {
+    const { container } = renderNode({ hasChildren: true })
+
+    const sourceHandle = container.querySelector('.node-handle--source.react-flow__handle-left') as HTMLElement
+
+    expect(sourceHandle.style.transform).toBe('translate(-50%, -50%)')
   })
 })

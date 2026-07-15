@@ -251,8 +251,25 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         </span>}
         <span>{node.label}</span>
       </div>}
-      <Handle id="source-left" type="source" position={Position.Left} className="node-handle node-handle--source" style={{ top: '50%' }} isConnectable={false} />
-      <Handle id="source-right" type="source" position={Position.Right} className="node-handle node-handle--source" style={{ top: '50%' }} isConnectable={false} />
+      <Handle
+        id="source-left"
+        type="source"
+        position={Position.Left}
+        className="node-handle node-handle--source"
+        // 自定义的缩放动画不能覆盖 React Flow 的锚点位移，否则连线会缩进卡片内部。
+        style={{ top: '50%', transform: 'translate(-50%, -50%)' }}
+        isConnectable={false}
+      />
+      <Handle
+        id="source-right"
+        type="source"
+        position={Position.Right}
+        className="node-handle node-handle--source"
+        // 折叠按钮半径为 9px；React Flow 默认使用 10px Handle 的外侧作为路径起点，
+        // 已经超出卡片 5px，因此再外移 4px 即与按钮外缘精确重合。
+        style={{ top: '50%', right: node.hasChildren ? '-4px' : undefined, transform: 'translate(50%, -50%)' }}
+        isConnectable={false}
+      />
       <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
       <Handle id="relation-source-right" type="source" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
     </div>
