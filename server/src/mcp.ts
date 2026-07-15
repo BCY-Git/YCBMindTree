@@ -69,7 +69,7 @@ function documentForOwner(repository: DocumentRepository, owner: string, documen
 }
 
 export function createMindTreeMcp(repository: DocumentRepository) {
-  const server = new McpServer({ name: 'mindtree-mcp', version: '0.1.0' })
+  const server = new McpServer({ name: 'mindtree-mcp', version: '0.2.0' })
 
   server.registerTool('mindtree_list_documents', {
     title: '列出 MindTree 导图',
