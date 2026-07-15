@@ -23,6 +23,9 @@ import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
 import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
 import { createImportedCopy, parseDocumentFile, saveDocumentToLocalFile } from '../export/document-file'
+import { downloadOpml, parseOpml } from '../export/opml'
+import { parseMarkdownOutline } from '../export/markdown-import'
+import type { ImportedDocument } from '../export/import-document'
 import { parseWorkspaceBackup, prepareWorkspaceRestore, saveWorkspaceBackupToLocalFile, type WorkspaceBackup } from '../export/workspace-backup'
 import { GhostNoteEditor } from '../ai/GhostNoteEditor'
 import { LoginDialog } from '../auth/LoginDialog'
@@ -59,6 +62,7 @@ type PendingNavigation =
 
 type SidebarPanel = 'projects' | 'maps' | 'tasks' | 'assistant'
 type InspectorTab = 'content' | 'tasks' | 'resources' | 'map'
+type UniversalImportCandidate = ImportedDocument & { format: 'OPML' | 'Markdown' }
 
 function toggleValue<T>(values: T[], value: T) {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
@@ -148,6 +152,7 @@ export function App() {
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
   const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
   const [importCandidate, setImportCandidate] = useState<MindMapDocument | null>(null)
+  const [universalImportCandidate, setUniversalImportCandidate] = useState<UniversalImportCandidate | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
   const [importBusy, setImportBusy] = useState(false)
   const [workspaceBackupCandidate, setWorkspaceBackupCandidate] = useState<WorkspaceBackup | null>(null)
@@ -242,6 +247,11 @@ export function App() {
 
   const exportCurrentDocument = (mode: MarkdownExportMode) => {
     downloadMarkdown(document, mode)
+    setExportOpen(false)
+  }
+
+  const exportCurrentOpml = () => {
+    downloadOpml(document)
     setExportOpen(false)
   }
 
@@ -431,7 +441,20 @@ export function App() {
     event.target.value = ''
     if (!file) return
     try {
-      const imported = parseDocumentFile(await file.text())
+      if (file.size > 2 * 1024 * 1024) throw new Error('导入文件不能超过 2 MB')
+      const content = await file.text()
+      const lowerName = file.name.toLowerCase()
+      if (lowerName.endsWith('.opml') || lowerName.endsWith('.xml')) {
+        setUniversalImportCandidate({ ...parseOpml(content, file.name), format: 'OPML' })
+        setImportStatus(null)
+        return
+      }
+      if (lowerName.endsWith('.md') || lowerName.endsWith('.markdown')) {
+        setUniversalImportCandidate({ ...parseMarkdownOutline(content, file.name), format: 'Markdown' })
+        setImportStatus(null)
+        return
+      }
+      const imported = parseDocumentFile(content)
       if (documents.some((item) => item.id === imported.id)) {
         setImportCandidate(imported)
         setImportStatus(null)
@@ -935,7 +958,7 @@ export function App() {
       '--line': theme.nodeBorder,
       '--accent': theme.selected,
     } as CSSProperties}>
-      <input ref={importInputRef} className="document-import-input" type="file" accept=".mindtree.json,application/json" onChange={(event) => { void importDocumentFromFile(event) }} aria-hidden="true" tabIndex={-1} />
+      <input ref={importInputRef} className="document-import-input" type="file" accept=".mindtree.json,.json,.opml,.xml,.md,.markdown,application/json,text/x-opml,text/xml,text/markdown" onChange={(event) => { void importDocumentFromFile(event) }} aria-hidden="true" tabIndex={-1} />
       <input ref={workspaceBackupInputRef} className="document-import-input" type="file" accept=".mindtree-backup.zip,.zip,application/zip" onChange={(event) => { void selectWorkspaceBackupFile(event) }} aria-hidden="true" tabIndex={-1} />
       <header className="topbar">
         <div className="brand-lockup">
@@ -972,7 +995,7 @@ export function App() {
           <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
-          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
+          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentOpml()}>导出 OPML 大纲</button><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
           <PanelToggleButton side="left" collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
           <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
@@ -1011,8 +1034,8 @@ export function App() {
             </section>}
 
             {sidebarPanel === 'maps' && <section className="sidebar-panel" aria-label="导图列表">
-              <div className="sidebar-panel__heading"><span>导图记录</span><span className="sidebar-import-actions"><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree 导图文件">⇧ 导入</button><button className="sidebar-import-button" onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">↥ 恢复</button></span></div>
-              <small className="sidebar-import-hint">导入单图或恢复 `.mindtree-backup.zip` 工作区备份。</small>
+              <div className="sidebar-panel__heading"><span>导图记录</span><span className="sidebar-import-actions"><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree、OPML 或 Markdown 文件">⇧ 导入</button><button className="sidebar-import-button" onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">↥ 恢复</button></span></div>
+              <small className="sidebar-import-hint">导入 MindTree / OPML / Markdown，或恢复工作区备份。</small>
               <input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" />
               {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>草稿 · 已自动保存到本机</small></span></button>)}</div>}
               {matchingDocuments.map((item) => (
@@ -1144,6 +1167,19 @@ export function App() {
             <button className="document-import-dialog__cancel" disabled={importBusy} onClick={() => setImportCandidate(null)}>取消</button>
           </div>
           <small>附件文件不会包含在导图 JSON 中；导入后同步会先检查云端版本，避免覆盖远端内容。</small>
+        </section>
+      </div>}
+      {universalImportCandidate && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !importBusy) setUniversalImportCandidate(null) }}>
+        <section className="document-import-dialog" role="dialog" aria-modal="true" aria-labelledby="universal-import-title">
+          <p className="eyebrow">{universalImportCandidate.format} 导入预览</p>
+          <h2 id="universal-import-title">{universalImportCandidate.document.title}</h2>
+          <p>内容已解析为新的 MindTree 导图。确认结构后再写入工作区，当前导图不会被覆盖。</p>
+          <div className="workspace-restore-summary"><strong>{universalImportCandidate.summary.nodeCount} 个节点 · 最大 {universalImportCandidate.summary.maxDepth} 层</strong><span>根主题：{universalImportCandidate.document.nodes[universalImportCandidate.document.rootId].topic}</span></div>
+          <div className="document-import-dialog__actions">
+            <button className="document-import-dialog__primary" disabled={importBusy} onClick={() => { const candidate = universalImportCandidate.document; setUniversalImportCandidate(null); void completeDocumentImport(candidate, 'replace') }}>导入为新导图</button>
+            <button className="document-import-dialog__cancel" disabled={importBusy} onClick={() => setUniversalImportCandidate(null)}>取消</button>
+          </div>
+          <small>通用格式只转换可表达的层级、顺序、备注和任务状态；MindTree 专有字段请使用 `.mindtree.json` 保真迁移。</small>
         </section>
       </div>}
       {workspaceBackupCandidate && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !workspaceBackupBusy) setWorkspaceBackupCandidate(null) }}>
