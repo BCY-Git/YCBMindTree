@@ -27,7 +27,16 @@ describe('deposit context', () => {
 
     expect(context.source.nodes).toHaveLength(depositContextLimits.sourceNodes)
     expect(context.source).toMatchObject({ truncated: true, totalNodeCount: Object.keys(document.nodes).length })
-    expect(context.destinations[0].candidateNodes).toHaveLength(depositContextLimits.destinationNodes)
+    expect(context.destinations[0].candidateNodes).toHaveLength(depositContextLimits.destinationNodesPerDocument)
     expect(context.destinations[0].truncated).toBe(true)
+  })
+
+  it('offers a bounded set of recent workspace documents as destinations', () => {
+    const source = createInitialDocument()
+    const other = createInitialDocument()
+    other.title = '无人项目'
+    const context = buildDepositContext(source, source.rootId, [], [source, other])
+
+    expect(context.destinations.map((item) => item.documentId)).toEqual([source.id, other.id])
   })
 })

@@ -3,7 +3,7 @@ import { depositFingerprint } from './deposit-dedup'
 import { parseDepositAnalysis } from './deposit-parser'
 
 describe('deposit analysis parser', () => {
-  const input = { sourceNodeIds: ['source-1'], documentId: 'doc-1', destinationNodeIds: ['root', 'project'] }
+  const input = { sourceNodeIds: ['source-1'], destinationNodeIdsByDocument: { 'doc-1': ['root', 'project'] } }
 
   it('accepts structured candidates and clears target IDs outside the supplied whitelist', () => {
     const proposal = parseDepositAnalysis(JSON.stringify({
@@ -23,5 +23,14 @@ describe('deposit analysis parser', () => {
 
   it('creates stable fingerprints regardless of source-node order', () => {
     expect(depositFingerprint('doc-1', ['b', 'a'], '  Zod 运行时验证 ', 'knowledge')).toBe(depositFingerprint('doc-1', ['a', 'b'], 'zod   运行时验证', 'knowledge'))
+  })
+
+  it('accepts a target from another supplied workspace document', () => {
+    const proposal = parseDepositAnalysis(JSON.stringify({
+      summary: '回流项目',
+      candidates: [{ type: 'result', title: 'PPT 已交付', detail: '已经发给负责人。', sourceNodeIds: ['source-1'], action: 'append-note', suggestedDocumentId: 'project-doc', suggestedParentId: null, suggestedTargetNodeId: 'project-node', confidence: 0.95, reason: '明确的项目成果。' }],
+    }), { sourceNodeIds: ['source-1'], destinationNodeIdsByDocument: { 'doc-1': ['root'], 'project-doc': ['project-node'] } })
+
+    expect(proposal.candidates[0]).toMatchObject({ suggestedDocumentId: 'project-doc', suggestedTargetNodeId: 'project-node' })
   })
 })

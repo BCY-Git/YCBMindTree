@@ -1,5 +1,6 @@
 import type { LocalDepositOperation } from '../../domain/commands'
 import type { MindNodePriority, MindNodeTaskStatus, NodeMark } from '../../domain/document.types'
+import type { MindMapDocument } from '../../domain/document.types'
 
 export const depositCandidateTypes = ['fact', 'result', 'task', 'problem', 'decision', 'knowledge', 'idea'] as const
 export type DepositCandidateType = typeof depositCandidateTypes[number]
@@ -99,7 +100,17 @@ export type { LocalDepositOperation }
 
 export type DepositPlan = {
   batchId: string
-  expectedDocumentUpdatedAt: number
-  operations: LocalDepositOperation[]
+  expectedDocumentUpdatedAt: Record<string, number>
+  operations: Array<{ candidateId: string; documentId: string; operation: LocalDepositOperation }>
   includedCandidateIds: string[]
+}
+
+export type DepositWorkspaceTransaction = {
+  id: string
+  batchId: string
+  beforeDocuments: MindMapDocument[]
+  afterDocuments: MindMapDocument[]
+  status: 'applied' | 'reverted'
+  createdAt: number
+  revertedAt: number | null
 }

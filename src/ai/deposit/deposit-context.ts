@@ -1,7 +1,7 @@
 import type { MindMapDocument } from '../../domain/document.types'
 import type { DepositAnalysisContext, DepositContextNode } from './deposit-types'
 
-export const depositContextLimits = { sourceNodes: 160, destinationNodes: 240, topicCharacters: 500, noteCharacters: 2_000 } as const
+export const depositContextLimits = { sourceNodes: 160, destinationDocuments: 8, destinationNodes: 240, destinationNodesPerDocument: 60, topicCharacters: 500, noteCharacters: 2_000 } as const
 
 function clipped(value: string, limit: number) {
   return value.length > limit ? `${value.slice(0, limit - 1)}…` : value
@@ -29,20 +29,27 @@ function subtreeIds(document: MindMapDocument, nodeId: string) {
   return result
 }
 
-export function buildDepositContext(document: MindMapDocument, sourceNodeId: string, appliedFingerprints: string[]): DepositAnalysisContext {
+export function buildDepositContext(document: MindMapDocument, sourceNodeId: string, appliedFingerprints: string[], workspaceDocuments: MindMapDocument[] = [document]): DepositAnalysisContext {
   const sourceIds = subtreeIds(document, sourceNodeId)
   const includedSourceIds = sourceIds.slice(0, depositContextLimits.sourceNodes)
   const toContextNode = (id: string): DepositContextNode => {
     const node = document.nodes[id]
     return { id, path: pathFor(document, id), topic: clipped(node.topic, depositContextLimits.topicCharacters), note: clipped(node.note, depositContextLimits.noteCharacters), taskStatus: node.taskStatus, priority: node.priority, dueDate: node.dueDate, marks: node.marks, tagIds: node.tagIds }
   }
-  const destinationNodes = Object.values(document.nodes)
-    .sort((left, right) => (left.id === document.rootId ? -1 : right.id === document.rootId ? 1 : right.updatedAt - left.updatedAt))
-  const includedDestinations = destinationNodes.slice(0, depositContextLimits.destinationNodes)
+  const destinationDocuments = [document, ...workspaceDocuments.filter((item) => item.id !== document.id && !item.isDraft).sort((left, right) => right.updatedAt - left.updatedAt)]
+    .slice(0, depositContextLimits.destinationDocuments)
+  let remainingDestinationNodes = depositContextLimits.destinationNodes
+  const destinations = destinationDocuments.map((destination) => {
+    const nodes = Object.values(destination.nodes)
+      .sort((left, right) => (left.id === destination.rootId ? -1 : right.id === destination.rootId ? 1 : right.updatedAt - left.updatedAt))
+    const limit = Math.min(depositContextLimits.destinationNodesPerDocument, remainingDestinationNodes)
+    const included = nodes.slice(0, limit)
+    remainingDestinationNodes -= included.length
+    return { documentId: destination.id, title: destination.title, candidateNodes: included.map((node) => ({ id: node.id, path: pathFor(destination, node.id), topic: clipped(node.topic, depositContextLimits.topicCharacters) })), totalNodeCount: nodes.length, truncated: included.length < nodes.length }
+  }).filter((destination) => destination.candidateNodes.length)
   return {
     source: { documentId: document.id, title: document.title, rootId: document.rootId, selectedNodeIds: [sourceNodeId], nodes: includedSourceIds.map(toContextNode), totalNodeCount: sourceIds.length, truncated: includedSourceIds.length < sourceIds.length },
-    // MVP 限定当前文档；仍提供全图目标节点，优先更新既有项目或知识主题。
-    destinations: [{ documentId: document.id, title: document.title, candidateNodes: includedDestinations.map((node) => ({ id: node.id, path: pathFor(document, node.id), topic: clipped(node.topic, depositContextLimits.topicCharacters) })), totalNodeCount: destinationNodes.length, truncated: includedDestinations.length < destinationNodes.length }],
+    destinations,
     alreadyAppliedFingerprints: appliedFingerprints,
   }
 }

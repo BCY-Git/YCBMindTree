@@ -8,29 +8,39 @@ function appendWithHeading(existing: string, content: string) {
   return [existing.trim(), `${heading}\n${value}`].filter(Boolean).join('\n\n')
 }
 
-function operationFor(document: MindMapDocument, candidate: DepositCandidate): LocalDepositOperation | null {
+function operationFor(documents: ReadonlyMap<string, MindMapDocument>, candidate: DepositCandidate): { documentId: string; operation: LocalDepositOperation } | null {
   if (candidate.action === 'keep') return null
+  const documentId = candidate.suggestedDocumentId
+  const document = documentId ? documents.get(documentId) : undefined
+  if (!documentId || !document) throw new Error(`「${candidate.title}」缺少有效的目标导图。`)
   if (candidate.action === 'create') {
     const parentId = candidate.suggestedParentId
     if (!parentId || !document.nodes[parentId] || document.nodes[parentId].isFreeTopic) throw new Error(`「${candidate.title}」缺少有效的新增位置。`)
-    return { type: 'CREATE_BRANCH', parentId, branch: { topic: candidate.title, note: candidate.detail, links: [], attachments: [], taskStatus: candidate.type === 'task' ? 'todo' : 'none', priority: 0, dueDate: null, marks: candidate.type === 'problem' ? ['risk'] : candidate.type === 'idea' ? ['idea'] : [], tagIds: [], collapsed: false, children: [] } }
+    return { documentId, operation: { type: 'CREATE_BRANCH', parentId, branch: { topic: candidate.title, note: candidate.detail, links: [], attachments: [], taskStatus: candidate.type === 'task' ? 'todo' : 'none', priority: 0, dueDate: null, marks: candidate.type === 'problem' ? ['risk'] : candidate.type === 'idea' ? ['idea'] : [], tagIds: [], collapsed: false, children: [] } } }
   }
   const nodeId = candidate.suggestedTargetNodeId
   if (!nodeId || !document.nodes[nodeId]) throw new Error(`「${candidate.title}」缺少有效的更新目标。`)
-  if (candidate.action === 'update') return { type: 'UPDATE_NODE', nodeId, patch: { note: candidate.detail } }
-  if (candidate.action === 'complete') return { type: 'COMPLETE_TASK', nodeId, evidence: candidate.detail || candidate.title }
-  return { type: 'APPEND_NODE_NOTE', nodeId, content: candidate.detail || candidate.title }
+  if (candidate.action === 'update') return { documentId, operation: { type: 'UPDATE_NODE', nodeId, patch: { note: candidate.detail } } }
+  if (candidate.action === 'complete') return { documentId, operation: { type: 'COMPLETE_TASK', nodeId, evidence: candidate.detail || candidate.title } }
+  return { documentId, operation: { type: 'APPEND_NODE_NOTE', nodeId, content: candidate.detail || candidate.title } }
 }
 
-export function buildDepositPlan(document: MindMapDocument, batch: DepositBatch): DepositPlan {
-  if (document.id !== batch.sourceDocumentId) throw new Error('当前导图不是本次沉淀的来源。')
-  if (document.updatedAt !== batch.sourceDocumentUpdatedAt) throw new Error('导图在生成建议后已经变化，请重新分析。')
+export function buildDepositPlan(workspaceDocuments: MindMapDocument[], batch: DepositBatch): DepositPlan {
+  const documents = new Map(workspaceDocuments.map((document) => [document.id, document]))
+  const sourceDocument = documents.get(batch.sourceDocumentId)
+  if (!sourceDocument) throw new Error('找不到本次沉淀的来源导图。')
+  if (sourceDocument.updatedAt !== batch.sourceDocumentUpdatedAt) throw new Error('来源导图在生成建议后已经变化，请重新分析。')
   const candidates = batch.candidates.filter((candidate) => candidate.status === 'accepted')
   if (!candidates.length) throw new Error('请先选择至少一条沉淀建议。')
+  const operations = candidates.flatMap((candidate) => {
+    const planned = operationFor(documents, candidate)
+    return planned ? [{ candidateId: candidate.id, ...planned }] : []
+  })
+  const relevantDocumentIds = new Set([batch.sourceDocumentId, ...operations.map((item) => item.documentId)])
   return {
     batchId: batch.id,
-    expectedDocumentUpdatedAt: batch.sourceDocumentUpdatedAt,
-    operations: candidates.map((candidate) => operationFor(document, candidate)).filter((item): item is LocalDepositOperation => item !== null),
+    expectedDocumentUpdatedAt: Object.fromEntries([...relevantDocumentIds].map((documentId) => [documentId, documents.get(documentId)?.updatedAt ?? -1])),
+    operations,
     includedCandidateIds: candidates.map((candidate) => candidate.id),
   }
 }

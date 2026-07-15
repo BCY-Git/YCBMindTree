@@ -26,7 +26,7 @@ import { parseDepositAnalysis } from './deposit/deposit-parser'
 import { depositSystemPrompt } from './deposit/deposit-prompt'
 import { buildDepositPlan, previewDepositOperation } from './deposit/deposit-planner'
 import type { DepositBatch, DepositCandidate, DepositPlan, DepositProvenance } from './deposit/deposit-types'
-import { applyDepositBatch, listAppliedDepositFingerprints, listDepositBatches, saveDepositBatch } from '../persistence/database'
+import { applyDepositBatch, applyWorkspaceDepositPlan, listAppliedDepositFingerprints, listDepositBatches, revertWorkspaceDepositBatch, saveDepositBatch } from '../persistence/database'
 import { DepositInbox } from '../deposit/DepositInbox'
 
 type ChatResponse = {
@@ -64,7 +64,7 @@ function ReorganizationPreview({ plan, document }: { plan: MapReorganization; do
   })}</ul>
 }
 
-export function AiAssistant({ document, targetNodeId }: { document: MindMapDocument; targetNodeId: string }) {
+export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
@@ -79,6 +79,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
   const [depositBatch, setDepositBatch] = useState<DepositBatch | null>(null)
   const [depositPreview, setDepositPreview] = useState<DepositPlan | null>(null)
   const [depositDebugContext, setDepositDebugContext] = useState<ReturnType<typeof buildDepositContext> | null>(null)
+  const [lastWorkspaceDepositBatchId, setLastWorkspaceDepositBatchId] = useState<string | null>(null)
 
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
   useEffect(() => {
@@ -144,7 +145,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     try {
       const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
       const appliedFingerprints = intent === 'deposit' ? await listAppliedDepositFingerprints(document.id) : []
-      const depositContext = intent === 'deposit' ? buildDepositContext(document, target.id, appliedFingerprints) : null
+      const depositContext = intent === 'deposit' ? buildDepositContext(document, target.id, appliedFingerprints, workspaceDocuments) : null
       if (depositContext) setDepositDebugContext(depositContext)
       const instruction = intent === 'branch'
         ? '你是 MindTree 的思维导图助手。根据用户要求扩展当前节点。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"topic":"分支主题","children":[{"topic":"子主题","children":[]}]}; 最多 6 层、60 个节点。'
@@ -178,8 +179,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
         if (!depositContext) throw new Error('无法构建沉淀分析范围。')
         const proposal = parseDepositAnalysis(content, {
           sourceNodeIds: depositContext.source.nodes.map((node) => node.id),
-          documentId: document.id,
-          destinationNodeIds: depositContext.destinations[0].candidateNodes.map((node) => node.id),
+          destinationNodeIdsByDocument: Object.fromEntries(depositContext.destinations.map((destination) => [destination.documentId, destination.candidateNodes.map((node) => node.id)])),
         })
         const now = Date.now()
         const batchId = crypto.randomUUID()
@@ -276,7 +276,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
   const previewDeposit = () => {
     if (!depositBatch) return
     try {
-      const plan = buildDepositPlan(document, depositBatch)
+      const plan = buildDepositPlan(workspaceDocuments, depositBatch)
       setDepositPreview(plan)
       setNotice(plan.operations.length ? `请核对 ${plan.operations.length} 项写入变化。` : '所选内容仅保留在原记录中，不会修改导图。')
     } catch (error) {
@@ -286,24 +286,41 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
 
   const confirmDeposit = async () => {
     if (!depositBatch || !depositPreview) return
-    if (document.updatedAt !== depositPreview.expectedDocumentUpdatedAt) {
+    if (document.updatedAt !== depositPreview.expectedDocumentUpdatedAt[document.id]) {
       setDepositPreview(null)
       setNotice('导图在预览期间已变化，请重新分析。')
       return
     }
     const accepted = depositBatch.candidates.filter((candidate) => depositPreview.includedCandidateIds.includes(candidate.id))
-    const applied = !depositPreview.operations.length || dispatch({ type: 'APPLY_DEPOSIT_OPERATIONS', batchId: depositBatch.id, operations: depositPreview.operations })
+    const crossDocument = depositPreview.operations.some((item) => item.documentId !== document.id)
+    if (crossDocument) {
+      try {
+        await onBeforeWorkspaceApply()
+        const result = await applyWorkspaceDepositPlan(depositPreview, depositBatch, settings.model.trim())
+        onWorkspaceDocumentsChanged(result.documents)
+        setDepositBatch(result.batch)
+        setDepositPreview(null)
+        setLastWorkspaceDepositBatchId(depositBatch.id)
+        setNotice(`已跨导图沉淀 ${accepted.length} 条内容，所有目标已在同一事务中写入。`)
+      } catch (error) {
+        setNotice(platformErrorMessage(error, '跨导图写入失败，没有产生部分修改。'))
+      }
+      return
+    }
+    const localOperations = depositPreview.operations.map((item) => item.operation)
+    const applied = !localOperations.length || dispatch({ type: 'APPLY_DEPOSIT_OPERATIONS', batchId: depositBatch.id, operations: localOperations })
     if (!applied) {
       setNotice('写入失败：目标节点可能已经变化，请重新分析。')
       return
     }
     const after = useEditorStore.getState().document
     const provenance: DepositProvenance[] = accepted.map((candidate) => {
+      const planned = depositPreview.operations.find((item) => item.candidateId === candidate.id)
       const createdId = candidate.action === 'create' && candidate.suggestedParentId
         ? after.nodes[candidate.suggestedParentId]?.childIds.find((id) => !document.nodes[id] && after.nodes[id]?.topic === candidate.title) ?? null
         : null
       const targetId = createdId ?? candidate.suggestedTargetNodeId
-      return { id: crypto.randomUUID(), batchId: depositBatch.id, candidateId: candidate.id, sourceDocumentId: depositBatch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: depositBatch.sourceSnapshot, targetDocumentId: targetId ? after.id : null, targetNodeIds: targetId ? [targetId] : [], action: candidate.action, model: settings.model.trim(), acceptedByUser: true, createdAt: Date.now() }
+      return { id: crypto.randomUUID(), batchId: depositBatch.id, candidateId: candidate.id, sourceDocumentId: depositBatch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: depositBatch.sourceSnapshot, targetDocumentId: planned?.documentId ?? (targetId ? after.id : null), targetNodeIds: targetId ? [targetId] : [], action: candidate.action, model: settings.model.trim(), acceptedByUser: true, createdAt: Date.now() }
     })
     try {
       const completed = await applyDepositBatch(depositBatch, provenance)
@@ -312,6 +329,19 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       setNotice(`已沉淀 ${accepted.length} 条内容${depositPreview.operations.length ? '，可按 ⌘Z 撤销导图写入。' : '。'}`)
     } catch (error) {
       setNotice(platformErrorMessage(error, '导图已更新，但来源记录保存失败，请重试。'))
+    }
+  }
+
+  const undoWorkspaceDeposit = async () => {
+    if (!lastWorkspaceDepositBatchId) return
+    try {
+      const result = await revertWorkspaceDepositBatch(lastWorkspaceDepositBatchId)
+      onWorkspaceDocumentsChanged(result.documents)
+      setDepositBatch(result.batch)
+      setLastWorkspaceDepositBatchId(null)
+      setNotice('已整体撤销本次跨导图沉淀；候选已恢复为待确认状态。')
+    } catch (error) {
+      setNotice(platformErrorMessage(error, '无法安全撤销：相关导图可能已继续修改。'))
     }
   }
 
@@ -341,8 +371,9 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
       {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
       {import.meta.env.DEV && depositDebugContext && <details className="deposit-debug"><summary>查看本次发送范围</summary><pre>{JSON.stringify(depositDebugContext, null, 2)}</pre></details>}
-      {depositBatch?.status === 'pending' && <DepositInbox batch={depositBatch} document={document} onChange={updateDepositCandidate} onChangeAll={updateDepositCandidates} onPreview={previewDeposit} onDismiss={() => { setDepositBatch(null); setDepositPreview(null); setNotice('已保留本批候选，可稍后继续处理。') }} />}
-      {depositPreview && <div className="ai-deposit-preview"><div className="ai-branch-preview__heading"><strong>待写入沉淀</strong><span>{depositPreview.operations.length} 项变化</span></div><ul>{depositPreview.operations.map((operation, index) => <li key={`${operation.type}-${index}`}>{previewDepositOperation(document, operation)}</li>)}</ul><div className="ai-branch-preview__actions"><button type="button" onClick={() => { void confirmDeposit() }}>确认写入</button><button type="button" onClick={() => setDepositPreview(null)}>返回修改</button></div></div>}
+      {depositBatch?.status === 'pending' && <DepositInbox batch={depositBatch} document={document} workspaceDocuments={workspaceDocuments} onChange={updateDepositCandidate} onChangeAll={updateDepositCandidates} onPreview={previewDeposit} onDismiss={() => { setDepositBatch(null); setDepositPreview(null); setNotice('已保留本批候选，可稍后继续处理。') }} />}
+      {depositPreview && <div className="ai-deposit-preview"><div className="ai-branch-preview__heading"><strong>待写入沉淀</strong><span>{depositPreview.operations.length} 项变化</span></div><ul>{depositPreview.operations.map((item, index) => { const targetDocument = workspaceDocuments.find((candidate) => candidate.id === item.documentId); return <li key={`${item.operation.type}-${index}`}>{targetDocument?.title ?? '未知导图'} · {targetDocument ? previewDepositOperation(targetDocument, item.operation) : '目标已删除'}</li> })}</ul><div className="ai-branch-preview__actions"><button type="button" onClick={() => { void confirmDeposit() }}>确认写入</button><button type="button" onClick={() => setDepositPreview(null)}>返回修改</button></div></div>}
+      {lastWorkspaceDepositBatchId && <button type="button" className="deposit-workspace-undo" onClick={() => { void undoWorkspaceDeposit() }}>撤销上一次跨导图沉淀</button>}
       {response && <div className="ai-response" aria-live="polite">{response}</div>}
     </section>
   )

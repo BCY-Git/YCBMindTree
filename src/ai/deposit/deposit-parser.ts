@@ -14,23 +14,22 @@ function extractJson(content: string) {
 /** 模型输出是不可信输入：结构由 Zod 校验，ID 再由本地白名单收紧。 */
 export function parseDepositAnalysis(content: string, input: {
   sourceNodeIds: readonly string[]
-  documentId: string
-  destinationNodeIds: readonly string[]
+  destinationNodeIdsByDocument: Readonly<Record<string, readonly string[]>>
 }): DepositAnalysisProposal {
   const parsed = depositAnalysisSchema.parse(extractJson(content))
   const allowedSources = new Set(input.sourceNodeIds)
-  const allowedNodes = new Set(input.destinationNodeIds)
+  const allowedDestinations = new Map(Object.entries(input.destinationNodeIdsByDocument).map(([documentId, nodeIds]) => [documentId, new Set(nodeIds)]))
   return {
     summary: parsed.summary,
     candidates: parsed.candidates.map((candidate) => {
       if (candidate.sourceNodeIds.some((id) => !allowedSources.has(id))) throw new Error('模型引用了分析范围之外的来源节点。')
-      const sameDocument = candidate.suggestedDocumentId === input.documentId
+      const allowedNodes = candidate.suggestedDocumentId ? allowedDestinations.get(candidate.suggestedDocumentId) : undefined
       return {
         ...candidate,
         sourceNodeIds: [...new Set(candidate.sourceNodeIds)],
-        suggestedDocumentId: sameDocument ? input.documentId : null,
-        suggestedParentId: sameDocument && candidate.suggestedParentId && allowedNodes.has(candidate.suggestedParentId) ? candidate.suggestedParentId : null,
-        suggestedTargetNodeId: sameDocument && candidate.suggestedTargetNodeId && allowedNodes.has(candidate.suggestedTargetNodeId) ? candidate.suggestedTargetNodeId : null,
+        suggestedDocumentId: allowedNodes ? candidate.suggestedDocumentId : null,
+        suggestedParentId: allowedNodes && candidate.suggestedParentId && allowedNodes.has(candidate.suggestedParentId) ? candidate.suggestedParentId : null,
+        suggestedTargetNodeId: allowedNodes && candidate.suggestedTargetNodeId && allowedNodes.has(candidate.suggestedTargetNodeId) ? candidate.suggestedTargetNodeId : null,
       }
     }),
   }

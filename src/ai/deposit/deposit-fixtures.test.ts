@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseDepositAnalysis } from './deposit-parser'
 
-const input = { sourceNodeIds: ['source'], documentId: 'document', destinationNodeIds: ['root', 'target'] }
+const input = { sourceNodeIds: ['source'], destinationNodeIdsByDocument: { document: ['root', 'target'] } }
 
 function parse(candidates: unknown[]) {
   return parseDepositAnalysis(JSON.stringify({ summary: 'fixture', candidates }), input).candidates

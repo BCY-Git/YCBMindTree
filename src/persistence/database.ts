@@ -18,6 +18,8 @@ import type { MindMapDocument, MindNodeAttachment } from '../domain/document.typ
 import { assertValidDocument } from '../domain/document.validator'
 import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
+import type { DepositPlan, DepositWorkspaceTransaction } from '../ai/deposit/deposit-types'
+import { executeCommand } from '../domain/commands'
 
 export type SyncMetadata = {
   documentId: string
@@ -38,6 +40,7 @@ class MindTreeDatabase extends Dexie {
   attachments!: EntityTable<StoredAttachment, 'id'>
   depositBatches!: EntityTable<DepositBatch, 'id'>
   depositProvenance!: EntityTable<DepositProvenance, 'id'>
+  depositWorkspaceTransactions!: EntityTable<DepositWorkspaceTransaction, 'id'>
 
   constructor() {
     super('mindtree')
@@ -61,6 +64,15 @@ class MindTreeDatabase extends Dexie {
       attachments: 'id, documentId, nodeId, createdAt',
       depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt',
       depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt',
+    })
+    this.version(6).stores({
+      documents: 'id, title, updatedAt',
+      syncMetadata: 'documentId, syncedAt',
+      documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind',
+      attachments: 'id, documentId, nodeId, createdAt',
+      depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt',
+      depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt',
+      depositWorkspaceTransactions: 'id, batchId, status, createdAt',
     })
   }
 }
@@ -124,6 +136,80 @@ export async function applyDepositBatch(batch: DepositBatch, provenance: Deposit
     if (provenance.length) await database.depositProvenance.bulkPut(provenance)
   })
   return applied
+}
+
+function appliedBatch(batch: DepositBatch, now = Date.now()): DepositBatch {
+  return {
+    ...batch,
+    status: 'applied',
+    updatedAt: now,
+    appliedAt: now,
+    candidates: batch.candidates.map((candidate) => candidate.status === 'accepted' ? { ...candidate, status: 'applied' } : candidate),
+  }
+}
+
+/**
+ * 跨导图沉淀在单个 Dexie 事务中完成：版本检查、所有导图写入、批次状态、来源与撤销快照。
+ */
+export async function applyWorkspaceDepositPlan(plan: DepositPlan, batch: DepositBatch, model: string): Promise<{ documents: MindMapDocument[]; batch: DepositBatch }> {
+  const documentIds = Object.keys(plan.expectedDocumentUpdatedAt)
+  return database.transaction('rw', [database.documents, database.depositBatches, database.depositProvenance, database.depositWorkspaceTransactions], async () => {
+    const loaded = await database.documents.bulkGet(documentIds)
+    const documents = new Map<string, MindMapDocument>()
+    loaded.forEach((document, index) => {
+      if (!document) throw new Error('沉淀目标导图已被删除')
+      const parsed = parseStoredDocument(document)
+      if (parsed.updatedAt !== plan.expectedDocumentUpdatedAt[parsed.id]) throw new Error(`导图「${parsed.title}」在预览后已发生变化`)
+      documents.set(parsed.id, parsed)
+    })
+    const beforeDocuments = documentIds.map((id) => structuredClone(documents.get(id)!))
+    const afterDocuments = documentIds.map((documentId) => {
+      const document = documents.get(documentId)!
+      const operations = plan.operations.filter((item) => item.documentId === documentId).map((item) => item.operation)
+      return operations.length ? executeCommand(document, { type: 'APPLY_DEPOSIT_OPERATIONS', batchId: batch.id, operations }).document : structuredClone(document)
+    })
+    const afterById = new Map(afterDocuments.map((document) => [document.id, document]))
+    const beforeById = new Map(beforeDocuments.map((document) => [document.id, document]))
+    const claimedCreatedNodes = new Set<string>()
+    const accepted = batch.candidates.filter((candidate) => plan.includedCandidateIds.includes(candidate.id))
+    const provenance: DepositProvenance[] = accepted.map((candidate) => {
+      const planned = plan.operations.find((item) => item.candidateId === candidate.id)
+      let targetNodeId: string | null = null
+      if (planned?.operation.type === 'CREATE_BRANCH') {
+        const before = beforeById.get(planned.documentId)!
+        const after = afterById.get(planned.documentId)!
+        targetNodeId = after.nodes[planned.operation.parentId]?.childIds.find((id) => !before.nodes[id] && !claimedCreatedNodes.has(id) && after.nodes[id]?.topic === candidate.title) ?? null
+        if (targetNodeId) claimedCreatedNodes.add(targetNodeId)
+      } else if (planned && 'nodeId' in planned.operation) targetNodeId = planned.operation.nodeId
+      return { id: crypto.randomUUID(), batchId: batch.id, candidateId: candidate.id, sourceDocumentId: batch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: batch.sourceSnapshot, targetDocumentId: planned?.documentId ?? null, targetNodeIds: targetNodeId ? [targetNodeId] : [], action: candidate.action, model, acceptedByUser: true, createdAt: Date.now() }
+    })
+    const completed = appliedBatch(batch)
+    const transaction: DepositWorkspaceTransaction = { id: crypto.randomUUID(), batchId: batch.id, beforeDocuments, afterDocuments, status: 'applied', createdAt: Date.now(), revertedAt: null }
+    await database.documents.bulkPut(afterDocuments)
+    await database.depositBatches.put(completed)
+    if (provenance.length) await database.depositProvenance.bulkPut(provenance)
+    await database.depositWorkspaceTransactions.put(transaction)
+    return { documents: afterDocuments, batch: completed }
+  })
+}
+
+export async function revertWorkspaceDepositBatch(batchId: string): Promise<{ documents: MindMapDocument[]; batch: DepositBatch }> {
+  return database.transaction('rw', [database.documents, database.depositBatches, database.depositWorkspaceTransactions], async () => {
+    const transaction = await database.depositWorkspaceTransactions.where('batchId').equals(batchId).last()
+    if (!transaction || transaction.status !== 'applied') throw new Error('找不到可撤销的跨导图沉淀')
+    const current = await database.documents.bulkGet(transaction.afterDocuments.map((document) => document.id))
+    current.forEach((document, index) => {
+      const expected = transaction.afterDocuments[index]
+      if (!document || document.updatedAt !== expected.updatedAt) throw new Error(`导图「${expected.title}」已继续修改，无法安全整体撤销`)
+    })
+    const batch = await database.depositBatches.get(batchId)
+    if (!batch) throw new Error('沉淀批次不存在')
+    const revertedBatch: DepositBatch = { ...batch, status: 'pending', appliedAt: null, updatedAt: Date.now(), candidates: batch.candidates.map((candidate) => candidate.status === 'applied' ? { ...candidate, status: 'accepted' } : candidate) }
+    await database.documents.bulkPut(transaction.beforeDocuments)
+    await database.depositBatches.put(revertedBatch)
+    await database.depositWorkspaceTransactions.put({ ...transaction, status: 'reverted', revertedAt: Date.now() })
+    return { documents: transaction.beforeDocuments, batch: revertedBatch }
+  })
 }
 
 /** 与编辑器撤销/重做联动；来源记录保留历史，是否生效由批次和候选状态表示。 */

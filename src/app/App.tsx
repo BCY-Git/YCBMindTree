@@ -307,6 +307,16 @@ export function App() {
       .sort((left, right) => right.updatedAt - left.updatedAt))
   }, [])
 
+  const adoptWorkspaceDocuments = useCallback((updatedDocuments: MindMapDocument[]) => {
+    setDocuments((current) => [...updatedDocuments, ...current.filter((item) => !updatedDocuments.some((updated) => updated.id === item.id))]
+      .sort((left, right) => right.updatedAt - left.updatedAt))
+    const active = updatedDocuments.find((item) => item.id === useEditorStore.getState().document.id)
+    if (active) {
+      observedVersionRef.current = { documentId: active.id, updatedAt: active.updatedAt }
+      hydrate(active)
+    }
+  }, [hydrate])
+
   const flushCurrentDocument = useCallback(async () => {
     if (!hydrated) return
     if (pendingSaveRef.current !== null) {
@@ -949,7 +959,7 @@ export function App() {
 
             {sidebarPanel === 'assistant' && <section className="sidebar-panel sidebar-panel--assistant" aria-label="AI 助手">
               <div className="sidebar-panel__heading"><span>AI 助手</span><small>基于当前导图</small></div>
-              <AiAssistant document={document} targetNodeId={selectedNodeId ?? document.rootId} />
+              <AiAssistant document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} />
             </section>}
           </div>
           <footer className="sidebar-footer">
