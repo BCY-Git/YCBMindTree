@@ -34,6 +34,7 @@ import { QuickAssistant } from '../ai/QuickAssistant'
 import { createTag, deleteTag, loadTags, recolorTag, renameTag, saveTags, type Tag } from '../domain/tag-library'
 import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
 import { emptyNodeFilter, hasActiveFilter, useNodeFilterStore } from '../editor/filter-store'
+import { PanelToggleButton } from './PanelToggleButton'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -46,10 +47,6 @@ function SummaryIcon() {
 
 function BoundaryIcon() {
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" strokeDasharray="2.5 2.5" /></svg>
-}
-
-function InspectorIcon() {
-  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M14 4v16" /></svg>
 }
 
 type Category = { id: string; name: string }
@@ -938,7 +935,8 @@ export function App() {
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
           <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
-          <button className={`topbar-utility__button ${inspectorCollapsed ? '' : 'is-active'}`} onClick={toggleInspector} title={inspectorCollapsed ? '显示属性侧栏' : '收起属性侧栏'} aria-label={inspectorCollapsed ? '显示属性侧栏' : '收起属性侧栏'} aria-pressed={!inspectorCollapsed}><Icon><InspectorIcon /></Icon></button>
+          <PanelToggleButton side="left" collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+          <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
           {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
         </div>
@@ -946,11 +944,8 @@ export function App() {
 
       <section className="workspace">
         <aside className="left-rail">
-          {sidebarCollapsed ? (
-            <button className="sidebar-expand" onClick={toggleSidebar} title="展开侧栏" aria-label="展开侧栏"><span>M</span><i>›</i></button>
-          ) : <>
           <div className="sidebar-scroll">
-            <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong><button onClick={toggleSidebar} aria-label="收起侧栏" title="收起侧栏">‹</button></div>
+            <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong></div>
             <div className="sidebar-quick-actions"><button onClick={() => { void startQuickNote() }} title="随手记 (⌘⇧N)"><span>✦</span>随手记</button><button onClick={() => { void startNewDocument() }} title="新建导图"><span>＋</span>新建导图</button></div>
             <nav className="sidebar-panel-nav" aria-label="侧栏分类">
               <button className={sidebarPanel === 'projects' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('projects')} aria-expanded={sidebarPanel === 'projects'}><span>◫</span><strong>项目</strong><small>{categories.length}</small><i>›</i></button>
@@ -1010,7 +1005,6 @@ export function App() {
               {accountMenuOpen && <div className="sidebar-account__menu"><strong>{accountSession ? '已登录账号' : '同步账号'}</strong><p>{accountSession ? '此账号的同步数据与其他账号隔离。' : '登录后可使用账号会话安全同步导图。'}</p>{accountSession ? <button onClick={() => { void logoutAccount() }}>退出登录</button> : <button onClick={() => { setLoginOpen(true); setAccountMenuOpen(false) }}>登录 / 注册</button>}</div>}
             </div>
           </footer>
-          </>}
         </aside>
 
         <MindMapCanvas />
