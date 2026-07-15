@@ -71,6 +71,8 @@ export type MindMapCommand =
   | { type: 'INDENT_NODE'; nodeId: string }
   | { type: 'OUTDENT_NODE'; nodeId: string }
   | { type: 'PASTE_SUBTREE'; parentId: string; clipboard: MindNodeClipboard }
+  /** 智能沉淀：在同一份导图内原子应用经用户确认的候选。 */
+  | { type: 'APPLY_DEPOSIT_OPERATIONS'; operations: LocalDepositOperation[] }
   | { type: 'RENAME_DOCUMENT'; title: string }
   | { type: 'SET_CATEGORY'; categoryId: string }
   | { type: 'SAVE_QUICK_NOTE'; title: string; categoryId: string }
@@ -95,6 +97,13 @@ export type MindNodeClipboard = {
   collapsed: boolean
   children: MindNodeClipboard[]
 }
+
+/** 领域层可执行的智能沉淀写入操作；AI 层只能生成这个受限集合。 */
+export type LocalDepositOperation =
+  | { type: 'CREATE_BRANCH'; parentId: string; branch: MindNodeClipboard }
+  | { type: 'UPDATE_NODE'; nodeId: string; patch: { topic?: string; note?: string } }
+  | { type: 'COMPLETE_TASK'; nodeId: string; evidence: string }
+  | { type: 'APPEND_NODE_NOTE'; nodeId: string; content: string }
 
 // 深拷贝文档，保证命令执行是纯函数，不污染原状态。
 function copy(document: MindMapDocument): MindMapDocument {
@@ -279,6 +288,50 @@ function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: Mi
   document.nodes[node.id] = node
   node.childIds = clipboard.children.map((child) => pasteSubtree(document, node.id, child))
   return node.id
+}
+
+function appendNodeNote(node: { note: string; updatedAt: number }, content: string) {
+  const value = content.trim()
+  if (!value) return
+  node.note = [node.note.trim(), value].filter(Boolean).join('\n\n')
+  node.updatedAt = Date.now()
+}
+
+/**
+ * 在 copy(document) 上顺序执行，因此任一操作抛错时原始导图完全不受影响。
+ * 这里不接受移动、删除或重组，确保智能沉淀只会新增/更新经确认的信息。
+ */
+function applyDepositOperations(document: MindMapDocument, operations: LocalDepositOperation[]) {
+  if (!operations.length) throw new Error('没有可应用的沉淀操作')
+  let focusNodeId: string | undefined
+  let inserted = false
+  for (const operation of operations) {
+    if (operation.type === 'CREATE_BRANCH') {
+      const parent = document.nodes[operation.parentId]
+      if (!parent || parent.isFreeTopic) throw new Error('沉淀目标父节点不存在或不可用')
+      const nodeId = pasteSubtree(document, parent.id, operation.branch)
+      parent.childIds.push(nodeId)
+      parent.collapsed = false
+      focusNodeId = nodeId
+      inserted = true
+      continue
+    }
+    const node = document.nodes[operation.nodeId]
+    if (!node) throw new Error('沉淀目标节点不存在')
+    if (operation.type === 'UPDATE_NODE') {
+      if (operation.patch.topic !== undefined) node.topic = operation.patch.topic.trim() || '未命名节点'
+      if (operation.patch.note !== undefined) node.note = operation.patch.note
+      node.updatedAt = Date.now()
+    } else if (operation.type === 'COMPLETE_TASK') {
+      node.taskStatus = 'done'
+      appendNodeNote(node, operation.evidence)
+    } else {
+      appendNodeNote(node, operation.content)
+    }
+    focusNodeId = node.id
+  }
+  if (inserted) arrangeAfterInsert(document)
+  return focusNodeId
 }
 
 export function executeCommand(source: MindMapDocument, command: MindMapCommand): CommandResult {
@@ -704,6 +757,9 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       focusNodeId = rootId
       break
     }
+    case 'APPLY_DEPOSIT_OPERATIONS':
+      focusNodeId = applyDepositOperations(document, command.operations)
+      break
 
     // ── 文档级操作 ───────────────────────────────────────────
     case 'RENAME_DOCUMENT':

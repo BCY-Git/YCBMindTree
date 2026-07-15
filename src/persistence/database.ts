@@ -17,6 +17,7 @@ import { mindMapDocumentSchema } from '../domain/document.schema'
 import type { MindMapDocument, MindNodeAttachment } from '../domain/document.types'
 import { assertValidDocument } from '../domain/document.validator'
 import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
+import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 
 export type SyncMetadata = {
   documentId: string
@@ -35,6 +36,8 @@ class MindTreeDatabase extends Dexie {
   syncMetadata!: EntityTable<SyncMetadata, 'documentId'>
   documentVersions!: EntityTable<DocumentVersion, 'id'>
   attachments!: EntityTable<StoredAttachment, 'id'>
+  depositBatches!: EntityTable<DepositBatch, 'id'>
+  depositProvenance!: EntityTable<DepositProvenance, 'id'>
 
   constructor() {
     super('mindtree')
@@ -50,6 +53,14 @@ class MindTreeDatabase extends Dexie {
       syncMetadata: 'documentId, syncedAt',
       documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind',
       attachments: 'id, documentId, nodeId, createdAt',
+    })
+    this.version(5).stores({
+      documents: 'id, title, updatedAt',
+      syncMetadata: 'documentId, syncedAt',
+      documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind',
+      attachments: 'id, documentId, nodeId, createdAt',
+      depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt',
+      depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt',
     })
   }
 }
@@ -74,6 +85,37 @@ export async function listDocuments(): Promise<MindMapDocument[]> {
 
 export async function saveDocument(document: MindMapDocument): Promise<void> {
   await database.documents.put(document)
+}
+
+/** 智能沉淀的候选与来源独立保存，不污染导图 JSON 或普通导出格式。 */
+export async function saveDepositBatch(batch: DepositBatch): Promise<void> {
+  await database.depositBatches.put(batch)
+}
+
+export async function listDepositBatches(sourceDocumentId: string): Promise<DepositBatch[]> {
+  const batches = await database.depositBatches.where('sourceDocumentId').equals(sourceDocumentId).toArray()
+  return batches.sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+export async function listAppliedDepositFingerprints(sourceDocumentId: string): Promise<string[]> {
+  const batches = await database.depositBatches.where('sourceDocumentId').equals(sourceDocumentId).toArray()
+  return batches.flatMap((batch) => batch.candidates.filter((candidate) => candidate.status === 'applied').map((candidate) => candidate.fingerprint))
+}
+
+export async function applyDepositBatch(batch: DepositBatch, provenance: DepositProvenance[]): Promise<DepositBatch> {
+  const now = Date.now()
+  const applied: DepositBatch = {
+    ...batch,
+    status: 'applied',
+    updatedAt: now,
+    appliedAt: now,
+    candidates: batch.candidates.map((candidate) => candidate.status === 'accepted' ? { ...candidate, status: 'applied' } : candidate),
+  }
+  await database.transaction('rw', database.depositBatches, database.depositProvenance, async () => {
+    await database.depositBatches.put(applied)
+    if (provenance.length) await database.depositProvenance.bulkPut(provenance)
+  })
+  return applied
 }
 
 /** 每张导图保留有限的自动版本；手动快照、恢复点和同步备份不会被自动清理。 */
