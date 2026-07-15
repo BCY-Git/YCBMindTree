@@ -409,7 +409,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       if (!node) throw new Error('节点不存在')
       let url: URL
       try { url = new URL(command.url.trim()) } catch { throw new Error('请输入有效的链接地址') }
-      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('链接仅支持 HTTP 或 HTTPS 地址')
+      if (!['http:', 'https:', 'mindtree:'].includes(url.protocol)) throw new Error('链接仅支持 HTTP、HTTPS 或 MindTree 节点地址')
       if (node.links.some((link) => link.url === url.toString())) throw new Error('该链接已添加')
       node.links.push({ id: crypto.randomUUID(), url: url.toString(), label: command.label?.trim() || url.hostname })
       node.updatedAt = Date.now()

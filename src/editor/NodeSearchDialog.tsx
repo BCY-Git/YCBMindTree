@@ -13,7 +13,10 @@ type NodeSearchDialogProps = {
   provenance: DepositProvenance[]
   onClose: () => void
   onSelect: (documentId: string, nodeId: string) => void
-  onCreate: (topic: string) => void
+  onCreate?: (topic: string) => void
+  initialScope?: 'current' | 'workspace'
+  allowCreate?: boolean
+  ariaLabel?: string
 }
 
 const matchLabel = { topic: '主题', note: '备注', link: '链接', tag: '标签' }
@@ -24,9 +27,9 @@ function toggleValue<T>(values: T[], value: T) {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
 }
 
-export function NodeSearchDialog({ currentDocumentId, documents, tags, provenance, onClose, onSelect, onCreate }: NodeSearchDialogProps) {
+export function NodeSearchDialog({ currentDocumentId, documents, tags, provenance, onClose, onSelect, onCreate, initialScope = 'current', allowCreate = true, ariaLabel = '搜索工作区' }: NodeSearchDialogProps) {
   const [query, setQuery] = useState('')
-  const [scope, setScope] = useState<'current' | 'workspace'>('current')
+  const [scope, setScope] = useState<'current' | 'workspace'>(initialScope)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [tagIds, setTagIds] = useState<string[]>([])
   const [marks, setMarks] = useState<NodeMark[]>([])
@@ -91,7 +94,7 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
   }
 
   return (
-    <div className="node-search-layer" role="dialog" aria-modal="true" aria-label="搜索工作区" onMouseDown={onClose}>
+    <div className="node-search-layer" role="dialog" aria-modal="true" aria-label={ariaLabel} onMouseDown={onClose}>
       <section className="node-search" onMouseDown={(event) => event.stopPropagation()}>
         <div className="node-search__input">
           <span aria-hidden="true">⌕</span>
@@ -103,7 +106,7 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex((current) => Math.min(current + 1, Math.max(0, results.length - 1))) }
               if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex((current) => Math.max(current - 1, 0)) }
-              if (event.key === 'Enter') { event.preventDefault(); if (results.length) chooseActive(); else if (scope === 'current' && query.trim()) onCreate(query.trim()) }
+              if (event.key === 'Enter') { event.preventDefault(); if (results.length) chooseActive(); else if (allowCreate && scope === 'current' && query.trim()) onCreate?.(query.trim()) }
             }}
           />
           <kbd>Esc</kbd>
@@ -126,7 +129,7 @@ export function NodeSearchDialog({ currentDocumentId, documents, tags, provenanc
             : results.length ? results.map((result, index) => <button key={`${result.documentId}-${result.nodeId}`} className={index === activeIndex ? 'is-active' : ''} onMouseEnter={() => setActiveIndex(index)} onClick={() => chooseResult(index)}>
               <span><strong>{result.topic}</strong><small>{scope === 'workspace' ? `${result.documentTitle} · ${result.path}` : result.path}</small></span><i>{result.matchedIn.length ? result.matchedIn.map((item) => matchLabel[item]).join(' · ') : result.provenanceRoles.map((role) => role === 'source' ? '来源' : '结果').join(' · ')}</i>
             </button>)
-              : <div className="node-search__empty"><p>没有匹配节点。</p>{scope === 'current' && <button onClick={() => onCreate(query.trim())}>将“{query.trim()}”创建为子节点</button>}</div>}
+              : <div className="node-search__empty"><p>没有匹配节点。</p>{allowCreate && scope === 'current' && <button onClick={() => onCreate?.(query.trim())}>将“{query.trim()}”创建为子节点</button>}</div>}
         </div>
         <footer><span><kbd>↑↓</kbd> 选择</span><span><kbd>↵</kbd> 定位</span><span><kbd>⌘ F</kbd> 搜索</span></footer>
       </section>
