@@ -41,6 +41,7 @@ MindTree 是一个面向个人思考与工作的本地优先树形工作空间�
 | `08-acceptance-and-testing.md` | 验收、测试样本、质量指标与风险 |
 | `09-agent-handoff.md` | 编码 Agent 的执行规则、顺序和审查点 |
 | `10-implementation-status.md` | 0.3 实际完成范围、验证证据与后续边界 |
+| `11-milestone-0.4-status.md` | 0.4 决策记录、知识卡与价值验证指标的实施状态 |
 
 ## 关键产品决策
 
