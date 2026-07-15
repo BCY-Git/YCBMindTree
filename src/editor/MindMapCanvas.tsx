@@ -39,7 +39,7 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu'
 import { CommandPalette } from './CommandPalette'
 import { NodeSearchDialog } from './NodeSearchDialog'
 import { getTheme } from '../domain/themes'
-import { getTreeBranchGeometry } from './tree-edge'
+import { getTreeEdgeAnchors } from './tree-edge'
 import { retainDraggingNodePosition } from './drag-state'
 import { resolveRegularTreeDragIntent, type TreeDropIntent } from './drag-intent'
 import type { MindNode as DomainMindNode } from '../domain/document.types'
@@ -47,10 +47,8 @@ import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { saveNodeAttachment } from '../persistence/database'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
-import { TreeBranchEdge } from './TreeBranchEdge'
 
 const nodeTypes = { mindNode: MindNode }
-const edgeTypes = { treeBranch: TreeBranchEdge }
 // 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
 const FREE_TOPIC_ATTACH_ENTER_DISTANCE = 116
 const FREE_TOPIC_ATTACH_RETAIN_DISTANCE = 164
@@ -215,9 +213,6 @@ export function MindMapCanvas() {
     }
     const baseNodes: Node<MindNodeData>[] = placed.map((item) => {
       const mindNode = document.nodes[item.id]
-      const visibleChildren = mindNode.childIds.map((childId) => positionedById.get(childId)).filter((child): child is NonNullable<typeof child> => Boolean(child))
-      const firstRightChild = visibleChildren.find((child) => child.x + child.width / 2 >= item.x + item.width / 2)
-      const branchGeometry = visibleChildren.length ? getTreeBranchGeometry(item, firstRightChild ?? visibleChildren[0], visibleChildren) : null
       const depth = depthOf(item.id)
       const matched = matchesFilter(mindNode)
       matchedById.set(item.id, matched)
@@ -244,8 +239,6 @@ export function MindMapCanvas() {
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
           hiddenDescendantCount: countDescendants(item.id),
-          branchJunctionOffset: branchGeometry?.junctionOffset ?? document.layout.levelGap / 2,
-          branchJunctionSide: branchGeometry?.direction ?? 'right',
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
           isRelationSource: relationSourceIds.includes(item.id),
           layoutHeight: item.height,
@@ -257,17 +250,15 @@ export function MindMapCanvas() {
     const treeEdges: Edge[] = placed.flatMap((item) => {
       const mindNode = document.nodes[item.id]
       const parent = mindNode.parentId ? positionedById.get(mindNode.parentId) : undefined
-      const siblings = parent ? document.nodes[parent.id].childIds.map((childId) => positionedById.get(childId)).filter((child): child is NonNullable<typeof child> => Boolean(child)) : []
-      const geometry = parent ? getTreeBranchGeometry(parent, item, siblings) : undefined
+      const anchors = parent ? getTreeEdgeAnchors(parent, item) : undefined
       return mindNode.parentId && visibleIds.has(mindNode.parentId)
         ? [{
             id: `${mindNode.parentId}-${item.id}`,
             source: mindNode.parentId,
             target: item.id,
-            sourceHandle: geometry?.sourceHandle,
-            targetHandle: geometry?.targetHandle,
-            type: 'treeBranch',
-            data: { junctionX: geometry?.junctionX },
+            sourceHandle: anchors?.sourceHandle,
+            targetHandle: anchors?.targetHandle,
+            type: 'default',
             reconnectable: false,
             style: {
               stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : (theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch),
@@ -743,7 +734,6 @@ export function MindMapCanvas() {
         nodes={flowNodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onInit={setFlowInstance}
         onNodeClick={onNodeClick}

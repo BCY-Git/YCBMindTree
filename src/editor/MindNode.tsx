@@ -28,8 +28,6 @@ export type MindNodeData = {
   hasChildren: boolean
   collapsed: boolean
   hiddenDescendantCount: number
-  branchJunctionOffset: number
-  branchJunctionSide: 'left' | 'right'
   accentColor: string
   isRelationSource: boolean
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
@@ -188,10 +186,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable />
       {node.hasChildren && (
         <button
-          className={`collapse-toggle ${node.collapsed ? 'is-collapsed' : ''} ${node.branchJunctionSide === 'left' ? 'is-left' : ''}`}
-          style={node.collapsed ? undefined : node.branchJunctionSide === 'right'
-            ? { right: `-${node.branchJunctionOffset + 9}px` }
-            : { left: `-${node.branchJunctionOffset + 9}px`, right: 'auto' }}
+          className={`collapse-toggle ${node.collapsed ? 'is-collapsed' : ''}`}
+          style={node.collapsed ? undefined : { right: '-13px' }}
           onClick={(event) => { event.stopPropagation(); dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: id }) }}
           aria-label={node.collapsed ? `展开节点，包含 ${node.hiddenDescendantCount} 个隐藏分支` : '折叠节点'}
         >
@@ -271,8 +267,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         type="source"
         position={Position.Right}
         className="node-handle node-handle--source"
-        // 树枝从卡片边缘起步；折叠按钮和展开交叉点只是覆盖层，不能再改变路径锚点。
-        style={{ top: '50%', transform: 'translate(50%, -50%)' }}
+        // 原生贝塞尔树枝的起点外移 4px；展开按钮覆盖该交汇锚点，但不改变曲线路径。
+        style={{ top: '50%', right: node.hasChildren ? '-4px' : undefined, transform: 'translate(50%, -50%)' }}
         isConnectable={false}
       />
       <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
