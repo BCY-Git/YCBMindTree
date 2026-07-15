@@ -24,7 +24,7 @@ npm run desktop:build
 Apple Silicon 产物：
 
 ```text
-src-tauri/target/release/bundle/dmg/MindTree_0.2.1_aarch64.dmg
+src-tauri/target/release/bundle/dmg/MindTree_0.2.2_aarch64.dmg
 ```
 
 当前为本机试用包，使用临时 ad-hoc 签名，未进行 Developer ID 签名和公证。首次从 Finder 打开时若被 Gatekeeper 阻止，可在“系统设置 → 隐私与安全性”中确认打开。对外发放前应配置 Apple Developer ID 与 notarization。

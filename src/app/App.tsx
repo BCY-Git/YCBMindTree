@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listDocumentVersions, listDocuments, loadLatestDocument, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata } from '../persistence/database'
+import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDocumentVersions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
@@ -23,6 +23,7 @@ import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
 import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
 import { createImportedCopy, parseDocumentFile, saveDocumentToLocalFile } from '../export/document-file'
+import { parseWorkspaceBackup, prepareWorkspaceRestore, saveWorkspaceBackupToLocalFile, type WorkspaceBackup } from '../export/workspace-backup'
 import { GhostNoteEditor } from '../ai/GhostNoteEditor'
 import { LoginDialog } from '../auth/LoginDialog'
 import { clearAccountSession, loadAccountSession, loginAccount, registerAccount, revokeAccountSession, saveAccountSession, type AuthSession } from '../auth/account-client'
@@ -131,12 +132,16 @@ export function App() {
   const [importCandidate, setImportCandidate] = useState<MindMapDocument | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
   const [importBusy, setImportBusy] = useState(false)
+  const [workspaceBackupCandidate, setWorkspaceBackupCandidate] = useState<WorkspaceBackup | null>(null)
+  const [workspaceBackupBusy, setWorkspaceBackupBusy] = useState(false)
+  const [workspaceBackupStatus, setWorkspaceBackupStatus] = useState<string | null>(null)
   const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const workspaceBackupInputRef = useRef<HTMLInputElement>(null)
   const pendingTaskFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const nodeFilter = useNodeFilterStore((state) => state.filter)
@@ -158,6 +163,9 @@ export function App() {
     const query = documentQuery.trim().toLocaleLowerCase()
     return query ? draftDocuments.filter((item) => item.title.toLocaleLowerCase().includes(query)) : draftDocuments
   }, [documentQuery, draftDocuments])
+  const workspaceBackupCollisions = useMemo(() => workspaceBackupCandidate
+    ? workspaceBackupCandidate.documents.filter((candidate) => documents.some((item) => item.id === candidate.id)).length
+    : 0, [documents, workspaceBackupCandidate])
   const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
   const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
   const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
@@ -363,6 +371,74 @@ export function App() {
       setImportStatus(error instanceof Error ? `无法导入：${error.message}` : '无法读取导图文件。')
     }
   }, [completeDocumentImport, documents])
+
+  const exportWorkspaceBackup = useCallback(async () => {
+    try {
+      setWorkspaceBackupStatus(null)
+      await flushCurrentDocument()
+      const workspaceDocuments = await listDocuments()
+      const referencedAttachmentIds = new Set(workspaceDocuments.flatMap((item) => Object.values(item.nodes).flatMap((node) => node.attachments.map((attachment) => attachment.id))))
+      const [versions, storedAttachments] = await Promise.all([listAllDocumentVersions(), listStoredAttachments()])
+      const result = await saveWorkspaceBackupToLocalFile({
+        documents: workspaceDocuments,
+        versions,
+        attachments: storedAttachments.filter((attachment) => referencedAttachmentIds.has(attachment.id)),
+        categories,
+        tags,
+      })
+      setWorkspaceBackupStatus(result === 'download' ? '工作区备份已下载。' : '工作区备份已保存到本机。')
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setWorkspaceBackupStatus(error instanceof Error ? `备份失败：${error.message}` : '备份失败，请重试。')
+    }
+  }, [categories, flushCurrentDocument, tags])
+
+  const selectWorkspaceBackupFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      setWorkspaceBackupStatus(null)
+      setWorkspaceBackupCandidate(await parseWorkspaceBackup(file))
+    } catch (error) {
+      setWorkspaceBackupStatus(error instanceof Error ? `无法恢复：${error.message}` : '无法读取工作区备份。')
+    }
+  }, [])
+
+  const confirmWorkspaceRestore = useCallback(async () => {
+    if (!workspaceBackupCandidate) return
+    try {
+      setWorkspaceBackupBusy(true)
+      setWorkspaceBackupStatus(null)
+      await flushCurrentDocument()
+      const attachments = await listStoredAttachments()
+      const plan = prepareWorkspaceRestore(workspaceBackupCandidate, {
+        documents,
+        attachmentIds: new Set(attachments.map((attachment) => attachment.id)),
+        categories,
+        tags,
+      })
+      await restoreWorkspaceData(plan)
+      saveCategories(plan.categories)
+      saveTags(plan.tags)
+      setCategories(plan.categories)
+      setTags(plan.tags)
+      const allDocuments = await listDocuments()
+      setDocuments(allDocuments)
+      const opened = plan.documents[0]
+      if (opened) {
+        observedVersionRef.current = { documentId: opened.id, updatedAt: opened.updatedAt }
+        hydrate(opened)
+        setSyncRemoteVersion(null)
+      }
+      setWorkspaceBackupCandidate(null)
+      setWorkspaceBackupStatus(`已恢复 ${plan.documents.length} 份导图、${plan.attachments.length} 个附件${plan.copiedDocumentCount ? `；其中 ${plan.copiedDocumentCount} 份已作为恢复副本保留。` : '。'}`)
+    } catch (error) {
+      setWorkspaceBackupStatus(error instanceof Error ? `恢复失败：${error.message}` : '恢复失败，请重试。')
+    } finally {
+      setWorkspaceBackupBusy(false)
+    }
+  }, [categories, documents, flushCurrentDocument, hydrate, tags, workspaceBackupCandidate])
 
   const refreshVersions = useCallback(() => {
     void listDocumentVersions(useEditorStore.getState().document.id).then(setVersions).catch(console.warn)
@@ -774,6 +850,7 @@ export function App() {
       '--accent': theme.selected,
     } as CSSProperties}>
       <input ref={importInputRef} className="document-import-input" type="file" accept=".mindtree.json,application/json" onChange={(event) => { void importDocumentFromFile(event) }} aria-hidden="true" tabIndex={-1} />
+      <input ref={workspaceBackupInputRef} className="document-import-input" type="file" accept=".mindtree-backup.zip,.zip,application/zip" onChange={(event) => { void selectWorkspaceBackupFile(event) }} aria-hidden="true" tabIndex={-1} />
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark">M</span>
@@ -800,7 +877,7 @@ export function App() {
           <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
-          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出 Markdown" aria-label="导出"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button></span>}</span>
+          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
           {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
         </div>
@@ -840,8 +917,8 @@ export function App() {
             </section>}
 
             {sidebarPanel === 'maps' && <section className="sidebar-panel" aria-label="导图列表">
-              <div className="sidebar-panel__heading"><span>导图记录</span><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree 导图文件">⇧ 导入</button></div>
-              <small className="sidebar-import-hint">支持 `.mindtree.json`，同名导图可覆盖或导入副本。</small>
+              <div className="sidebar-panel__heading"><span>导图记录</span><span className="sidebar-import-actions"><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree 导图文件">⇧ 导入</button><button className="sidebar-import-button" onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">↥ 恢复</button></span></div>
+              <small className="sidebar-import-hint">导入单图或恢复 `.mindtree-backup.zip` 工作区备份。</small>
               <input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" />
               {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>草稿 · 已自动保存到本机</small></span></button>)}</div>}
               {matchingDocuments.map((item) => (
@@ -965,6 +1042,18 @@ export function App() {
           <small>附件文件不会包含在导图 JSON 中；导入后同步会先检查云端版本，避免覆盖远端内容。</small>
         </section>
       </div>}
+      {workspaceBackupCandidate && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !workspaceBackupBusy) setWorkspaceBackupCandidate(null) }}>
+        <section className="document-import-dialog" role="dialog" aria-modal="true" aria-labelledby="workspace-restore-title">
+          <p className="eyebrow">恢复工作区备份</p>
+          <h2 id="workspace-restore-title">安全合并到本机工作区</h2>
+          <p>备份包含 {workspaceBackupCandidate.documents.length} 份导图、{workspaceBackupCandidate.versions.length} 条版本历史和 {workspaceBackupCandidate.attachments.length} 个附件。</p>
+          <div className="workspace-restore-summary"><strong>{workspaceBackupCollisions ? `${workspaceBackupCollisions} 份同 ID 导图将作为“恢复副本”导入` : '未发现同 ID 导图，可直接安全恢复'}</strong><span>现有工作区不会被清空或覆盖；分类与标签会合并，附件和版本历史会保留关联。</span></div>
+          <div className="document-import-dialog__actions">
+            <button className="document-import-dialog__primary" disabled={workspaceBackupBusy} onClick={() => { void confirmWorkspaceRestore() }}>安全恢复工作区</button>
+            <button className="document-import-dialog__cancel" disabled={workspaceBackupBusy} onClick={() => setWorkspaceBackupCandidate(null)}>取消</button>
+          </div>
+        </section>
+      </div>}
       {draftSaveOpen && <div className="draft-save-layer" role="dialog" aria-modal="true" aria-labelledby="draft-save-title">
         <section className="draft-save-dialog">
           <span className="draft-save-dialog__mark">✦</span>
@@ -981,6 +1070,7 @@ export function App() {
         </section>
       </div>}
       {importStatus && <div className="document-import-status" role="status"><span>{importStatus}</span><button onClick={() => setImportStatus(null)} aria-label="关闭导入提示">×</button></div>}
+      {workspaceBackupStatus && <div className="document-import-status" role="status"><span>{workspaceBackupStatus}</span><button onClick={() => setWorkspaceBackupStatus(null)} aria-label="关闭备份提示">×</button></div>}
     </main>
   )
 }

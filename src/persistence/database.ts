@@ -24,7 +24,7 @@ export type SyncMetadata = {
   syncedAt: number
 }
 
-type StoredAttachment = MindNodeAttachment & {
+export type StoredAttachment = MindNodeAttachment & {
   documentId: string
   nodeId: string
   blob: Blob
@@ -94,6 +94,11 @@ export async function listDocumentVersions(documentId: string): Promise<Document
   return versions.sort((left, right) => right.createdAt - left.createdAt)
 }
 
+/** 工作区备份使用：读取全部版本历史，而非仅当前导图。 */
+export async function listAllDocumentVersions(): Promise<DocumentVersion[]> {
+  return database.documentVersions.toArray()
+}
+
 export async function deleteDocumentVersions(documentId: string, kinds?: DocumentVersionKind[]): Promise<void> {
   const versions = await database.documentVersions.where('documentId').equals(documentId).toArray()
   const ids = versions.filter((version) => !kinds || kinds.includes(version.kind)).map((version) => version.id)
@@ -117,6 +122,11 @@ export async function getNodeAttachment(attachmentId: string): Promise<StoredAtt
   return database.attachments.get(attachmentId)
 }
 
+/** 工作区备份使用：读取全部附件，再由调用方按导图中的附件引用过滤。 */
+export async function listStoredAttachments(): Promise<StoredAttachment[]> {
+  return database.attachments.toArray()
+}
+
 export async function getSyncMetadata(documentId: string): Promise<SyncMetadata | undefined> {
   return database.syncMetadata.get(documentId)
 }
@@ -128,4 +138,17 @@ export async function saveSyncMetadata(metadata: SyncMetadata): Promise<void> {
 /** 导入文件没有可信的远端版本号；清理旧绑定，避免以错误 baseVersion 覆盖云端。 */
 export async function deleteSyncMetadata(documentId: string): Promise<void> {
   await database.syncMetadata.delete(documentId)
+}
+
+/**
+ * 写入已完成 ID 重映射的工作区恢复计划。
+ * 该操作是单个 IndexedDB 事务，失败时不会出现“导图已恢复但附件未恢复”的半完成状态。
+ */
+export async function restoreWorkspaceData(data: { documents: MindMapDocument[]; versions: DocumentVersion[]; attachments: StoredAttachment[] }): Promise<void> {
+  await database.transaction('rw', database.documents, database.documentVersions, database.attachments, database.syncMetadata, async () => {
+    await database.documents.bulkPut(data.documents)
+    await database.documentVersions.bulkPut(data.versions)
+    await database.attachments.bulkPut(data.attachments)
+    await database.syncMetadata.bulkDelete(data.documents.map((document) => document.id))
+  })
 }

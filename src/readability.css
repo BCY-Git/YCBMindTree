@@ -60,7 +60,8 @@
 
 /* 导图导入：入口保持在文件列表内，冲突处理用明确的三选项而非浏览器 confirm。 */
 .document-import-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.sidebar-import-button { margin-left: auto; border: 1px solid color-mix(in srgb, var(--accent, #47766a) 38%, var(--line, #d9dad0)); border-radius: 6px; background: transparent; color: var(--accent, #47766a); padding: 4px 7px; font-size: 11px; font-weight: 700; }
+.sidebar-import-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.sidebar-import-button { border: 1px solid color-mix(in srgb, var(--accent, #47766a) 38%, var(--line, #d9dad0)); border-radius: 6px; background: transparent; color: var(--accent, #47766a); padding: 4px 7px; font-size: 11px; font-weight: 700; }
 .sidebar-import-button:hover { background: color-mix(in srgb, var(--accent, #47766a) 10%, transparent); }
 .sidebar-import-hint { display: block; margin: -4px 0 9px; color: var(--muted-text, #85867c); font-size: 11px; line-height: 1.4; }
 .document-import-layer { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(28, 42, 33, .24); backdrop-filter: blur(4px); }
@@ -75,5 +76,8 @@
 .document-import-dialog__secondary { border: 1px solid color-mix(in srgb, var(--accent, #47766a) 52%, var(--line, #d9dad0)); background: transparent; color: var(--accent, #47766a); }
 .document-import-dialog__cancel { border: 0; background: transparent; color: var(--muted-text, #77786f); }
 .document-import-dialog__actions button:disabled { cursor: not-allowed; opacity: .55; }
+.workspace-restore-summary { display: grid; gap: 5px; margin: -4px 0 16px; border: 1px solid color-mix(in srgb, var(--accent, #47766a) 23%, var(--line, #d9dad0)); border-radius: 9px; background: color-mix(in srgb, var(--accent, #47766a) 6%, transparent); padding: 10px; }
+.workspace-restore-summary strong { color: var(--app-text, #353831); font-size: 12px; }
+.workspace-restore-summary span { color: var(--muted-text, #77786f); font-size: 11px; line-height: 1.45; }
 .document-import-status { position: fixed; z-index: 71; right: 22px; bottom: 38px; display: flex; max-width: min(420px, calc(100vw - 44px)); align-items: center; gap: 12px; border: 1px solid color-mix(in srgb, var(--accent, #47766a) 30%, var(--line, #d9dad0)); border-radius: 10px; background: var(--panel-bg, #fafaf6); box-shadow: 0 12px 32px rgba(22, 35, 28, .16); color: var(--app-text, #353831); padding: 11px 12px; font-size: 13px; line-height: 1.4; }
 .document-import-status button { border: 0; background: transparent; color: var(--muted-text, #77786f); font-size: 18px; line-height: 1; }
