@@ -7,6 +7,7 @@ MindTree 是一个本地优先、键盘优先的个人树形思维导图工具�
 - [产品需求与 MVP](./product-requirements.md)：第一阶段范围、用户流程与验收条件。
 - [技术架构](./architecture.md)：分层、数据模型、命令系统、布局与持久化边界。
 - [实施路线](./implementation-plan.md)：当前迭代的交付范围和后续阶段。
+- [智能沉淀与协作设计包](./mindtree-agent-design-v0.3/README.md)：0.3 的产品定位、MVP 协议、交互与实施约束。
 
 ## 当前实现范围
 
