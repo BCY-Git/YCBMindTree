@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { MindMapDocument } from '../domain/document.types'
-import { depositActions, depositCandidateTypes, type DepositBatch, type DepositCandidate } from '../ai/deposit/deposit-types'
+import type { MindMapDocument } from '../../domain/document.types'
+import { depositActions, depositCandidateTypes, type DepositBatch, type DepositCandidate } from './deposit-types'
 
 const typeLabels: Record<DepositCandidate['type'], string> = { fact: '事实', result: '成果', task: '任务', problem: '问题', decision: '决策', knowledge: '知识', idea: '想法' }
 const actionLabels: Record<DepositCandidate['action'], string> = { keep: '仅保留原记录', create: '新增节点', update: '更新备注', complete: '完成任务', 'append-note': '追加备注' }

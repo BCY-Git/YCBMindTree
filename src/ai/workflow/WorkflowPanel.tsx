@@ -1,6 +1,6 @@
-import type { WorkflowMode, WorkflowPhase, WorkflowSession } from '../ai/workflow/workflow-types'
-import { workflowModes, workflowPhases } from '../ai/workflow/workflow-types'
-import type { WorkflowAssetKind } from '../ai/workflow/workflow-asset'
+import type { WorkflowMode, WorkflowPhase, WorkflowSession } from './workflow-types'
+import { workflowModes, workflowPhases } from './workflow-types'
+import type { WorkflowAssetKind } from './workflow-asset'
 
 const modeLabels: Record<WorkflowMode, string> = { explore: '探索', decide: '决策', deliver: '交付' }
 const phaseLabels: Record<WorkflowPhase, string> = { context: '背景确认', understanding: '理解问题', modeling: '建立方案', validation: '验证', criteria: '验收标准', execution: '执行', review: '复核', deposit: '沉淀', completed: '已完成' }

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { createWorkflowSession } from '../ai/workflow/workflow-service'
+import { createWorkflowSession } from './workflow-service'
 import { WorkflowPanel } from './WorkflowPanel'
 
 describe('WorkflowPanel assets', () => {
