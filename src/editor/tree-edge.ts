@@ -17,10 +17,43 @@ export type TreeEdgeAnchors = {
   targetHandle: 'target-left' | 'target-right'
 }
 
+export type TreeBranchGeometry = TreeEdgeAnchors & {
+  direction: 'left' | 'right'
+  junctionX: number
+  junctionOffset: number
+}
+
 export function getTreeEdgeAnchors(parent: PositionedNode, child: PositionedNode): TreeEdgeAnchors {
   const parentCenterX = parent.x + parent.width / 2
   const childCenterX = child.x + child.width / 2
   return childCenterX < parentCenterX
     ? { sourceHandle: 'source-left', targetHandle: 'target-right' }
     : { sourceHandle: 'source-right', targetHandle: 'target-left' }
+}
+
+/**
+ * 为同一父节点同一侧的所有子节点计算共享交叉点。
+ * 交叉点位于父节点边缘和最近子节点边缘的中间；因此即使单个子节点被横向拖动，
+ * 兄弟分支仍共享一根稳定的纵向主干，不会重新退化成扇形尖点。
+ */
+export function getTreeBranchGeometry(parent: PositionedNode, child: PositionedNode, siblings: PositionedNode[]): TreeBranchGeometry {
+  const anchors = getTreeEdgeAnchors(parent, child)
+  const direction = anchors.sourceHandle === 'source-right' ? 'right' : 'left'
+  const sameSide = siblings.filter((sibling) => getTreeEdgeAnchors(parent, sibling).sourceHandle === anchors.sourceHandle)
+  const sourceEdgeX = direction === 'right' ? parent.x + parent.width : parent.x
+  const nearestTargetX = direction === 'right'
+    ? Math.min(...sameSide.map((sibling) => sibling.x))
+    : Math.max(...sameSide.map((sibling) => sibling.x + sibling.width))
+  const junctionX = (sourceEdgeX + nearestTargetX) / 2
+  return { ...anchors, direction, junctionX, junctionOffset: Math.abs(junctionX - sourceEdgeX) }
+}
+
+export function getTreeBranchPath({ sourceX, sourceY, junctionX, targetX, targetY }: {
+  sourceX: number
+  sourceY: number
+  junctionX: number
+  targetX: number
+  targetY: number
+}) {
+  return `M ${sourceX} ${sourceY} H ${junctionX} V ${targetY} H ${targetX}`
 }

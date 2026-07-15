@@ -20,6 +20,8 @@ function renderEditingNode() {
     hasChildren: false,
     collapsed: false,
     hiddenDescendantCount: 0,
+    branchJunctionOffset: 48,
+    branchJunctionSide: 'right',
     accentColor: '#467566',
     isRelationSource: false,
     layoutHeight: 44,
@@ -40,6 +42,8 @@ function renderNode(dataOverrides: Partial<MindNodeData> = {}) {
     hasChildren: false,
     collapsed: false,
     hiddenDescendantCount: 0,
+    branchJunctionOffset: 48,
+    branchJunctionSide: 'right',
     accentColor: '#467566',
     isRelationSource: false,
     layoutHeight: 44,
@@ -78,12 +82,18 @@ describe('MindNode tree branch anchor', () => {
     expect(screen.getByRole('button', { name: '展开节点，包含 25 个隐藏分支' }).textContent).toBe('25')
   })
 
-  it('moves the right source anchor to the outer edge of the collapse toggle', () => {
+  it('places the expanded collapse control over the shared branch junction', () => {
+    renderNode({ hasChildren: true, branchJunctionOffset: 48, branchJunctionSide: 'right' })
+
+    expect((screen.getByRole('button', { name: '折叠节点' }) as HTMLElement).style.right).toBe('-57px')
+  })
+
+  it('keeps the right source anchor on the card edge instead of the old toggle position', () => {
     const { container } = renderNode({ hasChildren: true })
 
     const sourceHandle = container.querySelector('.node-handle--source.react-flow__handle-right') as HTMLElement
 
-    expect(sourceHandle.style.right).toBe('-4px')
+    expect(sourceHandle.style.right).toBe('')
     expect(sourceHandle.style.transform).toBe('translate(50%, -50%)')
   })
 
