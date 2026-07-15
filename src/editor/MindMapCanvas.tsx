@@ -248,6 +248,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           hiddenDescendantCount: countDescendants(item.id),
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
           isRelationSource: relationSourceIds.includes(item.id),
+          imageAttachment: mindNode.attachments.find((attachment) => attachment.type.startsWith('image/')) ?? null,
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
         },

@@ -32,4 +32,15 @@ describe('SVG visual export', () => {
     expect(collapsedSvg).not.toContain('按 Tab 创建子节点')
     expect(collapsedSvg).not.toContain('data-relation-edge')
   })
+
+  it('embeds an available local image inside its reserved node thumbnail area', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    document.nodes[nodeId].attachments.push({ id: 'image-1', name: '示意图.png', type: 'image/png', size: 8, createdAt: 1 })
+
+    const svg = exportDocumentSvg(document, { images: { 'image-1': 'data:image/png;base64,aW1hZ2U=' } })
+
+    expect(svg).toContain('data-attachment-id="image-1"')
+    expect(svg).toContain('href="data:image/png;base64,aW1hZ2U="')
+  })
 })

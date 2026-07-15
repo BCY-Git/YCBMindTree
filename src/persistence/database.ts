@@ -352,6 +352,17 @@ export async function listStoredAttachments(): Promise<StoredAttachment[]> {
   return database.attachments.toArray()
 }
 
+/** 删除当前导图已不再引用的 Blob；覆盖附件移除、分支删除和导图内容替换。 */
+export async function pruneStoredAttachmentsForDocument(document: MindMapDocument, target = database): Promise<number> {
+  const referencedIds = new Set(Object.values(document.nodes).flatMap((node) => node.attachments.map((attachment) => attachment.id)))
+  const versions = await target.documentVersions.where('documentId').equals(document.id).toArray()
+  versions.forEach((version) => Object.values(version.snapshot.nodes).forEach((node) => node.attachments.forEach((attachment) => referencedIds.add(attachment.id))))
+  const stored = await target.attachments.where('documentId').equals(document.id).toArray()
+  const orphanIds = stored.filter((attachment) => !referencedIds.has(attachment.id)).map((attachment) => attachment.id)
+  if (orphanIds.length) await target.attachments.bulkDelete(orphanIds)
+  return orphanIds.length
+}
+
 export async function getSyncMetadata(documentId: string): Promise<SyncMetadata | undefined> {
   return database.syncMetadata.get(documentId)
 }

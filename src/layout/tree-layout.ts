@@ -35,7 +35,8 @@ function nodeSize(node: MindNode, isRoot: boolean, transientHeight?: number) {
   const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth)
   const charactersPerLine = Math.max(8, Math.floor((width - HORIZONTAL_TEXT_PADDING) / TEXT_CHARACTER_WIDTH))
   const lines = Math.max(1, node.topic.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
-  const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20
+  const imagePreviewHeight = node.attachments.some((attachment) => attachment.type.startsWith('image/')) ? 96 : 0
+  const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20 + imagePreviewHeight
   return { width, height: Math.max(node.height ?? 0, automaticHeight, transientHeight ?? 0) }
 }
 

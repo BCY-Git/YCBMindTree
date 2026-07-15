@@ -78,4 +78,12 @@ describe('tree layout', () => {
     const root = layoutTree(document).find((node) => node.id === document.rootId)!
     expect(root.height).toBe(138) // 58px 根主题 + 4 行 × 20px
   })
+
+  it('reserves a calm thumbnail area when a node contains an image attachment', () => {
+    const document = createInitialDocument()
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    document.nodes[nodeId].attachments.push({ id: 'image-1', name: '草图.png', type: 'image/png', size: 20, createdAt: 1 })
+
+    expect(layoutTree(document).find((node) => node.id === nodeId)?.height).toBe(140)
+  })
 })

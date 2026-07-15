@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createInitialDocument } from '../domain/document.factory'
-import { getDepositMetricSummary, markDepositTargetRevisited, MindTreeDatabase } from './database'
+import { getDepositMetricSummary, markDepositTargetRevisited, MindTreeDatabase, pruneStoredAttachmentsForDocument } from './database'
 
 const names: string[] = []
 
@@ -48,6 +48,33 @@ describe('MindTree IndexedDB migrations', () => {
     await markDepositTargetRevisited('target-document', 'target-node', current)
 
     expect((await getDepositMetricSummary('target-document', current)).revisited).toBe(1)
+    current.close()
+  })
+
+  it('removes unreferenced blobs while preserving current and version-history images', async () => {
+    const name = `mindtree-attachments-${crypto.randomUUID()}`
+    names.push(name)
+    const current = new MindTreeDatabase(name)
+    await current.open()
+    const document = createInitialDocument()
+    const node = document.nodes[document.rootId]
+    const live = { id: 'live-image', name: 'live.png', type: 'image/png', size: 3, createdAt: 1 }
+    const historical = { id: 'historical-image', name: 'history.png', type: 'image/png', size: 3, createdAt: 1 }
+    node.attachments = [live]
+    await current.attachments.bulkPut([
+      { ...live, documentId: document.id, nodeId: node.id, blob: new Blob(['img'], { type: 'image/png' }) },
+      { ...historical, documentId: document.id, nodeId: node.id, blob: new Blob(['history'], { type: 'image/png' }) },
+      { id: 'orphan-image', documentId: document.id, nodeId: 'deleted-node', name: 'old.png', type: 'image/png', size: 3, createdAt: 1, blob: new Blob(['old'], { type: 'image/png' }) },
+    ])
+    const snapshot = structuredClone(document)
+    snapshot.nodes[snapshot.rootId].attachments = [historical]
+    await current.documentVersions.put({ id: 'version-with-image', documentId: document.id, kind: 'manual', label: null, snapshot, createdAt: 1 })
+
+    expect(await pruneStoredAttachmentsForDocument(document, current)).toBe(1)
+    expect((await current.attachments.toArray()).map((attachment) => attachment.id).sort()).toEqual(['historical-image', 'live-image'])
+    await current.documentVersions.clear()
+    expect(await pruneStoredAttachmentsForDocument(document, current)).toBe(1)
+    expect((await current.attachments.toArray()).map((attachment) => attachment.id)).toEqual(['live-image'])
     current.close()
   })
 })

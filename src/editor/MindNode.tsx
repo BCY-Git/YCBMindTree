@@ -13,8 +13,9 @@ import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/rea
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
-import type { NodeMark } from '../domain/document.types'
+import type { MindNodeAttachment, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
+import { AttachmentImage } from '../attachments/AttachmentImage'
 
 export type MindNodeData = {
   label: string
@@ -30,6 +31,7 @@ export type MindNodeData = {
   hiddenDescendantCount: number
   accentColor: string
   isRelationSource: boolean
+  imageAttachment?: MindNodeAttachment | null
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
   layoutHeight: number
   onEditingHeightChange?: (height: number | null) => void
@@ -244,7 +246,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {suggestion && <span className="sr-only">按 Tab 接受 AI 续写，按 Esc 忽略</span>}
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
-      ) : <div className="node-label" title="双击编辑主题">
+      ) : <div className={`node-label ${node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
         {(taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
           {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
           {node.priority > 0 && <i className="node-priority" aria-hidden="true">P{node.priority}</i>}
@@ -252,6 +254,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {node.tags.map((tag) => <i key={tag.id} className="node-tag-dot" title={tag.name} style={{ '--tag-color': tag.color } as CSSProperties} aria-hidden="true" />)}
         </span>}
         <span>{node.label}</span>
+        {node.imageAttachment && <AttachmentImage attachment={node.imageAttachment} variant="node" />}
       </div>}
       <Handle
         id="source-left"

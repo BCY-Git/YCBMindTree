@@ -1,8 +1,9 @@
 import type { MindMapDocument } from '../domain/document.types'
 import { getTheme } from '../domain/themes'
 import { layoutTree, type PositionedNode } from '../layout/tree-layout'
+import { getNodeAttachment } from '../persistence/database'
 
-type SvgExportOptions = { transparent?: boolean }
+type SvgExportOptions = { transparent?: boolean; images?: Record<string, string> }
 
 const escapeXml = (value: string) => value
   .replace(/&/g, '&amp;')
@@ -92,20 +93,48 @@ export function exportDocumentSvg(document: MindMapDocument, options: SvgExportO
     const x = position.x + shiftX
     const y = position.y + shiftY
     const lines = textLines(node.topic, position.width)
+    const imageAttachment = node.attachments.find((attachment) => attachment.type.startsWith('image/'))
+    const imageUrl = imageAttachment ? options.images?.[imageAttachment.id] : undefined
     const lineHeight = 20
-    const firstY = y + position.height / 2 - ((lines.length - 1) * lineHeight) / 2 + 5
+    const firstY = imageAttachment ? y + 23 : y + position.height / 2 - ((lines.length - 1) * lineHeight) / 2 + 5
     const tspans = lines.map((line, index) => `<tspan x="${x + 18}" y="${firstY + index * lineHeight}">${escapeXml(line)}</tspan>`).join('')
     const collapsedCount = node.collapsed ? node.childIds.length : 0
-    return `<g data-node-id="${escapeXml(node.id)}"><rect x="${x}" y="${y}" width="${position.width}" height="${position.height}" rx="${isRoot ? 15 : 11}" fill="${background}" stroke="${branchColor}" stroke-width="${isRoot ? 0 : 1.5}"/><rect x="${x}" y="${y}" width="7" height="${position.height}" rx="3.5" fill="${branchColor}"/><text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="${isRoot ? 16 : 14}" font-weight="${isRoot ? 720 : 620}" fill="${textColor}">${tspans}</text>${collapsedCount ? `<g><circle cx="${x + position.width + 16}" cy="${y + position.height / 2}" r="14" fill="${theme.surface}" stroke="${branchColor}" stroke-width="2"/><text x="${x + position.width + 16}" y="${y + position.height / 2 + 5}" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="${branchColor}">${collapsedCount}</text></g>` : ''}</g>`
+    const imageX = x + 10
+    const imageY = y + position.height - 86
+    const imageWidth = position.width - 20
+    const image = imageAttachment ? imageUrl
+      ? `<clipPath id="image-clip-${escapeXml(node.id)}"><rect x="${imageX}" y="${imageY}" width="${imageWidth}" height="76" rx="6"/></clipPath><image data-attachment-id="${escapeXml(imageAttachment.id)}" href="${escapeXml(imageUrl)}" x="${imageX}" y="${imageY}" width="${imageWidth}" height="76" preserveAspectRatio="xMidYMid slice" clip-path="url(#image-clip-${escapeXml(node.id)})"/>`
+      : `<rect x="${imageX}" y="${imageY}" width="${imageWidth}" height="76" rx="6" fill="${theme.nodeBorder}" opacity=".28"/><text x="${x + position.width / 2}" y="${imageY + 42}" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="10" fill="${textColor}" opacity=".58">${escapeXml(imageAttachment.name)}</text>`
+      : ''
+    return `<g data-node-id="${escapeXml(node.id)}"><rect x="${x}" y="${y}" width="${position.width}" height="${position.height}" rx="${isRoot ? 15 : 11}" fill="${background}" stroke="${branchColor}" stroke-width="${isRoot ? 0 : 1.5}"/><rect x="${x}" y="${y}" width="7" height="${position.height}" rx="3.5" fill="${branchColor}"/><text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif" font-size="${isRoot ? 16 : 14}" font-weight="${isRoot ? 720 : 620}" fill="${textColor}">${tspans}</text>${image}${collapsedCount ? `<g><circle cx="${x + position.width + 16}" cy="${y + position.height / 2}" r="14" fill="${theme.surface}" stroke="${branchColor}" stroke-width="2"/><text x="${x + position.width + 16}" y="${y + position.height / 2 + 5}" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="${branchColor}">${collapsedCount}</text></g>` : ''}</g>`
   })
 
   const background = options.transparent ? '' : `<rect width="100%" height="100%" fill="${theme.canvas}"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeXml(document.title)}"><title>${escapeXml(document.title)}</title><defs><marker id="relation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${theme.branch}"/></marker></defs>${background}${treeEdges.join('')}${relationEdges.join('')}${nodes.join('')}</svg>`
 }
 
-export function downloadDocumentSvg(document: MindMapDocument, options?: SvgExportOptions) {
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('图片读取失败'))
+    reader.onload = () => resolve(String(reader.result))
+    reader.readAsDataURL(blob)
+  })
+}
+
+export async function loadDocumentImageDataUrls(document: MindMapDocument): Promise<Record<string, string>> {
+  const images = Object.values(document.nodes).flatMap((node) => node.attachments).filter((attachment) => attachment.type.startsWith('image/'))
+  const pairs = await Promise.all(images.map(async (attachment) => {
+    const stored = await getNodeAttachment(attachment.id)
+    return stored ? [attachment.id, await blobToDataUrl(stored.blob)] as const : null
+  }))
+  return Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => Boolean(pair)))
+}
+
+export async function downloadDocumentSvg(document: MindMapDocument, options: SvgExportOptions = {}) {
   const safeName = document.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'mindtree'
-  const blob = new Blob([exportDocumentSvg(document, options)], { type: 'image/svg+xml;charset=utf-8' })
+  const images = options.images ?? await loadDocumentImageDataUrls(document)
+  const blob = new Blob([exportDocumentSvg(document, { ...options, images })], { type: 'image/svg+xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = window.document.createElement('a')
   link.href = url
