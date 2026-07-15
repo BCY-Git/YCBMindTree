@@ -1094,7 +1094,7 @@ export function App() {
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
       {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} onSetPriority={(task, priority) => { void updateTaskPriority(task, priority) }} onSetDueDate={(task, dueDate) => { void updateTaskDueDate(task, dueDate) }} />}
-      <QuickAssistant document={document} />
+      <QuickAssistant document={document} workspaceDocuments={taskDocuments} />
       {importCandidate && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !importBusy) setImportCandidate(null) }}>
         <section className="document-import-dialog" role="dialog" aria-modal="true" aria-labelledby="document-import-title">
           <p className="eyebrow">导入导图</p>

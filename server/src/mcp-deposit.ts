@@ -27,6 +27,7 @@ export type McpDepositBatch = {
   confirmationToken: string
   createdAt: number
   appliedAt: number | null
+  affectedNodeIds?: string[]
 }
 
 const previewInputSchema = z.object({

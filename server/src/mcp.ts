@@ -89,10 +89,19 @@ export function createMindTreeMcp(repository: DocumentRepository) {
 
   server.registerTool('mindtree_search_nodes', {
     title: '搜索 MindTree 节点',
-    description: '在当前用户的导图中按关键词搜索节点主题。',
-    inputSchema: z.object({ query: z.string().trim().min(1).max(100) }),
+    description: '在当前用户的导图中按关键词和结构化语义搜索节点。支持主题、备注、链接、导图范围、标签、标记、任务状态、优先级和沉淀来源角色。',
+    inputSchema: z.object({
+      query: z.string().trim().max(100).default(''),
+      documentIds: z.array(z.string().uuid()).max(20).default([]),
+      tagIds: z.array(z.string().min(1).max(80)).max(20).default([]),
+      marks: z.array(z.enum(['flag', 'star', 'risk', 'idea'])).max(4).default([]),
+      statuses: z.array(z.enum(['none', 'todo', 'doing', 'done'])).max(4).default([]),
+      priorities: z.array(z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])).max(4).default([]),
+      provenanceRoles: z.array(z.enum(['source', 'target'])).max(2).default([]),
+      limit: z.number().int().min(1).max(100).default(50),
+    }),
     annotations: { readOnlyHint: true },
-  }, async ({ query }, extra) => text(repository.searchNodes(ownerId(extra), query)))
+  }, async (input, extra) => text(repository.searchNodes(ownerId(extra), input)))
 
   server.registerTool('mindtree_analyze_deposit', {
     title: '读取智能沉淀分析范围',
@@ -143,7 +152,7 @@ export function createMindTreeMcp(repository: DocumentRepository) {
       if (!batch) return text({ error: '沉淀批次不存在或无权访问' }, true)
       const document = documentForOwner(repository, owner, batch.targetDocumentId)
       const result = applyMcpDepositPreview(document, batch, { confirmationToken, confirmed })
-      const saved = repository.applyMcpDepositBatch(document, batch, result.payload)
+      const saved = repository.applyMcpDepositBatch(document, batch, result.payload, result.affectedNodeIds)
       if ('type' in saved) return text({ error: saved.type, currentVersion: saved.document.version }, true)
       return text({ batchId, status: 'applied', documentId: saved.id, version: saved.version, affectedNodeIds: result.affectedNodeIds })
     } catch (error) {

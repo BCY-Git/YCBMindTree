@@ -29,6 +29,47 @@ async function connectedMcp() {
 }
 
 describe('MCP deposit tools', () => {
+  it('searches nodes with structured filters and returns their map path and semantics', async () => {
+    const { client, server, repository, payload } = await connectedMcp()
+    const resultNode = Object.values(payload.nodes).find((node) => node.topic === 'PPT 已交付')!
+    resultNode.note = '等待专家验收'
+    resultNode.taskStatus = 'doing'
+    resultNode.tagIds = ['afsim']
+    repository.save({ id: payload.id, ownerId: 'local-user', title: '项目', categoryId: '', payload, baseVersion: 1 })
+
+    const result = await client.callTool({ name: 'mindtree_search_nodes', arguments: {
+      query: '验收', statuses: ['doing'], tagIds: ['afsim'], priorities: [], marks: [], provenanceRoles: [], limit: 20,
+    } })
+    const response = JSON.parse((result.content as Array<{ text: string }>)[0].text) as Array<Record<string, unknown>>
+
+    expect(response).toMatchObject([{
+      documentId: payload.id, nodeId: resultNode.id, path: ['项目', '日报', 'PPT 已交付'],
+      matchedIn: ['note'], taskStatus: 'doing', tagIds: ['afsim'],
+    }])
+    await client.close()
+    await server.close()
+  })
+
+  it('searches confirmed deposit sources and generated targets by provenance role', async () => {
+    const { client, server, payload, sourceNodeId } = await connectedMcp()
+    const previewResult = await client.callTool({ name: 'mindtree_preview_deposit_plan', arguments: {
+      documentId: payload.id, baseVersion: 1, sourceNodeIds: [sourceNodeId],
+      candidates: [{ type: 'result', action: 'create', title: '阶段成果', detail: '已完成验收', sourceNodeIds: [sourceNodeId], targetNodeId: payload.rootId }],
+    } })
+    const preview = JSON.parse((previewResult.content as Array<{ text: string }>)[0].text) as { batchId: string; confirmationToken: string }
+    await client.callTool({ name: 'mindtree_apply_deposit_plan', arguments: { batchId: preview.batchId, confirmationToken: preview.confirmationToken, confirmed: true } })
+
+    const sourceResult = await client.callTool({ name: 'mindtree_search_nodes', arguments: { query: '日报', provenanceRoles: ['source'] } })
+    const sourceNodes = JSON.parse((sourceResult.content as Array<{ text: string }>)[0].text) as Array<{ nodeId: string; provenanceRoles: string[] }>
+    const targetResult = await client.callTool({ name: 'mindtree_search_nodes', arguments: { query: '阶段成果', provenanceRoles: ['target'] } })
+    const targetNodes = JSON.parse((targetResult.content as Array<{ text: string }>)[0].text) as Array<{ topic: string; provenanceRoles: string[] }>
+
+    expect(sourceNodes).toMatchObject([{ nodeId: sourceNodeId, provenanceRoles: ['source'] }])
+    expect(targetNodes).toMatchObject([{ topic: '阶段成果', provenanceRoles: ['target'] }])
+    await client.close()
+    await server.close()
+  })
+
   it('returns a bounded source context without changing the map', async () => {
     const { client, server, payload, sourceNodeId } = await connectedMcp()
     const result = await client.callTool({ name: 'mindtree_analyze_deposit', arguments: { documentId: payload.id, sourceNodeId } })

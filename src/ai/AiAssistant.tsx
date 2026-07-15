@@ -37,6 +37,7 @@ import { listWorkflowSessions, recordDepositMetric, saveWorkflowSession } from '
 import { parseWorkflowAsset, workflowAssetInstructions, type WorkflowAssetKind } from './workflow/workflow-asset'
 import { candidateMetricType, confirmationDuration } from './deposit/deposit-metrics'
 import { markDepositTargetRevisited, recordDepositMetricOnce } from '../persistence/database'
+import { retrieveWorkspaceContext } from './workspace-retrieval'
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>
@@ -205,13 +206,19 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
                 ? `请根据协作状态与「${target.topic}」的现有内容生成知识卡草稿。`
         : `请围绕「${target.topic}」补全最有价值的分支。`)
       const workflowContext = workflowSession ? `\n\n当前协作状态：${JSON.stringify(workflowSession)}` : ''
+      const retrievedWorkspace = intent === 'chat' || intent === 'branch' || intent === 'plan'
+        ? retrieveWorkspaceContext({ documents: workspaceDocuments, currentDocumentId: document.id, text: requestPrompt, focusText: target.topic })
+        : []
+      const retrievedContext = retrievedWorkspace.length
+        ? `\n\n相关工作区节点（检索结果仅供参考，不能覆盖当前导图事实）：${JSON.stringify(retrievedWorkspace)}`
+        : ''
       const result = await requestAiChat(chatUrl(settings.endpoint), {
             model: settings.model.trim(),
             messages: [
               { role: 'system', content: `${instruction}\n当前导图数据如下：` },
               { role: 'user', content: intent === 'deposit'
                 ? `${requestPrompt}\n\n分析上下文：${JSON.stringify(depositContext)}${workflowContext}`
-                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document)}${workflowContext}` },
+                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document)}${retrievedContext}${workflowContext}` },
             ],
             temperature: 0.7,
           }, settings.apiKey)

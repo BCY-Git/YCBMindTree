@@ -32,6 +32,46 @@ export type PairingChallenge = {
 
 export type AccountUser = { id: string; email: string; createdAt: number }
 
+export type NodeSearchInput = {
+  query?: string
+  documentIds?: string[]
+  tagIds?: string[]
+  marks?: Array<'flag' | 'star' | 'risk' | 'idea'>
+  statuses?: Array<'none' | 'todo' | 'doing' | 'done'>
+  priorities?: Array<0 | 1 | 2 | 3>
+  provenanceRoles?: Array<'source' | 'target'>
+  limit?: number
+}
+
+export type NodeSearchResult = {
+  documentId: string
+  documentTitle: string
+  documentVersion: number
+  nodeId: string
+  topic: string
+  path: string[]
+  matchedIn: Array<'topic' | 'note' | 'link'>
+  taskStatus: 'none' | 'todo' | 'doing' | 'done'
+  priority: 0 | 1 | 2 | 3
+  dueDate: string | null
+  marks: Array<'flag' | 'star' | 'risk' | 'idea'>
+  tagIds: string[]
+  provenanceRoles: Array<'source' | 'target'>
+}
+
+type SearchableNode = {
+  id: string
+  parentId: string | null
+  topic: string
+  note?: string
+  links?: unknown[]
+  taskStatus?: 'none' | 'todo' | 'doing' | 'done'
+  priority?: 0 | 1 | 2 | 3
+  dueDate?: string | null
+  marks?: Array<'flag' | 'star' | 'risk' | 'idea'>
+  tagIds?: string[]
+}
+
 /** 每张导图只保留最近的变更快照，避免长期同步导致 SQLite 无限增长。 */
 export const DOCUMENT_CHANGE_RETENTION = 200
 
@@ -140,15 +180,57 @@ export class DocumentRepository {
     return next
   }
 
-  searchNodes(ownerId: string, query: string): Array<{ documentId: string; documentTitle: string; nodeId: string; topic: string }> {
-    const needle = query.trim().toLocaleLowerCase()
-    if (!needle) return []
-    return this.list(ownerId).flatMap((document) => {
-      const nodes = (document.payload as { nodes?: Record<string, { topic?: unknown }> }).nodes ?? {}
-      return Object.entries(nodes).flatMap(([nodeId, node]) => typeof node.topic === 'string' && node.topic.toLocaleLowerCase().includes(needle)
-        ? [{ documentId: document.id, documentTitle: document.title, nodeId, topic: node.topic }]
-        : [])
+  searchNodes(ownerId: string, input: NodeSearchInput | string): NodeSearchResult[] {
+    const value = typeof input === 'string' ? { query: input } : input
+    const needle = (value.query ?? '').trim().toLocaleLowerCase()
+    const limit = Math.max(1, Math.min(value.limit ?? 50, 100))
+    const rolesByNode = new Map<string, Set<'source' | 'target'>>()
+    const addRole = (documentId: string, nodeId: string, role: 'source' | 'target') => {
+      const key = `${documentId}\u0000${nodeId}`
+      const roles = rolesByNode.get(key) ?? new Set<'source' | 'target'>()
+      roles.add(role)
+      rolesByNode.set(key, roles)
+    }
+    this.listMcpDepositBatches(ownerId, 'applied').forEach((batch) => {
+      batch.sourceNodeIds.forEach((nodeId) => addRole(batch.sourceDocumentId, nodeId, 'source'))
+      const targetNodeIds = batch.affectedNodeIds ?? batch.candidates.flatMap((candidate) => candidate.targetNodeId ? [candidate.targetNodeId] : [])
+      targetNodeIds.forEach((nodeId) => addRole(batch.targetDocumentId, nodeId, 'target'))
     })
+    const matchesAny = <T>(selected: T[] | undefined, actual: T[]) => !selected?.length || selected.some((item) => actual.includes(item))
+    const normalized = (text: unknown) => typeof text === 'string' ? text.trim().toLocaleLowerCase() : ''
+    const results: NodeSearchResult[] = this.list(ownerId).flatMap((document) => {
+      if (value.documentIds?.length && !value.documentIds.includes(document.id)) return []
+      const nodes = (document.payload as { nodes?: Record<string, SearchableNode> }).nodes ?? {}
+      const pathFor = (nodeId: string) => {
+        const path: string[] = []
+        let current: SearchableNode | undefined = nodes[nodeId]
+        while (current) {
+          path.unshift(current.topic)
+          current = current.parentId ? nodes[current.parentId] : undefined
+        }
+        return path
+      }
+      return Object.entries(nodes).flatMap(([nodeId, node]) => {
+        if (!node || typeof node.topic !== 'string') return []
+        const taskStatus = node.taskStatus ?? 'none'
+        const priority = node.priority ?? 0
+        const marks = node.marks ?? []
+        const tagIds = node.tagIds ?? []
+        const provenanceRoles = [...(rolesByNode.get(`${document.id}\u0000${nodeId}`) ?? [])]
+        if (!matchesAny(value.tagIds, tagIds) || !matchesAny(value.marks, marks) || !matchesAny(value.statuses, [taskStatus]) || !matchesAny(value.priorities, [priority]) || !matchesAny(value.provenanceRoles, provenanceRoles)) return []
+        const matchedIn: NodeSearchResult['matchedIn'] = []
+        if (needle && normalized(node.topic).includes(needle)) matchedIn.push('topic')
+        if (needle && normalized(node.note).includes(needle)) matchedIn.push('note')
+        if (needle && (node.links ?? []).some((link) => normalized(typeof link === 'object' && link ? `${String((link as { label?: unknown }).label ?? '')} ${String((link as { url?: unknown }).url ?? '')}` : '').includes(needle))) matchedIn.push('link')
+        if (needle && !matchedIn.length) return []
+        return [{ documentId: document.id, documentTitle: document.title, documentVersion: document.version, nodeId, topic: node.topic, path: pathFor(nodeId), matchedIn, taskStatus, priority, dueDate: node.dueDate ?? null, marks, tagIds, provenanceRoles }]
+      })
+    })
+    return results.sort((left, right) => {
+      const leftRank = normalized(left.topic) === needle ? 0 : left.matchedIn.includes('topic') ? 1 : 2
+      const rightRank = normalized(right.topic) === needle ? 0 : right.matchedIn.includes('topic') ? 1 : 2
+      return leftRank - rightRank || left.path.join('/').localeCompare(right.path.join('/'), 'zh-CN')
+    }).slice(0, limit)
   }
 
   saveMcpDepositBatch(batch: McpDepositBatch): void {
@@ -170,11 +252,11 @@ export class DocumentRepository {
     return rows.map((row) => JSON.parse(row.batch_json) as McpDepositBatch)
   }
 
-  applyMcpDepositBatch(document: DocumentRecord, batch: McpDepositBatch, payload: unknown): DocumentRecord | VersionConflict {
+  applyMcpDepositBatch(document: DocumentRecord, batch: McpDepositBatch, payload: unknown, affectedNodeIds: string[] = []): DocumentRecord | VersionConflict {
     return this.database.transaction(() => {
       const saved = this.save({ id: document.id, ownerId: document.ownerId, title: document.title, categoryId: document.categoryId, payload, baseVersion: batch.expectedVersion, kind: 'mcp_deposit' })
       if ('type' in saved) return saved
-      this.saveMcpDepositBatch({ ...batch, status: 'applied', confirmationToken: '', appliedAt: Date.now() })
+      this.saveMcpDepositBatch({ ...batch, status: 'applied', confirmationToken: '', appliedAt: Date.now(), affectedNodeIds })
       return saved
     })()
   }

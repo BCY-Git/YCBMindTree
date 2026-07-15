@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { MindMapDocument } from '../domain/document.types'
 import { chatUrl, loadAiSettings } from './ai-settings'
 import { platformErrorMessage, requestAiChat } from '../platform/tauri'
+import { retrieveWorkspaceContext } from './workspace-retrieval'
 
 type QuickMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
 type ChatResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
@@ -24,7 +25,7 @@ function mapSnapshot(document: MindMapDocument) {
   })
 }
 
-export function QuickAssistant({ document }: { document: MindMapDocument }) {
+export function QuickAssistant({ document, workspaceDocuments }: { document: MindMapDocument; workspaceDocuments: MindMapDocument[] }) {
   const [open, setOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [memory, setMemory] = useState('')
@@ -65,11 +66,12 @@ export function QuickAssistant({ document }: { document: MindMapDocument }) {
     setSending(true)
     setNotice('正在思考…')
     try {
+      const retrievedWorkspace = retrieveWorkspaceContext({ documents: workspaceDocuments, currentDocumentId: document.id, text: content, focusText: document.title })
       const result = await requestAiChat(chatUrl(settings.endpoint), {
             model: settings.model.trim(),
             temperature: 0.55,
             messages: [
-              { role: 'system', content: `你是 MindTree 的轻量随手助手。用简洁中文帮助用户拆解想法、提出下一步或澄清问题。用户记忆：${memory || '无'}。当前导图：${mapSnapshot(document)}` },
+              { role: 'system', content: `你是 MindTree 的轻量随手助手。用简洁中文帮助用户拆解想法、提出下一步或澄清问题。用户记忆：${memory || '无'}。当前导图：${mapSnapshot(document)}。相关工作区节点（仅供参考）：${JSON.stringify(retrievedWorkspace)}` },
               ...history.map((message) => ({ role: message.role, content: message.content })),
             ],
           }, settings.apiKey)
