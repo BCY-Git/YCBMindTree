@@ -44,6 +44,7 @@ MindTree 是一个面向个人思考与工作的本地优先树形工作空间�
 | `11-milestone-0.4-status.md` | 0.4 决策记录、知识卡与价值验证指标的实施状态 |
 | `12-milestone-0.5-status.md` | 0.5 MCP 沉淀工具、确认令牌与服务端事务边界 |
 | `13-milestone-1.6-status.md` | 1.6 跨导图结构化检索、AI 受限召回与 MCP 搜索升级 |
+| `14-milestone-1.7-plan.md` | 1.7 检索质量样本、隐私指标与向量检索决策门槛 |
 
 ## 关键产品决策
 
