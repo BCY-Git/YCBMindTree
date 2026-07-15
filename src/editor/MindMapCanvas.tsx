@@ -47,6 +47,7 @@ import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/database'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
+import { projectFocusedDocument } from '../focus/focus-projection'
 
 const nodeTypes = { mindNode: MindNode }
 // 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
@@ -97,9 +98,10 @@ function renderedSize(candidate: Node<MindNodeData>) {
   }
 }
 
-export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
+export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focusRootId = null }: {
   workspaceDocuments: MindMapDocument[]
   onRevealWorkspaceNode: (documentId: string, nodeId: string) => void
+  focusRootId?: string | null
 }) {
   const document = useEditorStore((state) => state.document)
   const theme = getTheme(document.theme.id)
@@ -139,6 +141,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
   const [pasteAttachmentStatus, setPasteAttachmentStatus] = useState<string | null>(null)
+  const viewDocument = useMemo(() => focusRootId ? projectFocusedDocument(document, focusRootId) : document, [document, focusRootId])
   const fittedDocumentIdRef = useRef<string | null>(null)
   const rightPointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const suppressContextMenuRef = useRef(false)
@@ -169,15 +172,15 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
 
   // ── 构建 React Flow nodes / edges（响应 document / selectedNodeId / theme 变化）─────────
   const { baseNodes, edges, basePositionsById, boundaryBoxes, summaryBoxes } = useMemo(() => {
-    const stablePlaced = layoutTree(document, editingNodeHeights)
+    const stablePlaced = layoutTree(viewDocument, editingNodeHeights)
     // 同一父节点内的拖拽重排只在本地预览：先移除被拖节点，再按落点插回，
     // 其余节点立即腾位；真正写入文档仍等用户松开鼠标。
-    let layoutDocument = document
+    let layoutDocument = viewDocument
     if (dragPreview?.intent.kind === 'sibling') {
-      const previewNode = document.nodes[dragPreview.nodeId]
-      const previewParent = previewNode?.parentId ? document.nodes[previewNode.parentId] : null
+      const previewNode = viewDocument.nodes[dragPreview.nodeId]
+      const previewParent = previewNode?.parentId ? viewDocument.nodes[previewNode.parentId] : null
       if (previewNode && previewParent && previewParent.id === dragPreview.intent.parentId) {
-        layoutDocument = structuredClone(document)
+        layoutDocument = structuredClone(viewDocument)
         const parent = layoutDocument.nodes[previewParent.id]
         const currentIndex = parent.childIds.indexOf(previewNode.id)
         parent.childIds = parent.childIds.filter((id) => id !== previewNode.id)
@@ -188,7 +191,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
         parent.childIds.splice(targetIndex, 0, previewNode.id)
       }
     }
-    const placed = layoutDocument === document ? stablePlaced : layoutTree(layoutDocument, editingNodeHeights)
+    const placed = layoutDocument === viewDocument ? stablePlaced : layoutTree(layoutDocument, editingNodeHeights)
     const visibleIds = new Set(placed.map((item) => item.id))
     const positionedById = new Map(placed.map((item) => [item.id, item]))
     const depthOf = (nodeId: string) => {
@@ -318,7 +321,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
       return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
-  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme])
+  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
 
   useEffect(() => {
     setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId))
@@ -326,13 +329,14 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
 
   // 仅在首次打开或切换到另一张导图时自动适应视图；节点增删、编辑和布局更新都必须保留用户当前视角。
   useEffect(() => {
-    if (!flowInstance || !baseNodes.length || fittedDocumentIdRef.current === document.id) return
+    const viewKey = `${document.id}:${focusRootId ?? 'all'}`
+    if (!flowInstance || !baseNodes.length || fittedDocumentIdRef.current === viewKey) return
     const frame = window.requestAnimationFrame(() => {
       flowInstance.fitView({ nodes: baseNodes, padding: .35, maxZoom: 1 })
-      fittedDocumentIdRef.current = document.id
+      fittedDocumentIdRef.current = viewKey
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [baseNodes, document.id, flowInstance])
+  }, [baseNodes, document.id, flowInstance, focusRootId])
 
   useEffect(() => {
     if (!focusRequestNodeId) return
@@ -343,12 +347,17 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
   }, [baseNodes, clearNodeFocusRequest, flowInstance, focusRequestNodeId])
 
   const focusRoot = useCallback(() => {
-    const rootNode = baseNodes.find((node) => node.id === document.rootId)
-    selectNode(document.rootId)
+    const rootNode = baseNodes.find((node) => node.id === viewDocument.rootId)
+    selectNode(viewDocument.rootId)
     if (rootNode) flowInstance?.fitView({ nodes: [rootNode], padding: 1.5, maxZoom: 1.05, duration: 280 })
-  }, [baseNodes, document.rootId, flowInstance, selectNode])
+  }, [baseNodes, flowInstance, selectNode, viewDocument.rootId])
 
   const revealSearchResult = useCallback((documentId: string, nodeId: string) => {
+    if (documentId === document.id && focusRootId && !viewDocument.nodes[nodeId]) {
+      onRevealWorkspaceNode(documentId, nodeId)
+      setSearchOpen(false)
+      return
+    }
     if (documentId !== document.id) {
       onRevealWorkspaceNode(documentId, nodeId)
       setSearchOpen(false)
@@ -356,7 +365,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
     }
     if (dispatch({ type: 'REVEAL_NODE', nodeId })) setSearchFocusNodeId(nodeId)
     setSearchOpen(false)
-  }, [dispatch, document.id, onRevealWorkspaceNode])
+  }, [dispatch, document.id, focusRootId, onRevealWorkspaceNode, viewDocument.nodes])
 
   useEffect(() => {
     if (!searchOpen) return
@@ -637,7 +646,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
       if (meta && event.key.toLowerCase() === 'x') { event.preventDefault(); cutNode(selected); return }
       // 粘贴要等 ClipboardEvent 才能分辨图片还是内部复制的节点分支。
       if (meta && event.key.toLowerCase() === 'v') return
-      if (event.key === 'Enter') { event.preventDefault(); dispatch({ type: 'ADD_SIBLING', nodeId: selected }); return }
+      if (event.key === 'Enter') { event.preventDefault(); dispatch(selected === focusRootId ? { type: 'ADD_CHILD', parentId: selected } : { type: 'ADD_SIBLING', nodeId: selected }); return }
       if (event.key === 'Tab' && event.shiftKey) { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
       if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'INDENT_NODE', nodeId: selected }); return }
       if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
@@ -673,14 +682,14 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
       if (event.key.startsWith('Arrow')) {
         event.preventDefault()
         const adjacent = adjacentNodeId(selected, event.key)
-        if (adjacent) selectNode(adjacent)
+        if (adjacent && basePositionsById.has(adjacent)) selectNode(adjacent)
         return
       }
       if (event.key === 'F2') editNode(selected)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [cancelRelationCreation, commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, pasteIntoNode, redo, relationSourceIds.length, selectNode, undo])
+  }, [basePositionsById, cancelRelationCreation, commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, focusRootId, pasteIntoNode, redo, relationSourceIds.length, selectNode, undo])
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -742,7 +751,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
         if (dispatch({ type: 'CREATE_RELATED_FREE_TOPIC', sourceIds: relationSourceIds, ...position })) cancelRelationCreation()
         return
       }
-      dispatch({ type: 'ADD_CHILD', parentId: document.rootId })
+      dispatch({ type: 'ADD_CHILD', parentId: focusRootId ?? document.rootId })
     }}>
       <ReactFlow
         nodes={flowNodes}
@@ -860,7 +869,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
             position={contextMenu.position}
             node={contextNode}
             relation={contextRelation}
-            isRoot={targetNodeId === document.rootId}
+            isRoot={targetNodeId === document.rootId || targetNodeId === focusRootId}
             onAddChild={() => runContextAction(() => dispatch({ type: 'ADD_CHILD', parentId: targetNodeId }))}
             onAddSibling={() => runContextAction(() => dispatch({ type: 'ADD_SIBLING', nodeId: targetNodeId }))}
             onAddFreeTopic={() => runContextAction(() => {
@@ -904,7 +913,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode }: {
             onClose={() => setCommandPaletteOpen(false)}
             actions={[
               { label: '新建子节点', detail: '在当前节点下继续展开想法', shortcut: '工具栏', disabled: selected.isFreeTopic, run: () => dispatch({ type: 'ADD_CHILD', parentId: selectedId }) },
-              { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId || selected.isFreeTopic, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
+              { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId || selectedId === focusRootId || selected.isFreeTopic, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
               ...(selected.isFreeTopic ? [{ label: '附加到主节点', detail: '转为中心主题下的一级分支，并自动排列', shortcut: '—', run: () => dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: selectedId, parentId: document.rootId }) }] : []),
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
               { label: '创建关系', detail: '连线跟随鼠标，单击已有节点或双击空白处', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceIds([selectedId]); setRelationPointer(null) } },

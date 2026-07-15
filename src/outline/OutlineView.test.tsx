@@ -71,4 +71,20 @@ describe('OutlineView', () => {
 
     expect(screen.getByRole('dialog', { name: '搜索工作区' })).toBeTruthy()
   })
+
+  it('shows only the focused branch without changing the source document', () => {
+    const fixture = outlineDocument()
+    const root = fixture.document.nodes[fixture.document.rootId]
+    const sibling = createNode('其他分支', root.id)
+    root.childIds.push(sibling.id)
+    fixture.document.nodes[sibling.id] = sibling
+    act(() => useEditorStore.getState().hydrate(fixture.document))
+
+    render(<OutlineView tags={[]} focusRootId={fixture.branch.id} />)
+
+    expect(screen.getByDisplayValue('第一分支')).toBeTruthy()
+    expect(screen.getByDisplayValue('分支结论')).toBeTruthy()
+    expect(screen.queryByDisplayValue('其他分支')).toBeNull()
+    expect(useEditorStore.getState().document.nodes[sibling.id]).toBeTruthy()
+  })
 })

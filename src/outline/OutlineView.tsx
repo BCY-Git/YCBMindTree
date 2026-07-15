@@ -5,15 +5,17 @@ import type { Tag } from '../domain/tag-library'
 import { NodeSearchDialog } from '../editor/NodeSearchDialog'
 import { listAllDepositProvenance } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
+import { projectFocusedDocument } from '../focus/focus-projection'
 import { buildOutlineRows, outlineSiblingMove } from './outline-model'
 
 const taskLabel = { none: '普通主题', todo: '待办', doing: '进行中', done: '已完成' }
 const nextTaskStatus = { none: 'todo', todo: 'doing', doing: 'done', done: 'none' } as const
 
-export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNode }: {
+export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNode, focusRootId = null }: {
   tags: Tag[]
   workspaceDocuments?: MindMapDocument[]
   onRevealWorkspaceNode?: (documentId: string, nodeId: string) => void
+  focusRootId?: string | null
 }) {
   const document = useEditorStore((state) => state.document)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
@@ -23,7 +25,8 @@ export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNo
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchProvenance, setSearchProvenance] = useState<DepositProvenance[]>([])
   const rowsRef = useRef<HTMLDivElement>(null)
-  const rows = useMemo(() => buildOutlineRows(document), [document])
+  const viewDocument = useMemo(() => focusRootId ? projectFocusedDocument(document, focusRootId) : document, [document, focusRootId])
+  const rows = useMemo(() => buildOutlineRows(viewDocument), [viewDocument])
   const tagById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags])
 
   useEffect(() => {
@@ -57,8 +60,8 @@ export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNo
 
   return <section className="outline-view" aria-label="大纲视图">
     <header className="outline-view__header">
-      <div><p className="eyebrow">结构化大纲</p><h2>{document.title}</h2><span>与导图共享同一份节点和折叠状态</span></div>
-      <div className="outline-view__header-actions"><output>{Object.keys(document.nodes).length} 个主题</output><button type="button" onClick={() => setSearchOpen(true)}>⌕ 搜索</button></div>
+      <div><p className="eyebrow">{focusRootId ? '聚焦分支' : '结构化大纲'}</p><h2>{focusRootId ? document.nodes[focusRootId]?.topic ?? document.title : document.title}</h2><span>与导图共享同一份节点和折叠状态</span></div>
+      <div className="outline-view__header-actions"><output>{Object.keys(viewDocument.nodes).length} / {Object.keys(document.nodes).length} 个主题</output><button type="button" onClick={() => setSearchOpen(true)}>⌕ 搜索</button></div>
     </header>
     <div className="outline-view__columns" aria-hidden="true"><span>主题</span><span>状态与内容</span></div>
     <div className="outline-view__rows" ref={rowsRef}>
@@ -92,7 +95,7 @@ export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNo
                 if (command) dispatch(command)
               } else if (event.key === 'Enter') {
                 event.preventDefault()
-                if (!node.isFreeTopic) dispatch(node.id === document.rootId ? { type: 'ADD_CHILD', parentId: node.id } : { type: 'ADD_SIBLING', nodeId: node.id })
+                if (!node.isFreeTopic) dispatch(node.id === viewDocument.rootId ? { type: 'ADD_CHILD', parentId: node.id } : { type: 'ADD_SIBLING', nodeId: node.id })
               } else if (event.key === 'Tab') {
                 event.preventDefault()
                 dispatch(event.shiftKey ? { type: 'OUTDENT_NODE', nodeId: node.id } : { type: 'INDENT_NODE', nodeId: node.id })

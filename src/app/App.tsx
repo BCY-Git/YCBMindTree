@@ -36,6 +36,7 @@ import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
 import { emptyNodeFilter, hasActiveFilter, useNodeFilterStore } from '../editor/filter-store'
 import { PanelToggleButton } from './PanelToggleButton'
 import { OutlineView } from '../outline/OutlineView'
+import { buildFocusBreadcrumb } from '../focus/focus-projection'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -144,6 +145,7 @@ export function App() {
   const [tagDraft, setTagDraft] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const [workspaceView, setWorkspaceView] = useState<'map' | 'outline'>(() => localStorage.getItem('mindtree.workspace-view') === 'outline' ? 'outline' : 'map')
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
   const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
   const [importCandidate, setImportCandidate] = useState<MindMapDocument | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
@@ -160,6 +162,7 @@ export function App() {
   const workspaceBackupInputRef = useRef<HTMLInputElement>(null)
   const pendingNodeFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
+  const focusBreadcrumb = useMemo(() => focusedNodeId ? buildFocusBreadcrumb(document, focusedNodeId) : [], [document, focusedNodeId])
   const canGroupSelection = useMemo(() => {
     if (selectedNodeIds.length < 2) return false
     const selected = selectedNodeIds.map((id) => document.nodes[id])
@@ -200,6 +203,19 @@ export function App() {
     window.addEventListener('mindtree:tags-changed', refresh)
     return () => window.removeEventListener('mindtree:tags-changed', refresh)
   }, [])
+
+  useEffect(() => { setFocusedNodeId(null) }, [document.id])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !focusedNodeId) return
+      if ((event.target as HTMLElement | null)?.closest('input, textarea, [role="dialog"]')) return
+      event.preventDefault()
+      setFocusedNodeId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [focusedNodeId])
 
   useEffect(() => {
     const syncDepositHistory = (event: Event) => {
@@ -588,6 +604,7 @@ export function App() {
   }, [dispatch, document.id, openDocument, requestNodeFocus, taskDocuments])
 
   const revealWorkspaceNode = useCallback((documentId: string, nodeId: string) => {
+    setFocusedNodeId(null)
     if (documentId === document.id) {
       if (dispatch({ type: 'REVEAL_NODE', nodeId })) requestNodeFocus(nodeId)
       return
@@ -937,7 +954,7 @@ export function App() {
           <span className="floating-toolbar__divider" />
           <div className="floating-toolbar__cluster">
             <button className="floating-toolbar__button" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建子节点' : '新建子节点 (Tab)'}><Icon>＋</Icon><span>子节点</span></button>
-            <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon>↳</Icon><span>同级</span></button>
+            <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNodeId === focusedNodeId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNodeId === focusedNodeId ? '聚焦根节点请创建子节点，避免新节点出现在聚焦范围外' : selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon>↳</Icon><span>同级</span></button>
             <button
               className="floating-toolbar__button"
               disabled={!selectedNodeIds.length}
@@ -946,7 +963,8 @@ export function App() {
             ><Icon>⌁</Icon><span>{selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}</span></button>
             <button className="floating-toolbar__icon" disabled={!canGroupSelection} onClick={() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds })} title={canGroupSelection ? '为所选同级节点创建摘要' : '先选择两个或以上同级节点'} aria-label="创建摘要"><Icon><SummaryIcon /></Icon></button>
             <button className="floating-toolbar__icon" disabled={!canGroupSelection} onClick={() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds })} title={canGroupSelection ? '为所选同级节点创建边界' : '先选择两个或以上同级节点'} aria-label="创建边界"><Icon><BoundaryIcon /></Icon></button>
-            <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon><span>排列</span></button>
+            <button className="floating-toolbar__button" disabled={Boolean(focusedNodeId)} onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title={focusedNodeId ? '退出聚焦后再排列完整导图' : '自动排列并保留当前自由排布'}><Icon>↺</Icon><span>排列</span></button>
+            <button className={`floating-toolbar__button ${focusedNodeId ? 'is-active' : ''}`} disabled={!selectedNode || selectedNode.id === document.rootId || selectedNode.isFreeTopic} onClick={() => selectedNode && setFocusedNodeId((current) => current === selectedNode.id ? null : selectedNode.id)} title={focusedNodeId === selectedNode?.id ? '退出当前分支聚焦 (Esc)' : '只显示所选节点及其后代'}><Icon>◎</Icon><span>{focusedNodeId === selectedNode?.id ? '退出聚焦' : '聚焦'}</span></button>
           </div>
         </nav>
         <div className="topbar-utility">
@@ -1027,9 +1045,18 @@ export function App() {
           </footer>
         </aside>
 
-        {workspaceView === 'map'
-          ? <MindMapCanvas workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} />
-          : <OutlineView tags={tags} workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} />}
+        <section className="workspace-center">
+          <nav className={`focus-bar ${focusedNodeId ? '' : 'is-hidden'}`} aria-label="聚焦路径">
+            <span>聚焦</span>
+            {focusBreadcrumb.map((item, index) => <button key={item.nodeId} disabled={index === focusBreadcrumb.length - 1} onClick={() => index === 0 ? setFocusedNodeId(null) : setFocusedNodeId(item.nodeId)}>{item.topic || '未命名主题'}</button>)}
+            <button className="focus-bar__exit" onClick={() => setFocusedNodeId(null)}>显示完整导图 <kbd>Esc</kbd></button>
+          </nav>
+          <div className="workspace-center__view">
+            {workspaceView === 'map'
+              ? <MindMapCanvas workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} focusRootId={focusedNodeId} />
+              : <OutlineView tags={tags} workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} focusRootId={focusedNodeId} />}
+          </div>
+        </section>
 
         <aside className="inspector">
           <header className="inspector__header">
