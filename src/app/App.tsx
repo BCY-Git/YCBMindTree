@@ -26,6 +26,7 @@ import { createImportedCopy, parseDocumentFile, saveDocumentToLocalFile } from '
 import { downloadOpml, parseOpml } from '../export/opml'
 import { parseMarkdownOutline } from '../export/markdown-import'
 import type { ImportedDocument } from '../export/import-document'
+import { downloadDocumentSvg } from '../export/svg'
 import { parseWorkspaceBackup, prepareWorkspaceRestore, saveWorkspaceBackupToLocalFile, type WorkspaceBackup } from '../export/workspace-backup'
 import { GhostNoteEditor } from '../ai/GhostNoteEditor'
 import { LoginDialog } from '../auth/LoginDialog'
@@ -252,6 +253,11 @@ export function App() {
 
   const exportCurrentOpml = () => {
     downloadOpml(document)
+    setExportOpen(false)
+  }
+
+  const exportCurrentSvg = (transparent = false) => {
+    downloadDocumentSvg(document, { transparent })
     setExportOpen(false)
   }
 
@@ -995,7 +1001,7 @@ export function App() {
           <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
-          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentOpml()}>导出 OPML 大纲</button><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
+          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentSvg()}>导出完整导图 SVG</button><button onClick={() => exportCurrentSvg(true)}>导出透明背景 SVG</button><hr /><button onClick={() => exportCurrentOpml()}>导出 OPML 大纲</button><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
           <PanelToggleButton side="left" collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
           <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
