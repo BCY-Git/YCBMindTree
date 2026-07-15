@@ -77,11 +77,15 @@ export type DepositAnalysisContext = {
     rootId: string
     selectedNodeIds: string[]
     nodes: DepositContextNode[]
+    totalNodeCount: number
+    truncated: boolean
   }
   destinations: Array<{
     documentId: string
     title: string
     candidateNodes: Array<{ id: string; path: string[]; topic: string }>
+    totalNodeCount: number
+    truncated: boolean
   }>
   alreadyAppliedFingerprints: string[]
 }

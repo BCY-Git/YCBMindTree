@@ -5,6 +5,8 @@ import { assertValidDocument } from '../domain/document.validator'
 import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
 import type { StoredAttachment } from '../persistence/database'
 import { isTauriRuntime } from '../platform/tauri'
+import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
+import { depositBatchSchema, depositProvenanceSchema } from '../ai/deposit/deposit-persistence-schema'
 
 export type WorkspaceCategory = { id: string; name: string }
 export type WorkspaceTag = { id: string; name: string; color: string }
@@ -13,6 +15,8 @@ export type WorkspaceBackup = {
   documents: MindMapDocument[]
   versions: DocumentVersion[]
   attachments: StoredAttachment[]
+  depositBatches: DepositBatch[]
+  depositProvenance: DepositProvenance[]
   categories: WorkspaceCategory[]
   tags: WorkspaceTag[]
 }
@@ -31,13 +35,15 @@ export type WorkspaceRestorePlan = WorkspaceBackup & {
 type AttachmentManifest = Omit<StoredAttachment, 'blob'> & { path: string }
 type BackupManifest = {
   format: 'mindtree-workspace-backup'
-  version: 1
+  version: 1 | 2
   exportedAt: string
   documents: MindMapDocument[]
   versions: DocumentVersion[]
   attachments: AttachmentManifest[]
   categories: WorkspaceCategory[]
   tags: WorkspaceTag[]
+  depositBatches?: DepositBatch[]
+  depositProvenance?: DepositProvenance[]
 }
 
 const backupFormat = 'mindtree-workspace-backup' as const
@@ -109,6 +115,22 @@ function assertAttachmentCoverage(documents: MindMapDocument[], attachmentIds: R
   }
 }
 
+function parseDepositData(manifest: Partial<BackupManifest>, documents: MindMapDocument[]) {
+  const documentIds = new Set(documents.map((document) => document.id))
+  const depositBatches = (manifest.depositBatches ?? []).map((value) => depositBatchSchema.parse(value))
+  const batchById = new Map(depositBatches.map((batch) => [batch.id, batch]))
+  for (const batch of depositBatches) {
+    if (!documentIds.has(batch.sourceDocumentId) || batch.candidates.some((candidate) => candidate.batchId !== batch.id)) throw new Error('备份中的沉淀批次引用无效')
+  }
+  const depositProvenance = (manifest.depositProvenance ?? []).map((value) => depositProvenanceSchema.parse(value))
+  for (const item of depositProvenance) {
+    const batch = batchById.get(item.batchId)
+    if (!batch || !batch.candidates.some((candidate) => candidate.id === item.candidateId) || !documentIds.has(item.sourceDocumentId)
+      || (item.targetDocumentId !== null && !documentIds.has(item.targetDocumentId))) throw new Error('备份中的沉淀来源引用无效')
+  }
+  return { depositBatches, depositProvenance }
+}
+
 /** 将整个工作区压缩为可迁移的 ZIP；附件保留二进制，不进入 JSON。 */
 export async function createWorkspaceBackup(input: WorkspaceBackup): Promise<Blob> {
   const archive = new JSZip()
@@ -121,13 +143,15 @@ export async function createWorkspaceBackup(input: WorkspaceBackup): Promise<Blo
   assertAttachmentCoverage(input.documents, new Set(attachments.map((attachment) => attachment.id)))
   const manifest: BackupManifest = {
     format: backupFormat,
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     documents: input.documents,
     versions: input.versions,
     attachments,
     categories: input.categories,
     tags: input.tags,
+    depositBatches: input.depositBatches,
+    depositProvenance: input.depositProvenance,
   }
   archive.file('manifest.json', JSON.stringify(manifest))
   return archive.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
@@ -153,7 +177,7 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
     throw new Error('不是受支持的 MindTree 工作区备份')
   }
   const manifest = raw as Partial<BackupManifest>
-  if (manifest.format !== backupFormat || manifest.version !== 1 || !Array.isArray(manifest.documents)) {
+  if (manifest.format !== backupFormat || ![1, 2].includes(manifest.version ?? 0) || !Array.isArray(manifest.documents)) {
     throw new Error('不是受支持的 MindTree 工作区备份')
   }
   const documents = manifest.documents.map(parseDocument)
@@ -169,7 +193,8 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
     if (!binary) throw new Error(`备份缺少附件：${attachment.name}`)
     return { ...attachment, blob: await binary.async('blob') }
   }))
-  return { documents, versions, attachments, categories, tags }
+  const deposit = parseDepositData(manifest, documents)
+  return { documents, versions, attachments, categories, tags, ...deposit }
 }
 
 function backupFileName() {
@@ -292,5 +317,30 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
     id: attachmentIdMap.get(attachment.id) ?? attachment.id,
     documentId: documentIdMap.get(attachment.documentId) ?? attachment.documentId,
   }))
-  return { documents, versions, attachments, categories, tags, copiedDocumentCount: copiedIds.size }
+  const batchIdMap = new Map(backup.depositBatches.map((batch) => [batch.id, crypto.randomUUID()]))
+  const candidateIdMap = new Map(backup.depositBatches.flatMap((batch) => batch.candidates.map((candidate) => [candidate.id, crypto.randomUUID()] as const)))
+  const depositBatches = backup.depositBatches.map((source) => {
+    const batchId = batchIdMap.get(source.id) ?? source.id
+    return {
+      ...structuredClone(source),
+      id: batchId,
+      sourceDocumentId: documentIdMap.get(source.sourceDocumentId) ?? source.sourceDocumentId,
+      candidates: source.candidates.map((candidate) => ({
+        ...structuredClone(candidate),
+        id: candidateIdMap.get(candidate.id) ?? candidate.id,
+        batchId,
+        suggestedDocumentId: candidate.suggestedDocumentId ? documentIdMap.get(candidate.suggestedDocumentId) ?? candidate.suggestedDocumentId : null,
+        duplicateOfCandidateId: candidate.duplicateOfCandidateId ? candidateIdMap.get(candidate.duplicateOfCandidateId) ?? null : null,
+      })),
+    }
+  })
+  const depositProvenance = backup.depositProvenance.map((source) => ({
+    ...structuredClone(source),
+    id: crypto.randomUUID(),
+    batchId: batchIdMap.get(source.batchId) ?? source.batchId,
+    candidateId: candidateIdMap.get(source.candidateId) ?? source.candidateId,
+    sourceDocumentId: documentIdMap.get(source.sourceDocumentId) ?? source.sourceDocumentId,
+    targetDocumentId: source.targetDocumentId ? documentIdMap.get(source.targetDocumentId) ?? source.targetDocumentId : null,
+  }))
+  return { documents, versions, attachments, categories, tags, depositBatches, depositProvenance, copiedDocumentCount: copiedIds.size }
 }

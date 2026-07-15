@@ -12,6 +12,8 @@ describe('editor history', () => {
       document,
       past: [],
       future: [],
+      pastDepositBatchIds: [],
+      futureDepositBatchIds: [],
       selectedNodeId: document.rootId,
       selectedNodeIds: [document.rootId],
       editingNodeId: null,
@@ -103,5 +105,19 @@ describe('editor history', () => {
 
     undo()
     expect(useEditorStore.getState().document.nodes[childId]).toBeDefined()
+  })
+
+  it('announces deposit batch state when its atomic write is undone and redone', () => {
+    const events: Array<{ batchId: string; applied: boolean }> = []
+    const listener = (event: Event) => events.push((event as CustomEvent<{ batchId: string; applied: boolean }>).detail)
+    window.addEventListener('mindtree:deposit-history', listener)
+    const { document, dispatch, undo, redo } = useEditorStore.getState()
+
+    dispatch({ type: 'APPLY_DEPOSIT_OPERATIONS', batchId: 'batch-1', operations: [{ type: 'APPEND_NODE_NOTE', nodeId: document.rootId, content: '沉淀内容' }] })
+    undo()
+    redo()
+
+    expect(events).toEqual([{ batchId: 'batch-1', applied: false }, { batchId: 'batch-1', applied: true }])
+    window.removeEventListener('mindtree:deposit-history', listener)
   })
 })

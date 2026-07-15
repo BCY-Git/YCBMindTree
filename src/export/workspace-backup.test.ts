@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createInitialDocument } from '../domain/document.factory'
 import { createWorkspaceBackup, parseWorkspaceBackup, prepareWorkspaceRestore } from './workspace-backup'
+import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 
 function readText(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -9,6 +10,14 @@ function readText(blob: Blob) {
     reader.onload = () => resolve(String(reader.result))
     reader.readAsText(blob)
   })
+}
+
+function depositData(documentId: string, nodeId: string): { depositBatches: DepositBatch[]; depositProvenance: DepositProvenance[] } {
+  const candidate = { id: 'candidate-1', batchId: 'batch-1', type: 'task' as const, title: '继续验证', detail: '来自日报', sourceNodeIds: [nodeId], suggestedDocumentId: documentId, suggestedParentId: nodeId, suggestedTargetNodeId: null, action: 'create' as const, confidence: 0.9, reason: '明确的后续动作', duplicateOfCandidateId: null, status: 'applied' as const, fingerprint: 'fingerprint-1' }
+  return {
+    depositBatches: [{ id: 'batch-1', sourceDocumentId: documentId, sourceNodeIds: [nodeId], scope: 'subtree', sourceDocumentUpdatedAt: 1, sourceSnapshot: '日报 › 继续验证', status: 'applied', summary: '一条任务', candidates: [candidate], createdAt: 1, updatedAt: 2, appliedAt: 2 }],
+    depositProvenance: [{ id: 'provenance-1', batchId: 'batch-1', candidateId: candidate.id, sourceDocumentId: documentId, sourceNodeIds: [nodeId], sourceSnapshot: '日报 › 继续验证', targetDocumentId: documentId, targetNodeIds: [nodeId], action: 'create', model: 'test-model', acceptedByUser: true, createdAt: 2 }],
+  }
 }
 
 describe('workspace backup', () => {
@@ -20,6 +29,8 @@ describe('workspace backup', () => {
       attachments: [],
       categories: [{ id: 'uncategorized', name: '未分类' }],
       tags: [{ id: 'work', name: '工作', color: '#3f8f78' }],
+      depositBatches: [],
+      depositProvenance: [],
     })
     const restored = await parseWorkspaceBackup(archive)
 
@@ -33,7 +44,7 @@ describe('workspace backup', () => {
     const attachment = { id: 'attachment-1', name: 'note.txt', type: 'text/plain', size: 5, createdAt: 1 }
     document.nodes[document.rootId].attachments = [attachment]
     const archive = await createWorkspaceBackup({
-      documents: [document], versions: [], categories: [], tags: [],
+      documents: [document], versions: [], categories: [], tags: [], depositBatches: [], depositProvenance: [],
       attachments: [{ ...attachment, documentId: document.id, nodeId: document.rootId, blob: new Blob(['hello'], { type: 'text/plain' }) }],
     })
     const restored = await parseWorkspaceBackup(archive)
@@ -55,6 +66,7 @@ describe('workspace backup', () => {
       attachments: [{ ...attachment, documentId: document.id, nodeId: document.rootId, blob: new Blob(['hello']) }],
       categories: [{ id: 'project', name: '项目' }],
       tags: [{ id: 'work', name: '工作', color: '#3f8f78' }],
+      ...depositData(document.id, document.rootId),
     }
     const restored = prepareWorkspaceRestore(backup, {
       documents: [document], attachmentIds: new Set(['attachment-1']), categories: [], tags: [],
@@ -68,5 +80,18 @@ describe('workspace backup', () => {
     expect(restored.attachments[0].id).toBe(copy.nodes[copy.rootId].attachments[0].id)
     expect(restored.versions[0].documentId).toBe(copy.id)
     expect(restored.versions[0].snapshot.id).toBe(copy.id)
+    expect(restored.depositBatches[0].id).not.toBe('batch-1')
+    expect(restored.depositBatches[0].sourceDocumentId).toBe(copy.id)
+    expect(restored.depositProvenance[0]).toMatchObject({ sourceDocumentId: copy.id, targetDocumentId: copy.id, batchId: restored.depositBatches[0].id })
+  })
+
+  it('round-trips applied deposit batches and provenance', async () => {
+    const document = createInitialDocument()
+    const deposit = depositData(document.id, document.rootId)
+    const archive = await createWorkspaceBackup({ documents: [document], versions: [], attachments: [], categories: [], tags: [], ...deposit })
+    const restored = await parseWorkspaceBackup(archive)
+
+    expect(restored.depositBatches).toEqual(deposit.depositBatches)
+    expect(restored.depositProvenance).toEqual(deposit.depositProvenance)
   })
 })

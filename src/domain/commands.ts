@@ -72,7 +72,7 @@ export type MindMapCommand =
   | { type: 'OUTDENT_NODE'; nodeId: string }
   | { type: 'PASTE_SUBTREE'; parentId: string; clipboard: MindNodeClipboard }
   /** 智能沉淀：在同一份导图内原子应用经用户确认的候选。 */
-  | { type: 'APPLY_DEPOSIT_OPERATIONS'; operations: LocalDepositOperation[] }
+  | { type: 'APPLY_DEPOSIT_OPERATIONS'; batchId: string; operations: LocalDepositOperation[] }
   | { type: 'RENAME_DOCUMENT'; title: string }
   | { type: 'SET_CATEGORY'; categoryId: string }
   | { type: 'SAVE_QUICK_NOTE'; title: string; categoryId: string }

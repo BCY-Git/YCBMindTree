@@ -22,6 +22,8 @@ type EditorState = {
   document: MindMapDocument
   past: MindMapDocument[]   // undo 栈
   future: MindMapDocument[] // redo 栈
+  pastDepositBatchIds: Array<string | null>
+  futureDepositBatchIds: Array<string | null>
   selectedNodeId: string | null
   selectedNodeIds: string[]
   selectedRelationId: string | null
@@ -70,10 +72,17 @@ function shouldEditFocusedNode(command: MindMapCommand) {
 
 const historyMergeWindowMs = 1_000
 
+function notifyDepositHistory(batchId: string | null | undefined, applied: boolean) {
+  if (!batchId || typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('mindtree:deposit-history', { detail: { batchId, applied } }))
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   document: initialDocument,
   past: [],
   future: [],
+  pastDepositBatchIds: [],
+  futureDepositBatchIds: [],
   selectedNodeId: initialDocument.rootId,
   selectedNodeIds: [initialDocument.rootId],
   selectedRelationId: null,
@@ -97,6 +106,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         document: result.document,
         past: shouldMerge ? state.past : [...state.past.slice(-49), state.document],
         future: [],
+        pastDepositBatchIds: shouldMerge ? state.pastDepositBatchIds : [...state.pastDepositBatchIds.slice(-49), command.type === 'APPLY_DEPOSIT_OPERATIONS' ? command.batchId : null],
+        futureDepositBatchIds: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
         selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds.filter((id) => Boolean(result.document.nodes[id])),
         selectedRelationId: result.focusRelationId ?? (state.selectedRelationId && result.document.relations.some((relation) => relation.id === state.selectedRelationId) ? state.selectedRelationId : null),
@@ -115,14 +126,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get()
     const previous = state.past.at(-1)
     if (!previous) return
-    set({ document: previous, past: state.past.slice(0, -1), future: [state.document, ...state.future], lastHistoryMerge: null })
+    const batchId = state.pastDepositBatchIds.at(-1) ?? null
+    set({ document: previous, past: state.past.slice(0, -1), future: [state.document, ...state.future], pastDepositBatchIds: state.pastDepositBatchIds.slice(0, -1), futureDepositBatchIds: [batchId, ...state.futureDepositBatchIds], lastHistoryMerge: null })
+    notifyDepositHistory(batchId, false)
   },
   // redo：从 future 栈取出下一份文档，将当前文档推入 past 栈。
   redo: () => {
     const state = get()
     const next = state.future[0]
     if (!next) return
-    set({ document: next, past: [...state.past, state.document], future: state.future.slice(1), lastHistoryMerge: null })
+    const batchId = state.futureDepositBatchIds[0] ?? null
+    set({ document: next, past: [...state.past, state.document], future: state.future.slice(1), pastDepositBatchIds: [...state.pastDepositBatchIds, batchId], futureDepositBatchIds: state.futureDepositBatchIds.slice(1), lastHistoryMerge: null })
+    notifyDepositHistory(batchId, true)
   },
   selectNode: (id, additive = false) => set((state) => {
     if (!id) return { selectedNodeId: null, selectedNodeIds: [], selectedRelationId: null }
@@ -167,6 +182,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         document: result.document,
         past: [...state.past.slice(-49), state.document],
         future: [],
+        pastDepositBatchIds: [...state.pastDepositBatchIds.slice(-49), null],
+        futureDepositBatchIds: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
         selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds,
         selectedRelationId: null,
@@ -185,6 +202,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         document: result.document,
         past: [...state.past.slice(-49), state.document],
         future: [],
+        pastDepositBatchIds: [...state.pastDepositBatchIds.slice(-49), null],
+        futureDepositBatchIds: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
         selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds,
         selectedRelationId: null,
@@ -202,6 +221,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         document: result.document,
         past: [...state.past.slice(-49), state.document],
         future: [],
+        pastDepositBatchIds: [...state.pastDepositBatchIds.slice(-49), null],
+        futureDepositBatchIds: [],
         selectedNodeId: result.focusNodeId ?? state.selectedNodeId,
         selectedNodeIds: result.focusNodeId ? [result.focusNodeId] : state.selectedNodeIds,
         selectedRelationId: null,
@@ -221,6 +242,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       document,
       past: [],
       future: [],
+      pastDepositBatchIds: [],
+      futureDepositBatchIds: [],
       selectedNodeId: document.rootId,
       selectedNodeIds: [document.rootId],
       selectedRelationId: null,
@@ -237,6 +260,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       document,
       past: [],
       future: [],
+      pastDepositBatchIds: [],
+      futureDepositBatchIds: [],
       selectedNodeId: document.rootId,
       selectedNodeIds: [document.rootId],
       selectedRelationId: null,
@@ -251,6 +276,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     document,
     past: [],
     future: [],
+    pastDepositBatchIds: [],
+    futureDepositBatchIds: [],
     selectedNodeId: document.rootId,
     selectedNodeIds: [document.rootId],
     selectedRelationId: null,

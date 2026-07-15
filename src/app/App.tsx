@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDocumentVersions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata } from '../persistence/database'
+import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositBatches, listAllDepositProvenance, listAllDocumentVersions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata, setDepositBatchAppliedState } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
@@ -177,6 +177,15 @@ export function App() {
     const refresh = () => setTags(loadTags())
     window.addEventListener('mindtree:tags-changed', refresh)
     return () => window.removeEventListener('mindtree:tags-changed', refresh)
+  }, [])
+
+  useEffect(() => {
+    const syncDepositHistory = (event: Event) => {
+      const detail = (event as CustomEvent<{ batchId: string; applied: boolean }>).detail
+      if (detail?.batchId) void setDepositBatchAppliedState(detail.batchId, detail.applied).catch(console.warn)
+    }
+    window.addEventListener('mindtree:deposit-history', syncDepositHistory)
+    return () => window.removeEventListener('mindtree:deposit-history', syncDepositHistory)
   }, [])
 
   const setSelectedNodeTags = (tagIds: string[]) => {
@@ -378,13 +387,15 @@ export function App() {
       await flushCurrentDocument()
       const workspaceDocuments = await listDocuments()
       const referencedAttachmentIds = new Set(workspaceDocuments.flatMap((item) => Object.values(item.nodes).flatMap((node) => node.attachments.map((attachment) => attachment.id))))
-      const [versions, storedAttachments] = await Promise.all([listAllDocumentVersions(), listStoredAttachments()])
+      const [versions, storedAttachments, depositBatches, depositProvenance] = await Promise.all([listAllDocumentVersions(), listStoredAttachments(), listAllDepositBatches(), listAllDepositProvenance()])
       const result = await saveWorkspaceBackupToLocalFile({
         documents: workspaceDocuments,
         versions,
         attachments: storedAttachments.filter((attachment) => referencedAttachmentIds.has(attachment.id)),
         categories,
         tags,
+        depositBatches,
+        depositProvenance,
       })
       setWorkspaceBackupStatus(result === 'download' ? '工作区备份已下载。' : '工作区备份已保存到本机。')
     } catch (error) {
@@ -432,7 +443,7 @@ export function App() {
         setSyncRemoteVersion(null)
       }
       setWorkspaceBackupCandidate(null)
-      setWorkspaceBackupStatus(`已恢复 ${plan.documents.length} 份导图、${plan.attachments.length} 个附件${plan.copiedDocumentCount ? `；其中 ${plan.copiedDocumentCount} 份已作为恢复副本保留。` : '。'}`)
+      setWorkspaceBackupStatus(`已恢复 ${plan.documents.length} 份导图、${plan.attachments.length} 个附件和 ${plan.depositBatches.length} 批沉淀记录${plan.copiedDocumentCount ? `；其中 ${plan.copiedDocumentCount} 份已作为恢复副本保留。` : '。'}`)
     } catch (error) {
       setWorkspaceBackupStatus(error instanceof Error ? `恢复失败：${error.message}` : '恢复失败，请重试。')
     } finally {

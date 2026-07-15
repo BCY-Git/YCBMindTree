@@ -97,6 +97,14 @@ export async function listDepositBatches(sourceDocumentId: string): Promise<Depo
   return batches.sort((left, right) => right.updatedAt - left.updatedAt)
 }
 
+export async function listAllDepositBatches(): Promise<DepositBatch[]> {
+  return database.depositBatches.toArray()
+}
+
+export async function listAllDepositProvenance(): Promise<DepositProvenance[]> {
+  return database.depositProvenance.toArray()
+}
+
 export async function listAppliedDepositFingerprints(sourceDocumentId: string): Promise<string[]> {
   const batches = await database.depositBatches.where('sourceDocumentId').equals(sourceDocumentId).toArray()
   return batches.flatMap((batch) => batch.candidates.filter((candidate) => candidate.status === 'applied').map((candidate) => candidate.fingerprint))
@@ -116,6 +124,26 @@ export async function applyDepositBatch(batch: DepositBatch, provenance: Deposit
     if (provenance.length) await database.depositProvenance.bulkPut(provenance)
   })
   return applied
+}
+
+/** 与编辑器撤销/重做联动；来源记录保留历史，是否生效由批次和候选状态表示。 */
+export async function setDepositBatchAppliedState(batchId: string, applied: boolean): Promise<void> {
+  await database.transaction('rw', database.depositBatches, async () => {
+    const batch = await database.depositBatches.get(batchId)
+    if (!batch) return
+    const now = Date.now()
+    await database.depositBatches.put({
+      ...batch,
+      status: applied ? 'applied' : 'pending',
+      appliedAt: applied ? now : null,
+      updatedAt: now,
+      candidates: batch.candidates.map((candidate) => {
+        if (!applied && candidate.status === 'applied') return { ...candidate, status: 'accepted' }
+        if (applied && candidate.status === 'accepted') return { ...candidate, status: 'applied' }
+        return candidate
+      }),
+    })
+  })
 }
 
 /** 每张导图保留有限的自动版本；手动快照、恢复点和同步备份不会被自动清理。 */
@@ -186,11 +214,13 @@ export async function deleteSyncMetadata(documentId: string): Promise<void> {
  * 写入已完成 ID 重映射的工作区恢复计划。
  * 该操作是单个 IndexedDB 事务，失败时不会出现“导图已恢复但附件未恢复”的半完成状态。
  */
-export async function restoreWorkspaceData(data: { documents: MindMapDocument[]; versions: DocumentVersion[]; attachments: StoredAttachment[] }): Promise<void> {
-  await database.transaction('rw', database.documents, database.documentVersions, database.attachments, database.syncMetadata, async () => {
+export async function restoreWorkspaceData(data: { documents: MindMapDocument[]; versions: DocumentVersion[]; attachments: StoredAttachment[]; depositBatches: DepositBatch[]; depositProvenance: DepositProvenance[] }): Promise<void> {
+  await database.transaction('rw', [database.documents, database.documentVersions, database.attachments, database.syncMetadata, database.depositBatches, database.depositProvenance], async () => {
     await database.documents.bulkPut(data.documents)
     await database.documentVersions.bulkPut(data.versions)
     await database.attachments.bulkPut(data.attachments)
+    await database.depositBatches.bulkPut(data.depositBatches)
+    await database.depositProvenance.bulkPut(data.depositProvenance)
     await database.syncMetadata.bulkDelete(data.documents.map((document) => document.id))
   })
 }

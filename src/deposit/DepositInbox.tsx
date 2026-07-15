@@ -15,10 +15,11 @@ function nodePath(document: MindMapDocument, nodeId: string) {
   return path.join(' › ')
 }
 
-export function DepositInbox({ batch, document, onChange, onPreview, onDismiss }: {
+export function DepositInbox({ batch, document, onChange, onChangeAll, onPreview, onDismiss }: {
   batch: DepositBatch
   document: MindMapDocument
   onChange: (candidateId: string, patch: Partial<DepositCandidate>) => void
+  onChangeAll: (candidateIds: string[], status: 'pending' | 'accepted') => void
   onPreview: () => void
   onDismiss: () => void
 }) {
@@ -28,6 +29,7 @@ export function DepositInbox({ batch, document, onChange, onPreview, onDismiss }
   const nodes = Object.values(document.nodes)
   return <section className="deposit-inbox" aria-label="待沉淀收件箱">
     <div className="deposit-inbox__heading"><strong>待沉淀内容</strong><span>{candidates.length} 条</span></div>
+    {!!candidates.length && <div className="deposit-inbox__bulk"><button type="button" onClick={() => onChangeAll(candidates.filter((candidate) => !candidate.duplicateOfCandidateId && candidate.confidence >= 0.6).map((candidate) => candidate.id), 'accepted')}>选择建议项</button><button type="button" onClick={() => onChangeAll(candidates.map((candidate) => candidate.id), 'pending')}>全部取消</button></div>}
     {batch.summary && <p className="deposit-inbox__summary">{batch.summary}</p>}
     {!candidates.length && <p className="deposit-inbox__empty">本批建议已处理。</p>}
     <div className="deposit-inbox__list">{candidates.map((candidate) => {

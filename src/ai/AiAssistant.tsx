@@ -78,6 +78,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
   const [ghostCompletionEnabled, setGhostCompletionEnabled] = useState(false)
   const [depositBatch, setDepositBatch] = useState<DepositBatch | null>(null)
   const [depositPreview, setDepositPreview] = useState<DepositPlan | null>(null)
+  const [depositDebugContext, setDepositDebugContext] = useState<ReturnType<typeof buildDepositContext> | null>(null)
 
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
   useEffect(() => {
@@ -88,6 +89,26 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     }).catch(() => { if (active) setDepositBatch(null) })
     return () => { active = false }
   }, [document.id])
+  useEffect(() => {
+    const reflectDepositHistory = (event: Event) => {
+      const detail = (event as CustomEvent<{ batchId: string; applied: boolean }>).detail
+      setDepositBatch((current) => {
+        if (!current || current.id !== detail?.batchId) return current
+        return {
+          ...current,
+          status: detail.applied ? 'applied' : 'pending',
+          appliedAt: detail.applied ? Date.now() : null,
+          candidates: current.candidates.map((candidate) => {
+            if (!detail.applied && candidate.status === 'applied') return { ...candidate, status: 'accepted' }
+            if (detail.applied && candidate.status === 'accepted') return { ...candidate, status: 'applied' }
+            return candidate
+          }),
+        }
+      })
+    }
+    window.addEventListener('mindtree:deposit-history', reflectDepositHistory)
+    return () => window.removeEventListener('mindtree:deposit-history', reflectDepositHistory)
+  }, [])
 
   // 本地开发时可由 Vite 代理读取项目 .env 中的密钥；生产环境仍需用户自行配置 Key。
   const isConfigured = Boolean(settings.endpoint.trim() && settings.model.trim() && (settings.apiKey.trim() || import.meta.env.DEV))
@@ -124,6 +145,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
       const appliedFingerprints = intent === 'deposit' ? await listAppliedDepositFingerprints(document.id) : []
       const depositContext = intent === 'deposit' ? buildDepositContext(document, target.id, appliedFingerprints) : null
+      if (depositContext) setDepositDebugContext(depositContext)
       const instruction = intent === 'branch'
         ? '你是 MindTree 的思维导图助手。根据用户要求扩展当前节点。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"topic":"分支主题","children":[{"topic":"子主题","children":[]}]}; 最多 6 层、60 个节点。'
         : intent === 'plan'
@@ -185,7 +207,8 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
         }
         await saveDepositBatch(batch)
         setDepositBatch(batch)
-        setNotice(batch.candidates.length ? `已识别 ${batch.candidates.length} 条候选，请确认后再写入。` : '未发现需要沉淀的高价值内容。')
+        const rangeNotice = depositContext.source.truncated ? `实际分析前 ${depositContext.source.nodes.length}/${depositContext.source.totalNodeCount} 个节点。` : ''
+        setNotice(batch.candidates.length ? `已识别 ${batch.candidates.length} 条候选，请确认后再写入。${rangeNotice}` : `未发现需要沉淀的高价值内容。${rangeNotice}`)
       } else if (intent === 'reorganize') {
         const plan = parseMapReorganization(content, document)
         setReorganization({ plan, sourceUpdatedAt: document.updatedAt })
@@ -239,6 +262,17 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
     })
   }
 
+  const updateDepositCandidates = (candidateIds: string[], status: 'pending' | 'accepted') => {
+    const selected = new Set(candidateIds)
+    setDepositPreview(null)
+    setDepositBatch((current) => {
+      if (!current) return current
+      const next = { ...current, updatedAt: Date.now(), candidates: current.candidates.map((candidate) => selected.has(candidate.id) ? { ...candidate, status } : candidate) }
+      void saveDepositBatch(next)
+      return next
+    })
+  }
+
   const previewDeposit = () => {
     if (!depositBatch) return
     try {
@@ -258,7 +292,7 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       return
     }
     const accepted = depositBatch.candidates.filter((candidate) => depositPreview.includedCandidateIds.includes(candidate.id))
-    const applied = !depositPreview.operations.length || dispatch({ type: 'APPLY_DEPOSIT_OPERATIONS', operations: depositPreview.operations })
+    const applied = !depositPreview.operations.length || dispatch({ type: 'APPLY_DEPOSIT_OPERATIONS', batchId: depositBatch.id, operations: depositPreview.operations })
     if (!applied) {
       setNotice('写入失败：目标节点可能已经变化，请重新分析。')
       return
@@ -306,7 +340,8 @@ export function AiAssistant({ document, targetNodeId }: { document: MindMapDocum
       </form>
       {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
       {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
-      {depositBatch?.status === 'pending' && <DepositInbox batch={depositBatch} document={document} onChange={updateDepositCandidate} onPreview={previewDeposit} onDismiss={() => { setDepositBatch(null); setDepositPreview(null); setNotice('已保留本批候选，可稍后继续处理。') }} />}
+      {import.meta.env.DEV && depositDebugContext && <details className="deposit-debug"><summary>查看本次发送范围</summary><pre>{JSON.stringify(depositDebugContext, null, 2)}</pre></details>}
+      {depositBatch?.status === 'pending' && <DepositInbox batch={depositBatch} document={document} onChange={updateDepositCandidate} onChangeAll={updateDepositCandidates} onPreview={previewDeposit} onDismiss={() => { setDepositBatch(null); setDepositPreview(null); setNotice('已保留本批候选，可稍后继续处理。') }} />}
       {depositPreview && <div className="ai-deposit-preview"><div className="ai-branch-preview__heading"><strong>待写入沉淀</strong><span>{depositPreview.operations.length} 项变化</span></div><ul>{depositPreview.operations.map((operation, index) => <li key={`${operation.type}-${index}`}>{previewDepositOperation(document, operation)}</li>)}</ul><div className="ai-branch-preview__actions"><button type="button" onClick={() => { void confirmDeposit() }}>确认写入</button><button type="button" onClick={() => setDepositPreview(null)}>返回修改</button></div></div>}
       {response && <div className="ai-response" aria-live="polite">{response}</div>}
     </section>
