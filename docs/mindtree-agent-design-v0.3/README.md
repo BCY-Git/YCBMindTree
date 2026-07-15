@@ -40,6 +40,7 @@ MindTree 是一个面向个人思考与工作的本地优先树形工作空间�
 | `07-implementation-roadmap.md` | 结合 0.2.2 代码的分阶段实施方案 |
 | `08-acceptance-and-testing.md` | 验收、测试样本、质量指标与风险 |
 | `09-agent-handoff.md` | 编码 Agent 的执行规则、顺序和审查点 |
+| `10-implementation-status.md` | 0.3 实际完成范围、验证证据与后续边界 |
 
 ## 关键产品决策
 
@@ -67,4 +68,3 @@ README
 ```
 
 涉及 UI 时补读 `04-interaction-design.md`；涉及上下文和 AI 请求时补读 `06-agent-architecture.md`。
-
