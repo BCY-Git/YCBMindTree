@@ -28,7 +28,7 @@ type EditorState = {
   selectedNodeIds: string[]
   selectedRelationId: string | null
   focusRequestNodeId: string | null
-  relationCreationRequestSourceId: string | null
+  relationCreationRequestSourceIds: string[]
   editingNodeId: string | null
   clipboard: MindNodeClipboard | null
   hydrated: boolean
@@ -41,7 +41,7 @@ type EditorState = {
   selectRelation: (id: string | null) => void
   requestNodeFocus: (id: string) => void
   clearNodeFocusRequest: () => void
-  requestRelatedTopic: (sourceId: string) => void
+  requestRelatedTopic: (sourceIds: string[]) => void
   clearRelationCreationRequest: () => void
   editNode: (id: string | null) => void
   hydrate: (document: MindMapDocument) => void
@@ -87,7 +87,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedNodeIds: [initialDocument.rootId],
   selectedRelationId: null,
   focusRequestNodeId: null,
-  relationCreationRequestSourceId: null,
+  relationCreationRequestSourceIds: [],
   editingNodeId: null,
   clipboard: null,
   hydrated: false,
@@ -162,8 +162,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectRelation: (id) => set({ selectedRelationId: id, selectedNodeId: null, selectedNodeIds: [], editingNodeId: null }),
   requestNodeFocus: (id) => set({ selectedNodeId: id, selectedNodeIds: [id], selectedRelationId: null, editingNodeId: null, focusRequestNodeId: id }),
   clearNodeFocusRequest: () => set({ focusRequestNodeId: null }),
-  requestRelatedTopic: (sourceId) => set({ relationCreationRequestSourceId: sourceId }),
-  clearRelationCreationRequest: () => set({ relationCreationRequestSourceId: null }),
+  requestRelatedTopic: (sourceIds) => set({ relationCreationRequestSourceIds: [...new Set(sourceIds)] }),
+  clearRelationCreationRequest: () => set({ relationCreationRequestSourceIds: [] }),
   // editNode：进入编辑态，同时选中该节点；传 null 则退出编辑态。
   editNode: (id) => set({ editingNodeId: id, selectedNodeId: id, selectedNodeIds: id ? [id] : [], selectedRelationId: null }),
   // copyNode：将节点及子树序列化为剪贴板，不修改文档。

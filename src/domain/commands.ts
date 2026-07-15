@@ -40,8 +40,8 @@ export type MindMapCommand =
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
-  /** 一次创建自由主题与关联线，避免用户得到半完成的“悬空关系”。 */
-  | { type: 'CREATE_RELATED_FREE_TOPIC'; sourceId: string; x: number; y: number; topic?: string; label?: string }
+  /** 一次创建共享自由主题与多条关联线，避免生成多个外观相同但实际独立的目标。 */
+  | { type: 'CREATE_RELATED_FREE_TOPIC'; sourceIds: string[]; x: number; y: number; topic?: string; label?: string }
   | { type: 'RETARGET_RELATION'; relationId: string; targetId: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
   | { type: 'DELETE_RELATION'; relationId: string }
@@ -524,15 +524,16 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       break
     }
     case 'CREATE_RELATED_FREE_TOPIC': {
-      if (!document.nodes[command.sourceId]) throw new Error('关系节点不存在')
+      const sourceIds = [...new Set(command.sourceIds)]
+      if (!sourceIds.length || sourceIds.some((sourceId) => !document.nodes[sourceId])) throw new Error('关系节点不存在')
       const target = createNode(command.topic ?? '新主题', null)
       target.isFreeTopic = true
       target.offsetX = Math.round(command.x)
       target.offsetY = Math.round(command.y)
       document.nodes[target.id] = target
-      const relation = createRelation(command.sourceId, target.id, command.label ?? '关联')
-      document.relations.push(relation)
-      focusRelationId = relation.id
+      const relations = sourceIds.map((sourceId) => createRelation(sourceId, target.id, command.label ?? '关联'))
+      document.relations.push(...relations)
+      focusRelationId = relations.at(-1)?.id
       break
     }
     case 'RETARGET_RELATION': {

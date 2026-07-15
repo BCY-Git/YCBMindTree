@@ -134,16 +134,18 @@ describe('MindTree command executor', () => {
     expect(deleted.nodes).toEqual(document.nodes)
   })
 
-  it('creates a free target and a relation together as one undoable command', () => {
+  it('creates one shared free target for multiple relation sources as one undoable command', () => {
     const document = createInitialDocument()
-    const sourceId = document.nodes[document.rootId].childIds[0]
-    const result = executeCommand(document, { type: 'CREATE_RELATED_FREE_TOPIC', sourceId, x: 720, y: 280 })
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const sourceIds = document.nodes[branchId].childIds
+    const result = executeCommand(document, { type: 'CREATE_RELATED_FREE_TOPIC', sourceIds, x: 720, y: 280 })
     const targetId = result.document.relations[0].targetId
 
-    expect(result.document.relations).toHaveLength(1)
-    expect(result.focusRelationId).toBe(result.document.relations[0].id)
+    expect(result.document.relations).toHaveLength(sourceIds.length)
+    expect(result.document.relations.map((relation) => relation.sourceId)).toEqual(sourceIds)
+    expect(new Set(result.document.relations.map((relation) => relation.targetId))).toEqual(new Set([targetId]))
+    expect(result.focusRelationId).toBe(result.document.relations.at(-1)?.id)
     expect(result.document.nodes[targetId]).toMatchObject({ isFreeTopic: true, parentId: null, topic: '新主题', offsetX: 720, offsetY: 280 })
-    expect(result.document.relations[0]).toMatchObject({ sourceId, targetId, label: '关联' })
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
@@ -151,7 +153,7 @@ describe('MindTree command executor', () => {
     const document = createInitialDocument()
     const sourceId = document.nodes[document.rootId].childIds[0]
     const existingTargetId = document.nodes[sourceId].childIds[0]
-    const created = executeCommand(document, { type: 'CREATE_RELATED_FREE_TOPIC', sourceId, x: 720, y: 280 })
+    const created = executeCommand(document, { type: 'CREATE_RELATED_FREE_TOPIC', sourceIds: [sourceId], x: 720, y: 280 })
     const relation = created.document.relations[0]
     const retargeted = executeCommand(created.document, { type: 'RETARGET_RELATION', relationId: relation.id, targetId: existingTargetId })
 

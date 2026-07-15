@@ -87,3 +87,14 @@ describe('MindNode tree branch anchor', () => {
     expect(sourceHandle.style.transform).toBe('translate(-50%, -50%)')
   })
 })
+
+describe('MindNode relation handles', () => {
+  it('allows relation targets to receive a dragged relation endpoint', () => {
+    const { container } = renderNode()
+
+    const targetHandles = container.querySelectorAll('.node-handle--relation.target')
+
+    expect(targetHandles).toHaveLength(2)
+    targetHandles.forEach((handle) => expect(handle.classList.contains('connectable')).toBe(true))
+  })
+})

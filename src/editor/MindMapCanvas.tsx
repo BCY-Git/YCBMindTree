@@ -24,6 +24,7 @@ import {
   applyNodeChanges,
   MarkerType,
   type Edge,
+  type Connection,
   type Node,
   type NodePositionChange,
   type OnNodeDrag,
@@ -108,7 +109,7 @@ export function MindMapCanvas() {
   const selectRelation = useEditorStore((state) => state.selectRelation)
   const editNode = useEditorStore((state) => state.editNode)
   const clearNodeFocusRequest = useEditorStore((state) => state.clearNodeFocusRequest)
-  const relationCreationRequestSourceId = useEditorStore((state) => state.relationCreationRequestSourceId)
+  const relationCreationRequestSourceIds = useEditorStore((state) => state.relationCreationRequestSourceIds)
   const clearRelationCreationRequest = useEditorStore((state) => state.clearRelationCreationRequest)
   const dispatch = useEditorStore((state) => state.dispatch)
   const copyNode = useEditorStore((state) => state.copyNode)
@@ -247,6 +248,7 @@ export function MindMapCanvas() {
             sourceHandle: anchors?.sourceHandle,
             targetHandle: anchors?.targetHandle,
             type: 'default',
+            reconnectable: false,
             style: {
               stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : (theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch),
               strokeWidth: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? 3.4 : 2,
@@ -268,6 +270,7 @@ export function MindMapCanvas() {
         sourceHandle: targetIsRight ? 'relation-source-right' : 'relation-source-left',
         targetHandle: targetIsRight ? 'relation-target-left' : 'relation-target-right',
         type: 'default',
+        reconnectable: 'target',
         label: relation.label,
         className: `mind-relation-edge ${isSelected ? 'is-selected' : ''}`,
         selectable: true,
@@ -346,21 +349,31 @@ export function MindMapCanvas() {
   // 顶部“建立联系”只发出意图；画布掌握布局坐标，因而在源节点右侧创建默认自由主题。
   // 该命令原子地写入主题和关系线，撤销时不会留下半截关系或孤立的历史状态。
   useEffect(() => {
-    if (!relationCreationRequestSourceId) return
-    const source = baseNodes.find((node) => node.id === relationCreationRequestSourceId)
-    if (!source) {
+    if (!relationCreationRequestSourceIds.length) return
+    const sources = relationCreationRequestSourceIds
+      .map((sourceId) => baseNodes.find((node) => node.id === sourceId))
+      .filter((node): node is Node<MindNodeData> => Boolean(node))
+    if (sources.length !== relationCreationRequestSourceIds.length) {
       clearRelationCreationRequest()
       return
     }
-    const width = source.measured?.width ?? source.width ?? 180
+    const right = Math.max(...sources.map((source) => source.position.x + (source.measured?.width ?? source.width ?? 180)))
+    const centerYs = sources.map((source) => source.position.y + (source.measured?.height ?? source.height ?? 44) / 2)
+    const centerY = (Math.min(...centerYs) + Math.max(...centerYs)) / 2
     dispatch({
       type: 'CREATE_RELATED_FREE_TOPIC',
-      sourceId: relationCreationRequestSourceId,
-      x: source.position.x + width + 220,
-      y: source.position.y,
+      sourceIds: relationCreationRequestSourceIds,
+      x: right + 220,
+      y: centerY - 22,
     })
     clearRelationCreationRequest()
-  }, [baseNodes, clearRelationCreationRequest, dispatch, relationCreationRequestSourceId])
+  }, [baseNodes, clearRelationCreationRequest, dispatch, relationCreationRequestSourceIds])
+
+  const onReconnect = useCallback((edge: Edge, connection: Connection) => {
+    const relation = document.relations.find((item) => item.id === edge.id)
+    if (!relation || !connection.target || connection.target === relation.sourceId) return
+    dispatch({ type: 'RETARGET_RELATION', relationId: relation.id, targetId: connection.target })
+  }, [dispatch, document.relations])
 
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     if (relationSourceId) {
@@ -715,6 +728,7 @@ export function MindMapCanvas() {
           const label = window.prompt('关系名称', relation.label)
           if (label !== null) dispatch({ type: 'UPDATE_RELATION_LABEL', relationId: relation.id, label })
         }}
+        onReconnect={onReconnect}
         onEdgeContextMenu={(event, edge) => {
           event.preventDefault()
           selectRelation(edge.id)

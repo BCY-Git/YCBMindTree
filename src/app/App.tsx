@@ -80,6 +80,7 @@ function isBackgroundBackup(document: MindMapDocument) {
 export function App() {
   const document = useEditorStore((state) => state.document)
   const selectedNodeId = useEditorStore((state) => state.selectedNodeId)
+  const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedRelationId = useEditorStore((state) => state.selectedRelationId)
   const past = useEditorStore((state) => state.past)
   const future = useEditorStore((state) => state.future)
@@ -891,7 +892,12 @@ export function App() {
           <div className="floating-toolbar__cluster">
             <button className="floating-toolbar__button" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建子节点' : '新建子节点 (Tab)'}><Icon>＋</Icon><span>子节点</span></button>
             <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon>↳</Icon><span>同级</span></button>
-            <button className="floating-toolbar__button" disabled={!selectedNode} onClick={() => selectedNode && requestRelatedTopic(selectedNode.id)} title={selectedNode ? '建立一条指向新主题的关系线' : '先选中一个节点'}><Icon>⌁</Icon><span>建立联系</span></button>
+            <button
+              className="floating-toolbar__button"
+              disabled={!selectedNodeIds.length}
+              onClick={() => requestRelatedTopic(selectedNodeIds)}
+              title={selectedNodeIds.length > 1 ? `将 ${selectedNodeIds.length} 个节点关联到同一个新主题` : selectedNode ? '建立一条指向新主题的关系线' : '先选中一个节点'}
+            ><Icon>⌁</Icon><span>{selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}</span></button>
             <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon><span>排列</span></button>
           </div>
         </nav>
@@ -995,7 +1001,7 @@ export function App() {
               <select id="relation-target" className="relation-target-select" value={selectedRelation.targetId} onChange={(event) => dispatch({ type: 'RETARGET_RELATION', relationId: selectedRelation.id, targetId: event.target.value })}>
                 {Object.values(document.nodes).filter((node) => node.id !== selectedRelation.sourceId).map((node) => <option key={node.id} value={node.id}>{node.topic || '未命名节点'}{node.isFreeTopic ? ' · 自由主题' : ''}</option>)}
               </select>
-              <small className="relation-target-hint">可改为导图中任一已有节点；默认目标为新建自由主题。</small>
+              <small className="relation-target-hint">可在此选择已有节点，也可选中关系线后直接拖动箭头端点。</small>
               <button className="danger-button" onClick={() => dispatch({ type: 'DELETE_RELATION', relationId: selectedRelation.id })}>删除此关系</button>
             </> : selectedNode ? <>
               {inspectorTab === 'content' && <section className="inspector-pane"><label className="field-label" htmlFor="topic">主题</label><textarea id="topic" value={selectedNode.topic} rows={3} onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: selectedNode.id, topic: event.target.value })} /><label className="field-label" htmlFor="node-note">备注</label><GhostNoteEditor value={selectedNode.note} document={document} nodeId={selectedNode.id} onChange={(note) => dispatch({ type: 'UPDATE_NODE_NOTE', nodeId: selectedNode.id, note })} /></section>}
@@ -1019,7 +1025,7 @@ export function App() {
         {syncStatus && <span>{syncStatus}</span>}
         {localSaveStatus && <span>{localSaveStatus}</span>}
         {clipboard && <span>已复制「{clipboard.topic}」</span>}
-        <span className="status-hint">拖动根节点移动整图 · 右键“创建关系”后选择目标节点 · Shift+拖动调整结构 · ⌘K 命令</span>
+        <span className="status-hint">多选节点可建立共同联系 · 拖动关系箭头可更换目标 · Shift+拖动调整结构 · ⌘K 命令</span>
       </footer>
       <SyncDialog
         open={syncOpen}

@@ -181,8 +181,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       />}
       <Handle id="target-left" type="target" position={Position.Left} className="node-handle node-handle--target" style={{ top: '50%' }} isConnectable={false} />
       <Handle id="target-right" type="target" position={Position.Right} className="node-handle node-handle--target" style={{ top: '50%' }} isConnectable={false} />
-      <Handle id="relation-target-left" type="target" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
-      <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
+      <Handle id="relation-target-left" type="target" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable />
+      <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable />
       {node.hasChildren && (
         <button
           className="collapse-toggle"
