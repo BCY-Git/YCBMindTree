@@ -46,6 +46,7 @@ import type { MindNode as DomainMindNode } from '../domain/document.types'
 import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { saveNodeAttachment } from '../persistence/database'
+import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 
 const nodeTypes = { mindNode: MindNode }
 // 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
@@ -124,7 +125,8 @@ export function MindMapCanvas() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchFocusNodeId, setSearchFocusNodeId] = useState<string | null>(null)
-  const [relationSourceId, setRelationSourceId] = useState<string | null>(null)
+  const [relationSourceIds, setRelationSourceIds] = useState<string[]>([])
+  const [relationPointer, setRelationPointer] = useState<{ x: number; y: number } | null>(null)
   const [freeTopicAttachmentParentId, setFreeTopicAttachmentParentId] = useState<string | null>(null)
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
@@ -229,7 +231,7 @@ export function MindMapCanvas() {
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
-          isRelationSource: relationSourceId === item.id,
+          isRelationSource: relationSourceIds.includes(item.id),
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
         },
@@ -303,7 +305,7 @@ export function MindMapCanvas() {
       return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
-  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceId, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme])
+  }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme])
 
   useEffect(() => {
     setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId))
@@ -346,28 +348,22 @@ export function MindMapCanvas() {
     setSearchFocusNodeId(null)
   }, [baseNodes, flowInstance, searchFocusNodeId])
 
-  // 顶部“建立联系”只发出意图；画布掌握布局坐标，因而在源节点右侧创建默认自由主题。
-  // 该命令原子地写入主题和关系线，撤销时不会留下半截关系或孤立的历史状态。
+  const cancelRelationCreation = useCallback(() => {
+    setRelationSourceIds([])
+    setRelationPointer(null)
+  }, [])
+
+  // 顶部、右键菜单和命令面板只发出“开始关系”意图。
+  // 此时不写入任何节点；等待用户单击已有节点或双击画布后再原子提交。
   useEffect(() => {
     if (!relationCreationRequestSourceIds.length) return
-    const sources = relationCreationRequestSourceIds
-      .map((sourceId) => baseNodes.find((node) => node.id === sourceId))
-      .filter((node): node is Node<MindNodeData> => Boolean(node))
-    if (sources.length !== relationCreationRequestSourceIds.length) {
-      clearRelationCreationRequest()
-      return
+    const sourceIds = [...new Set(relationCreationRequestSourceIds)].filter((sourceId) => Boolean(document.nodes[sourceId]))
+    if (sourceIds.length) {
+      setRelationSourceIds(sourceIds)
+      setRelationPointer(null)
     }
-    const right = Math.max(...sources.map((source) => source.position.x + (source.measured?.width ?? source.width ?? 180)))
-    const centerYs = sources.map((source) => source.position.y + (source.measured?.height ?? source.height ?? 44) / 2)
-    const centerY = (Math.min(...centerYs) + Math.max(...centerYs)) / 2
-    dispatch({
-      type: 'CREATE_RELATED_FREE_TOPIC',
-      sourceIds: relationCreationRequestSourceIds,
-      x: right + 220,
-      y: centerY - 22,
-    })
     clearRelationCreationRequest()
-  }, [baseNodes, clearRelationCreationRequest, dispatch, relationCreationRequestSourceIds])
+  }, [clearRelationCreationRequest, document.nodes, relationCreationRequestSourceIds])
 
   const onReconnect = useCallback((edge: Edge, connection: Connection) => {
     const relation = document.relations.find((item) => item.id === edge.id)
@@ -376,12 +372,21 @@ export function MindMapCanvas() {
   }, [dispatch, document.relations])
 
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
-    if (relationSourceId) {
-      if (node.id !== relationSourceId && dispatch({ type: 'CREATE_RELATION', sourceId: relationSourceId, targetId: node.id })) setRelationSourceId(null)
+    if (relationSourceIds.length) {
+      const sourceIds = relationSourceIds.filter((sourceId) => sourceId !== node.id)
+      if (sourceIds.length && dispatch({ type: 'CREATE_RELATIONS', sourceIds, targetId: node.id })) cancelRelationCreation()
       return
     }
     selectNode(node.id, event.metaKey || event.ctrlKey)
-  }, [dispatch, relationSourceId, selectNode])
+  }, [cancelRelationCreation, dispatch, relationSourceIds, selectNode])
+
+  const relationDraftPaths = useMemo(() => {
+    if (!relationPointer) return []
+    return relationSourceIds.flatMap((sourceId) => {
+      const source = basePositionsById.get(sourceId)
+      return source ? [{ sourceId, ...relationDraftGeometry(source, relationPointer) }] : []
+    })
+  }, [basePositionsById, relationPointer, relationSourceIds])
   const commitSelectionBox = useCallback(() => {
     const nextIds = flowInstance?.getNodes().filter((node) => node.selected).map((node) => node.id) ?? []
     const currentIds = useEditorStore.getState().selectedNodeIds
@@ -597,7 +602,7 @@ export function MindMapCanvas() {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       const meta = event.metaKey || event.ctrlKey
-      if (relationSourceId && event.key === 'Escape') { event.preventDefault(); setRelationSourceId(null); return }
+      if (relationSourceIds.length && event.key === 'Escape') { event.preventDefault(); cancelRelationCreation(); return }
       if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandPaletteOpen(true); return }
       if (meta && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); return }
       if (target.closest('input, textarea')) return
@@ -652,7 +657,7 @@ export function MindMapCanvas() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, pasteIntoNode, redo, relationSourceId, selectNode, undo])
+  }, [cancelRelationCreation, commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, pasteIntoNode, redo, relationSourceIds.length, selectNode, undo])
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -693,6 +698,7 @@ export function MindMapCanvas() {
     }} onPointerMoveCapture={(event) => {
       const start = rightPointerRef.current
       if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) start.moved = true
+      if (relationSourceIds.length && flowInstance) setRelationPointer(flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY }))
     }} onPointerUpCapture={(event) => {
       const start = rightPointerRef.current
       if (event.button !== 2 || !start) return
@@ -703,7 +709,16 @@ export function MindMapCanvas() {
       rightPointerRef.current = null
     }} onDoubleClickCapture={(event) => {
       const target = event.target as HTMLElement
-      if (relationSourceId || !flowInstance || target.closest('.react-flow__node, .react-flow__controls')) return
+      // 只处理真正的画布空白区；节点、关系线、摘要等元素的双击仍交给它们自身。
+      if (!flowInstance || !target.classList.contains('react-flow__pane')) return
+      if (relationSourceIds.length) {
+        event.preventDefault()
+        event.stopPropagation()
+        const pointer = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        const position = relationTopicPositionAt(pointer)
+        if (dispatch({ type: 'CREATE_RELATED_FREE_TOPIC', sourceIds: relationSourceIds, ...position })) cancelRelationCreation()
+        return
+      }
       dispatch({ type: 'ADD_CHILD', parentId: document.rootId })
     }}>
       <ReactFlow
@@ -734,7 +749,7 @@ export function MindMapCanvas() {
           selectRelation(edge.id)
           setContextMenu({ position: { x: event.clientX, y: event.clientY }, nodeId: null, relationId: edge.id })
         }}
-        onPaneClick={() => { setRelationSourceId(null); selectNode(null); closeContextMenu() }}
+        onPaneClick={() => { if (!relationSourceIds.length) selectNode(null); closeContextMenu() }}
         selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}
         selectionMode={SelectionMode.Partial}
@@ -755,6 +770,17 @@ export function MindMapCanvas() {
       >
         <Background gap={20} size={1} color={theme.grid} />
         <ViewportPortal>
+          {relationDraftPaths.length > 0 && relationPointer && (
+            <svg className="relation-draft-preview" aria-hidden="true">
+              <defs>
+                <marker id="relation-draft-arrow" viewBox="0 0 8 8" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M 0 0 L 8 4 L 0 8 z" />
+                </marker>
+              </defs>
+              {relationDraftPaths.map((draft) => <path key={draft.sourceId} className="relation-draft-preview__line" d={draft.path} markerEnd="url(#relation-draft-arrow)" />)}
+              <circle className="relation-draft-preview__target" cx={relationPointer.x} cy={relationPointer.y} r={4} />
+            </svg>
+          )}
           {selectionToolbar && <div className="selection-toolbar" style={{ left: selectionToolbar.left, top: selectionToolbar.top }}>
             <strong>已选 {selectionToolbar.count} 项</strong>
             <button disabled={!canCreateBoundary} onClick={() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds })}>边界</button>
@@ -797,7 +823,7 @@ export function MindMapCanvas() {
         </ViewportPortal>
         <Controls showInteractive={false}><ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
       </ReactFlow>
-      {relationSourceId && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>请选择另一个节点作为目标 · Esc 取消</span></div>}
+      {relationSourceIds.length > 0 && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>单击已有节点，或双击空白处创建新主题 · Esc 取消</span></div>}
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : `松开即可插入此分支的第 ${dropIntent.index + 1} 个位置`}</div>}
       {pasteAttachmentStatus && <div className="paste-attachment-hint" role="status">{pasteAttachmentStatus}</div>}
@@ -821,7 +847,7 @@ export function MindMapCanvas() {
             onAttachToRoot={() => runContextAction(() => dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: targetNodeId, parentId: document.rootId }))}
             onEdit={() => runContextAction(() => editNode(targetNodeId))}
             onToggleMark={(mark) => runContextAction(() => dispatch({ type: 'TOGGLE_NODE_MARK', nodeId: targetNodeId, mark }))}
-            onCreateRelation={() => runContextAction(() => { selectNode(targetNodeId); setRelationSourceId(targetNodeId) })}
+            onCreateRelation={() => runContextAction(() => { selectNode(targetNodeId); setRelationSourceIds([targetNodeId]); setRelationPointer(null) })}
             onCreateBoundary={() => runContextAction(() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }))}
             onCreateSummary={() => runContextAction(() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds }))}
             onToggleCollapse={() => runContextAction(() => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: targetNodeId }))}
@@ -858,7 +884,7 @@ export function MindMapCanvas() {
               { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId || selected.isFreeTopic, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
               ...(selected.isFreeTopic ? [{ label: '附加到主节点', detail: '转为中心主题下的一级分支，并自动排列', shortcut: '—', run: () => dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: selectedId, parentId: document.rootId }) }] : []),
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
-              { label: '创建关系', detail: '选择另一个节点建立横向关联', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceId(selectedId) } },
+              { label: '创建关系', detail: '连线跟随鼠标，单击已有节点或双击空白处', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceIds([selectedId]); setRelationPointer(null) } },
               { label: '为所选节点创建边界', detail: '圈定两个或以上同级节点，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }) },
               { label: '为所选节点创建摘要', detail: '为同级分支写下一个结论，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds }) },
               { label: selected.collapsed ? '展开当前分支' : '折叠当前分支', detail: '收起或展开子节点', shortcut: 'Space', disabled: !selected.childIds.length, run: () => dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: selectedId }) },

@@ -40,6 +40,7 @@ export type MindMapCommand =
   | { type: 'DELETE_NODE'; nodeId: string }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
+  | { type: 'CREATE_RELATIONS'; sourceIds: string[]; targetId: string; label?: string }
   /** 一次创建共享自由主题与多条关联线，避免生成多个外观相同但实际独立的目标。 */
   | { type: 'CREATE_RELATED_FREE_TOPIC'; sourceIds: string[]; x: number; y: number; topic?: string; label?: string }
   | { type: 'RETARGET_RELATION'; relationId: string; targetId: string }
@@ -523,6 +524,19 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       focusRelationId = relation.id
       break
     }
+    case 'CREATE_RELATIONS': {
+      const sourceIds = [...new Set(command.sourceIds)]
+      if (!sourceIds.length || !document.nodes[command.targetId] || sourceIds.some((sourceId) => !document.nodes[sourceId])) throw new Error('关系节点不存在')
+      sourceIds.forEach((sourceId) => {
+        if (sourceId === command.targetId) throw new Error('关系不能连接节点自身')
+        if (document.relations.some((relation) => (relation.sourceId === sourceId && relation.targetId === command.targetId)
+          || (relation.sourceId === command.targetId && relation.targetId === sourceId))) throw new Error('节点之间已存在关系')
+      })
+      const relations = sourceIds.map((sourceId) => createRelation(sourceId, command.targetId, command.label ?? '关联'))
+      document.relations.push(...relations)
+      focusRelationId = relations.at(-1)?.id
+      break
+    }
     case 'CREATE_RELATED_FREE_TOPIC': {
       const sourceIds = [...new Set(command.sourceIds)]
       if (!sourceIds.length || sourceIds.some((sourceId) => !document.nodes[sourceId])) throw new Error('关系节点不存在')
@@ -533,7 +547,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       document.nodes[target.id] = target
       const relations = sourceIds.map((sourceId) => createRelation(sourceId, target.id, command.label ?? '关联'))
       document.relations.push(...relations)
-      focusRelationId = relations.at(-1)?.id
+      focusNodeId = target.id
       break
     }
     case 'RETARGET_RELATION': {

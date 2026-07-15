@@ -896,7 +896,7 @@ export function App() {
               className="floating-toolbar__button"
               disabled={!selectedNodeIds.length}
               onClick={() => requestRelatedTopic(selectedNodeIds)}
-              title={selectedNodeIds.length > 1 ? `将 ${selectedNodeIds.length} 个节点关联到同一个新主题` : selectedNode ? '建立一条指向新主题的关系线' : '先选中一个节点'}
+              title={selectedNodeIds.length > 1 ? `${selectedNodeIds.length} 个节点的关系线将跟随鼠标` : selectedNode ? '关系线跟随鼠标；单击已有节点或双击空白处' : '先选中一个节点'}
             ><Icon>⌁</Icon><span>{selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}</span></button>
             <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title="自动排列并保留当前自由排布"><Icon>↺</Icon><span>排列</span></button>
           </div>
@@ -1025,7 +1025,7 @@ export function App() {
         {syncStatus && <span>{syncStatus}</span>}
         {localSaveStatus && <span>{localSaveStatus}</span>}
         {clipboard && <span>已复制「{clipboard.topic}」</span>}
-        <span className="status-hint">多选节点可建立共同联系 · 拖动关系箭头可更换目标 · Shift+拖动调整结构 · ⌘K 命令</span>
+        <span className="status-hint">建立联系后移动鼠标 · 单击已有节点或双击空白处 · 拖动关系箭头可换目标 · ⌘K 命令</span>
       </footer>
       <SyncDialog
         open={syncOpen}

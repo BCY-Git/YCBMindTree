@@ -107,6 +107,24 @@ describe('editor history', () => {
     expect(useEditorStore.getState().document.nodes[childId]).toBeDefined()
   })
 
+  it('creates and edits a relation topic as one undoable action', () => {
+    const { document, dispatch, undo } = useEditorStore.getState()
+    const sourceId = document.nodes[document.rootId].childIds[0]
+
+    dispatch({ type: 'CREATE_RELATED_FREE_TOPIC', sourceIds: [sourceId], x: 360, y: 240 })
+
+    const created = useEditorStore.getState()
+    const targetId = created.selectedNodeId!
+    expect(created.document.nodes[targetId]).toMatchObject({ isFreeTopic: true, offsetX: 360, offsetY: 240 })
+    expect(created.document.relations).toContainEqual(expect.objectContaining({ sourceId, targetId }))
+    expect(created.editingNodeId).toBe(targetId)
+    expect(created.past).toHaveLength(1)
+
+    undo()
+    expect(useEditorStore.getState().document.nodes[targetId]).toBeUndefined()
+    expect(useEditorStore.getState().document.relations).toHaveLength(0)
+  })
+
   it('announces deposit batch state when its atomic write is undone and redone', () => {
     const events: Array<{ batchId: string; applied: boolean }> = []
     const listener = (event: Event) => events.push((event as CustomEvent<{ batchId: string; applied: boolean }>).detail)

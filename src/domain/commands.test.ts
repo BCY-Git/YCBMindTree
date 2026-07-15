@@ -144,8 +144,21 @@ describe('MindTree command executor', () => {
     expect(result.document.relations).toHaveLength(sourceIds.length)
     expect(result.document.relations.map((relation) => relation.sourceId)).toEqual(sourceIds)
     expect(new Set(result.document.relations.map((relation) => relation.targetId))).toEqual(new Set([targetId]))
-    expect(result.focusRelationId).toBe(result.document.relations.at(-1)?.id)
+    expect(result.focusNodeId).toBe(targetId)
     expect(result.document.nodes[targetId]).toMatchObject({ isFreeTopic: true, parentId: null, topic: '新主题', offsetX: 720, offsetY: 280 })
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
+  it('connects multiple sources to one existing target in a single command', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const sourceIds = document.nodes[branchId].childIds
+
+    const result = executeCommand(document, { type: 'CREATE_RELATIONS', sourceIds, targetId: document.rootId })
+
+    expect(result.document.relations).toHaveLength(sourceIds.length)
+    expect(result.document.relations.map((relation) => relation.targetId)).toEqual(sourceIds.map(() => document.rootId))
+    expect(result.focusRelationId).toBe(result.document.relations.at(-1)?.id)
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 

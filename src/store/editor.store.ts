@@ -67,7 +67,7 @@ function historyMergeKey(command: MindMapCommand): string | null {
 }
 
 function shouldEditFocusedNode(command: MindMapCommand) {
-  return command.type === 'ADD_CHILD' || command.type === 'ADD_SIBLING' || command.type === 'ADD_FREE_TOPIC' || command.type === 'PASTE_SUBTREE'
+  return command.type === 'ADD_CHILD' || command.type === 'ADD_SIBLING' || command.type === 'ADD_FREE_TOPIC' || command.type === 'CREATE_RELATED_FREE_TOPIC' || command.type === 'PASTE_SUBTREE'
 }
 
 const historyMergeWindowMs = 1_000
