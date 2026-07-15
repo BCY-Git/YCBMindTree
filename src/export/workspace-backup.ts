@@ -7,6 +7,8 @@ import type { StoredAttachment } from '../persistence/database'
 import { isTauriRuntime } from '../platform/tauri'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 import { depositBatchSchema, depositProvenanceSchema } from '../ai/deposit/deposit-persistence-schema'
+import type { WorkflowSession } from '../ai/workflow/workflow-types'
+import { workflowSessionSchema } from '../ai/workflow/workflow-schema'
 
 export type WorkspaceCategory = { id: string; name: string }
 export type WorkspaceTag = { id: string; name: string; color: string }
@@ -17,6 +19,7 @@ export type WorkspaceBackup = {
   attachments: StoredAttachment[]
   depositBatches: DepositBatch[]
   depositProvenance: DepositProvenance[]
+  workflowSessions: WorkflowSession[]
   categories: WorkspaceCategory[]
   tags: WorkspaceTag[]
 }
@@ -35,7 +38,7 @@ export type WorkspaceRestorePlan = WorkspaceBackup & {
 type AttachmentManifest = Omit<StoredAttachment, 'blob'> & { path: string }
 type BackupManifest = {
   format: 'mindtree-workspace-backup'
-  version: 1 | 2
+  version: 1 | 2 | 3
   exportedAt: string
   documents: MindMapDocument[]
   versions: DocumentVersion[]
@@ -44,6 +47,7 @@ type BackupManifest = {
   tags: WorkspaceTag[]
   depositBatches?: DepositBatch[]
   depositProvenance?: DepositProvenance[]
+  workflowSessions?: WorkflowSession[]
 }
 
 const backupFormat = 'mindtree-workspace-backup' as const
@@ -131,6 +135,15 @@ function parseDepositData(manifest: Partial<BackupManifest>, documents: MindMapD
   return { depositBatches, depositProvenance }
 }
 
+function parseWorkflowSessions(manifest: Partial<BackupManifest>, documents: MindMapDocument[]) {
+  const documentById = new Map(documents.map((document) => [document.id, document]))
+  return (manifest.workflowSessions ?? []).map((value) => {
+    const session = workflowSessionSchema.parse(value)
+    if (!documentById.get(session.documentId)?.nodes[session.focusNodeId]) throw new Error('备份中的协作会话引用无效')
+    return session
+  })
+}
+
 /** 将整个工作区压缩为可迁移的 ZIP；附件保留二进制，不进入 JSON。 */
 export async function createWorkspaceBackup(input: WorkspaceBackup): Promise<Blob> {
   const archive = new JSZip()
@@ -143,7 +156,7 @@ export async function createWorkspaceBackup(input: WorkspaceBackup): Promise<Blo
   assertAttachmentCoverage(input.documents, new Set(attachments.map((attachment) => attachment.id)))
   const manifest: BackupManifest = {
     format: backupFormat,
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     documents: input.documents,
     versions: input.versions,
@@ -152,6 +165,7 @@ export async function createWorkspaceBackup(input: WorkspaceBackup): Promise<Blo
     tags: input.tags,
     depositBatches: input.depositBatches,
     depositProvenance: input.depositProvenance,
+    workflowSessions: input.workflowSessions,
   }
   archive.file('manifest.json', JSON.stringify(manifest))
   return archive.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
@@ -177,7 +191,7 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
     throw new Error('不是受支持的 MindTree 工作区备份')
   }
   const manifest = raw as Partial<BackupManifest>
-  if (manifest.format !== backupFormat || ![1, 2].includes(manifest.version ?? 0) || !Array.isArray(manifest.documents)) {
+  if (manifest.format !== backupFormat || ![1, 2, 3].includes(manifest.version ?? 0) || !Array.isArray(manifest.documents)) {
     throw new Error('不是受支持的 MindTree 工作区备份')
   }
   const documents = manifest.documents.map(parseDocument)
@@ -194,7 +208,7 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
     return { ...attachment, blob: await binary.async('blob') }
   }))
   const deposit = parseDepositData(manifest, documents)
-  return { documents, versions, attachments, categories, tags, ...deposit }
+  return { documents, versions, attachments, categories, tags, ...deposit, workflowSessions: parseWorkflowSessions(manifest, documents) }
 }
 
 function backupFileName() {
@@ -342,5 +356,6 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
     sourceDocumentId: documentIdMap.get(source.sourceDocumentId) ?? source.sourceDocumentId,
     targetDocumentId: source.targetDocumentId ? documentIdMap.get(source.targetDocumentId) ?? source.targetDocumentId : null,
   }))
-  return { documents, versions, attachments, categories, tags, depositBatches, depositProvenance, copiedDocumentCount: copiedIds.size }
+  const workflowSessions = backup.workflowSessions.map((source) => ({ ...structuredClone(source), id: crypto.randomUUID(), documentId: documentIdMap.get(source.documentId) ?? source.documentId }))
+  return { documents, versions, attachments, categories, tags, depositBatches, depositProvenance, workflowSessions, copiedDocumentCount: copiedIds.size }
 }

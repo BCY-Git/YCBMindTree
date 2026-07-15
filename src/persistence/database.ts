@@ -20,6 +20,8 @@ import type { DocumentVersion, DocumentVersionKind } from '../history/version-hi
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 import type { DepositPlan, DepositWorkspaceTransaction } from '../ai/deposit/deposit-types'
 import { executeCommand } from '../domain/commands'
+import type { WorkflowSession } from '../ai/workflow/workflow-types'
+import { workflowSessionSchema } from '../ai/workflow/workflow-schema'
 
 export type SyncMetadata = {
   documentId: string
@@ -41,6 +43,7 @@ class MindTreeDatabase extends Dexie {
   depositBatches!: EntityTable<DepositBatch, 'id'>
   depositProvenance!: EntityTable<DepositProvenance, 'id'>
   depositWorkspaceTransactions!: EntityTable<DepositWorkspaceTransaction, 'id'>
+  workflowSessions!: EntityTable<WorkflowSession, 'id'>
 
   constructor() {
     super('mindtree')
@@ -73,6 +76,11 @@ class MindTreeDatabase extends Dexie {
       depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt',
       depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt',
       depositWorkspaceTransactions: 'id, batchId, status, createdAt',
+    })
+    this.version(7).stores({
+      documents: 'id, title, updatedAt', syncMetadata: 'documentId, syncedAt', documentVersions: 'id, documentId, createdAt, [documentId+createdAt], kind', attachments: 'id, documentId, nodeId, createdAt',
+      depositBatches: 'id, sourceDocumentId, status, createdAt, updatedAt', depositProvenance: 'id, batchId, candidateId, sourceDocumentId, createdAt', depositWorkspaceTransactions: 'id, batchId, status, createdAt',
+      workflowSessions: 'id, documentId, focusNodeId, status, updatedAt',
     })
   }
 }
@@ -115,6 +123,19 @@ export async function listAllDepositBatches(): Promise<DepositBatch[]> {
 
 export async function listAllDepositProvenance(): Promise<DepositProvenance[]> {
   return database.depositProvenance.toArray()
+}
+
+export async function listWorkflowSessions(documentId: string): Promise<WorkflowSession[]> {
+  const sessions = await database.workflowSessions.where('documentId').equals(documentId).toArray()
+  return sessions.map((session) => workflowSessionSchema.parse(session)).sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+export async function listAllWorkflowSessions(): Promise<WorkflowSession[]> {
+  return (await database.workflowSessions.toArray()).map((session) => workflowSessionSchema.parse(session))
+}
+
+export async function saveWorkflowSession(session: WorkflowSession): Promise<void> {
+  await database.workflowSessions.put(workflowSessionSchema.parse(session))
 }
 
 export async function listAppliedDepositFingerprints(sourceDocumentId: string): Promise<string[]> {
@@ -300,13 +321,14 @@ export async function deleteSyncMetadata(documentId: string): Promise<void> {
  * 写入已完成 ID 重映射的工作区恢复计划。
  * 该操作是单个 IndexedDB 事务，失败时不会出现“导图已恢复但附件未恢复”的半完成状态。
  */
-export async function restoreWorkspaceData(data: { documents: MindMapDocument[]; versions: DocumentVersion[]; attachments: StoredAttachment[]; depositBatches: DepositBatch[]; depositProvenance: DepositProvenance[] }): Promise<void> {
-  await database.transaction('rw', [database.documents, database.documentVersions, database.attachments, database.syncMetadata, database.depositBatches, database.depositProvenance], async () => {
+export async function restoreWorkspaceData(data: { documents: MindMapDocument[]; versions: DocumentVersion[]; attachments: StoredAttachment[]; depositBatches: DepositBatch[]; depositProvenance: DepositProvenance[]; workflowSessions: WorkflowSession[] }): Promise<void> {
+  await database.transaction('rw', [database.documents, database.documentVersions, database.attachments, database.syncMetadata, database.depositBatches, database.depositProvenance, database.workflowSessions], async () => {
     await database.documents.bulkPut(data.documents)
     await database.documentVersions.bulkPut(data.versions)
     await database.attachments.bulkPut(data.attachments)
     await database.depositBatches.bulkPut(data.depositBatches)
     await database.depositProvenance.bulkPut(data.depositProvenance)
+    await database.workflowSessions.bulkPut(data.workflowSessions)
     await database.syncMetadata.bulkDelete(data.documents.map((document) => document.id))
   })
 }

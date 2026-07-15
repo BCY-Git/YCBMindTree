@@ -28,6 +28,12 @@ import { buildDepositPlan, previewDepositOperation } from './deposit/deposit-pla
 import type { DepositBatch, DepositCandidate, DepositPlan, DepositProvenance } from './deposit/deposit-types'
 import { applyDepositBatch, applyWorkspaceDepositPlan, listAppliedDepositFingerprints, listDepositBatches, revertWorkspaceDepositBatch, saveDepositBatch } from '../persistence/database'
 import { DepositInbox } from '../deposit/DepositInbox'
+import { depositNudgeReason } from './deposit/deposit-nudge'
+import { WorkflowPanel } from '../workflow/WorkflowPanel'
+import { createWorkflowSession, workflowCheckpointPrompt } from './workflow/workflow-service'
+import { parseWorkflowCheckpoint } from './workflow/workflow-schema'
+import type { WorkflowMode, WorkflowSession } from './workflow/workflow-types'
+import { listWorkflowSessions, saveWorkflowSession } from '../persistence/database'
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>
@@ -80,6 +86,8 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const [depositPreview, setDepositPreview] = useState<DepositPlan | null>(null)
   const [depositDebugContext, setDepositDebugContext] = useState<ReturnType<typeof buildDepositContext> | null>(null)
   const [lastWorkspaceDepositBatchId, setLastWorkspaceDepositBatchId] = useState<string | null>(null)
+  const [workflowSession, setWorkflowSession] = useState<WorkflowSession | null>(null)
+  const [depositNudgeHidden, setDepositNudgeHidden] = useState(false)
 
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
   useEffect(() => {
@@ -88,6 +96,15 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       const pending = batches.find((batch) => batch.status === 'pending' && batch.candidates.some((candidate) => candidate.status === 'pending' || candidate.status === 'accepted'))
       if (active) setDepositBatch(pending ?? null)
     }).catch(() => { if (active) setDepositBatch(null) })
+    return () => { active = false }
+  }, [document.id])
+  useEffect(() => { setDepositNudgeHidden(false) }, [document.id, targetNodeId])
+  useEffect(() => {
+    let active = true
+    void listWorkflowSessions(document.id).then((sessions) => {
+      const session = sessions.find((item) => item.status === 'active' && Boolean(document.nodes[item.focusNodeId])) ?? null
+      if (active) setWorkflowSession(session)
+    }).catch(() => { if (active) setWorkflowSession(null) })
     return () => { active = false }
   }, [document.id])
   useEffect(() => {
@@ -122,13 +139,15 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       setNotice('当前浏览器无法保存配置，请检查本地存储权限。')
     }
   }
+  const depositNudgeDisabled = localStorage.getItem(`mindtree.deposit-nudge.disabled.${document.id}`) === 'true'
+  const depositNudge = !depositNudgeDisabled && !depositNudgeHidden && !depositBatch ? depositNudgeReason(document, targetNodeId) : null
 
   const toggleGhostCompletion = (enabled: boolean) => {
     setGhostCompletionEnabled(enabled)
     saveGhostCompletionEnabled(enabled)
   }
 
-  const requestAssistant = async (intent: 'chat' | 'branch' | 'plan' | 'reorganize' | 'deposit') => {
+  const requestAssistant = async (intent: 'chat' | 'branch' | 'plan' | 'reorganize' | 'deposit' | 'checkpoint') => {
     if (!isConfigured) {
       setSettingsOpen(true)
       setNotice('请先完成并保存连接配置。')
@@ -137,7 +156,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     if (!prompt.trim() && intent === 'chat') return
 
     setIsSending(true)
-    setNotice(intent === 'branch' ? '正在生成可插入的分支…' : intent === 'plan' ? '正在生成可确认的执行计划…' : intent === 'reorganize' ? '正在分析全图结构并生成预览…' : intent === 'deposit' ? '正在分析当前子树中可沉淀的内容…' : '正在请求你的模型…')
+    setNotice(intent === 'branch' ? '正在生成可插入的分支…' : intent === 'plan' ? '正在生成可确认的执行计划…' : intent === 'reorganize' ? '正在分析全图结构并生成预览…' : intent === 'deposit' ? '正在分析当前子树中可沉淀的内容…' : intent === 'checkpoint' ? '正在提取阶段检查点…' : '正在请求你的模型…')
     setResponse('')
     if (intent !== 'chat') setGeneratedBranch(null)
     if (intent !== 'reorganize') setReorganization(null)
@@ -155,19 +174,24 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
             ? '你是 MindTree 的导图结构编辑助手。审查整张导图的层级是否有重复、错位或归属不清的节点。只返回合法 JSON，不要 Markdown 或解释。格式必须为：{"summary":"一句整理说明","moves":[{"nodeId":"现有节点ID","newParentId":"现有父节点ID","index":0}]}. 只能使用输入中已有的 ID；不要移动根节点、自由主题；没有必要调整时返回空 moves 数组；最多 24 项。'
             : intent === 'deposit'
               ? depositSystemPrompt
+              : intent === 'checkpoint'
+                ? workflowCheckpointPrompt
         : '你是 MindTree 的思维导图助手。请用简洁中文协助用户梳理、扩展或优化导图。'
       const requestPrompt = prompt.trim() || (intent === 'reorganize'
         ? '请分析整张导图的层级与归属，仅提出确有必要的结构调整。'
         : intent === 'deposit'
           ? `请分析当前子树「${target.topic}」中真正值得回流、推进或长期保留的信息。`
+          : intent === 'checkpoint'
+            ? `请围绕「${target.topic}」生成当前阶段检查点。`
         : `请围绕「${target.topic}」补全最有价值的分支。`)
+      const workflowContext = workflowSession ? `\n\n当前协作状态：${JSON.stringify(workflowSession)}` : ''
       const result = await requestAiChat(chatUrl(settings.endpoint), {
             model: settings.model.trim(),
             messages: [
               { role: 'system', content: `${instruction}\n当前导图数据如下：` },
               { role: 'user', content: intent === 'deposit'
-                ? `${requestPrompt}\n\n分析上下文：${JSON.stringify(depositContext)}`
-                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document)}` },
+                ? `${requestPrompt}\n\n分析上下文：${JSON.stringify(depositContext)}${workflowContext}`
+                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document)}${workflowContext}` },
             ],
             temperature: 0.7,
           }, settings.apiKey)
@@ -175,7 +199,17 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const content = payload.choices?.[0]?.message?.content?.trim()
       if (!content) throw new Error('模型没有返回可显示的内容。')
-      if (intent === 'deposit') {
+      if (intent === 'checkpoint') {
+        if (!workflowSession) throw new Error('请先开始一次智能协作。')
+        const proposal = parseWorkflowCheckpoint(content)
+        const sourceContext = buildDepositContext(document, target.id, [], [document])
+        const checkpoint = { ...proposal, id: crypto.randomUUID(), sourceNodeIds: sourceContext.source.nodes.map((node) => node.id), createdAt: Date.now() }
+        const unique = (values: string[]) => [...new Set(values)]
+        const next: WorkflowSession = { ...workflowSession, confirmedFacts: unique([...workflowSession.confirmedFacts, ...proposal.confirmed]), rejectedOptions: unique([...workflowSession.rejectedOptions, ...proposal.rejected]), constraints: unique([...workflowSession.constraints, ...proposal.constraints]), openQuestions: proposal.openQuestions, nextActions: proposal.nextActions, checkpoints: [...workflowSession.checkpoints, checkpoint].slice(-100), updatedAt: Date.now() }
+        await saveWorkflowSession(next)
+        setWorkflowSession(next)
+        setNotice('阶段检查点已保存到协作会话；需要长期保留的内容可继续生成沉淀建议。')
+      } else if (intent === 'deposit') {
         if (!depositContext) throw new Error('无法构建沉淀分析范围。')
         const proposal = parseDepositAnalysis(content, {
           sourceNodeIds: depositContext.source.nodes.map((node) => node.id),
@@ -260,6 +294,31 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       void saveDepositBatch(next)
       return next
     })
+  }
+
+  const updateWorkflowSession = (patch: Partial<WorkflowSession>) => {
+    setWorkflowSession((current) => {
+      if (!current) return current
+      const next = { ...current, ...patch, updatedAt: Date.now() }
+      void saveWorkflowSession(next)
+      return next
+    })
+  }
+
+  const startWorkflow = (mode: WorkflowMode) => {
+    const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
+    const session = createWorkflowSession(document.id, target.id, prompt.trim() || target.topic, mode)
+    setWorkflowSession(session)
+    void saveWorkflowSession(session)
+    setNotice(`已围绕「${target.topic}」开始${mode === 'explore' ? '探索' : mode === 'decide' ? '决策' : '交付'}协作。`)
+  }
+
+  const completeWorkflow = () => {
+    if (!workflowSession) return
+    const completed: WorkflowSession = { ...workflowSession, phase: 'completed', status: 'completed', updatedAt: Date.now(), completedAt: Date.now() }
+    void saveWorkflowSession(completed)
+    setWorkflowSession(null)
+    setNotice('本次智能协作已完成并保留检查点。')
   }
 
   const updateDepositCandidates = (candidateIds: string[], status: 'pending' | 'accepted') => {
@@ -363,6 +422,9 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           <p className="ai-assistant__privacy">兼容 OpenAI Chat Completions；本地开发会优先使用项目 .env 中的 Key，普通对话与启用后的幽灵续写都会经本机代理转发。</p>
         </div>
       )}
+
+      <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { void requestAssistant('deposit') }} onComplete={completeWorkflow} />
+      {depositNudge && <div className="deposit-nudge"><p>{depositNudge}</p><div><button type="button" onClick={() => { void requestAssistant('deposit') }}>现在分析</button><button type="button" onClick={() => setDepositNudgeHidden(true)}>稍后</button><button type="button" onClick={() => { localStorage.setItem(`mindtree.deposit-nudge.disabled.${document.id}`, 'true'); setDepositNudgeHidden(true) }}>不再提示</button></div></div>}
 
       <form className="ai-prompt" onSubmit={sendPrompt}>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="例如：帮我找出这张导图缺少的分支" />

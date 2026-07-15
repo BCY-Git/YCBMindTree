@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createInitialDocument } from '../domain/document.factory'
 import { createWorkspaceBackup, parseWorkspaceBackup, prepareWorkspaceRestore } from './workspace-backup'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
+import { createWorkflowSession } from '../ai/workflow/workflow-service'
 
 function readText(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -31,12 +32,14 @@ describe('workspace backup', () => {
       tags: [{ id: 'work', name: '工作', color: '#3f8f78' }],
       depositBatches: [],
       depositProvenance: [],
+      workflowSessions: [createWorkflowSession(document.id, document.rootId, '完成 AFSIM PPT')],
     })
     const restored = await parseWorkspaceBackup(archive)
 
     expect(restored.documents).toEqual([document])
     expect(restored.categories).toEqual([{ id: 'uncategorized', name: '未分类' }])
     expect(restored.tags).toEqual([{ id: 'work', name: '工作', color: '#3f8f78' }])
+    expect(restored.workflowSessions[0]).toMatchObject({ documentId: document.id, goal: '完成 AFSIM PPT' })
   })
 
   it('keeps attachment bytes outside the manifest and restores them with their node', async () => {
@@ -44,7 +47,7 @@ describe('workspace backup', () => {
     const attachment = { id: 'attachment-1', name: 'note.txt', type: 'text/plain', size: 5, createdAt: 1 }
     document.nodes[document.rootId].attachments = [attachment]
     const archive = await createWorkspaceBackup({
-      documents: [document], versions: [], categories: [], tags: [], depositBatches: [], depositProvenance: [],
+      documents: [document], versions: [], categories: [], tags: [], depositBatches: [], depositProvenance: [], workflowSessions: [],
       attachments: [{ ...attachment, documentId: document.id, nodeId: document.rootId, blob: new Blob(['hello'], { type: 'text/plain' }) }],
     })
     const restored = await parseWorkspaceBackup(archive)
@@ -67,6 +70,7 @@ describe('workspace backup', () => {
       categories: [{ id: 'project', name: '项目' }],
       tags: [{ id: 'work', name: '工作', color: '#3f8f78' }],
       ...depositData(document.id, document.rootId),
+      workflowSessions: [createWorkflowSession(document.id, document.rootId, '完成 AFSIM PPT')],
     }
     const restored = prepareWorkspaceRestore(backup, {
       documents: [document], attachmentIds: new Set(['attachment-1']), categories: [], tags: [],
@@ -83,12 +87,13 @@ describe('workspace backup', () => {
     expect(restored.depositBatches[0].id).not.toBe('batch-1')
     expect(restored.depositBatches[0].sourceDocumentId).toBe(copy.id)
     expect(restored.depositProvenance[0]).toMatchObject({ sourceDocumentId: copy.id, targetDocumentId: copy.id, batchId: restored.depositBatches[0].id })
+    expect(restored.workflowSessions[0]).toMatchObject({ documentId: copy.id, focusNodeId: document.rootId, goal: '完成 AFSIM PPT' })
   })
 
   it('round-trips applied deposit batches and provenance', async () => {
     const document = createInitialDocument()
     const deposit = depositData(document.id, document.rootId)
-    const archive = await createWorkspaceBackup({ documents: [document], versions: [], attachments: [], categories: [], tags: [], ...deposit })
+    const archive = await createWorkspaceBackup({ documents: [document], versions: [], attachments: [], categories: [], tags: [], ...deposit, workflowSessions: [] })
     const restored = await parseWorkspaceBackup(archive)
 
     expect(restored.depositBatches).toEqual(deposit.depositBatches)
