@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createInitialDocument } from '../domain/document.factory'
-import { getDepositMetricSummary, markDepositTargetRevisited, MindTreeDatabase, pruneStoredAttachmentsForDocument } from './database'
+import { deleteLocalDocument, getDepositMetricSummary, markDepositTargetRevisited, MindTreeDatabase, pruneStoredAttachmentsForDocument } from './database'
 
 const names: string[] = []
 
@@ -75,6 +75,30 @@ describe('MindTree IndexedDB migrations', () => {
     await current.documentVersions.clear()
     expect(await pruneStoredAttachmentsForDocument(document, current)).toBe(1)
     expect((await current.attachments.toArray()).map((attachment) => attachment.id)).toEqual(['live-image'])
+    current.close()
+  })
+
+  it('deletes a quick note and its local versions, attachments, sync state, and workflow state', async () => {
+    const name = `mindtree-delete-draft-${crypto.randomUUID()}`
+    names.push(name)
+    const current = new MindTreeDatabase(name)
+    await current.open()
+    const document = createInitialDocument()
+    document.isDraft = true
+    const nodeId = document.rootId
+    await current.documents.put(document)
+    await current.documentVersions.put({ id: 'draft-version', documentId: document.id, kind: 'auto', label: null, snapshot: document, createdAt: 1 })
+    await current.attachments.put({ id: 'draft-image', documentId: document.id, nodeId, name: 'draft.png', type: 'image/png', size: 3, createdAt: 1, blob: new Blob(['img']) })
+    await current.syncMetadata.put({ documentId: document.id, remoteVersion: 2, syncedAt: 1 })
+    await current.workflowSessions.put({ id: 'draft-workflow', documentId: document.id, focusNodeId: nodeId, mode: 'explore', phase: 'context', status: 'active', goal: '', audience: '', deliverable: '', constraints: [], acceptanceCriteria: [], confirmedFacts: [], rejectedOptions: [], openQuestions: [], nextActions: [], checkpoints: [], createdAt: 1, updatedAt: 1, completedAt: null })
+
+    await deleteLocalDocument(document.id, current)
+
+    expect(await current.documents.get(document.id)).toBeUndefined()
+    expect(await current.documentVersions.where('documentId').equals(document.id).count()).toBe(0)
+    expect(await current.attachments.where('documentId').equals(document.id).count()).toBe(0)
+    expect(await current.syncMetadata.get(document.id)).toBeUndefined()
+    expect(await current.workflowSessions.where('documentId').equals(document.id).count()).toBe(0)
     current.close()
   })
 })

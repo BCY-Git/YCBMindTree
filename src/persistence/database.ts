@@ -128,6 +128,29 @@ export async function saveDocument(document: MindMapDocument): Promise<void> {
   await database.documents.put(document)
 }
 
+/**
+ * 永久删除一份仅存在于本机的导图及其附属状态。
+ * 正文、附件、版本、同步绑定和 AI 工作状态必须在同一事务中清理，避免留下孤立记录。
+ */
+export async function deleteLocalDocument(documentId: string, target = database): Promise<void> {
+  await target.transaction('rw', [target.documents, target.syncMetadata, target.documentVersions, target.attachments, target.depositBatches, target.depositProvenance, target.depositWorkspaceTransactions, target.workflowSessions, target.depositMetrics], async () => {
+    const batchIds = await target.depositBatches.where('sourceDocumentId').equals(documentId).primaryKeys()
+    const sourceProvenanceIds = await target.depositProvenance.where('sourceDocumentId').equals(documentId).primaryKeys()
+    const targetProvenanceIds = await target.depositProvenance.where('targetDocumentId').equals(documentId).primaryKeys()
+    await target.documents.delete(documentId)
+    await target.syncMetadata.delete(documentId)
+    await target.documentVersions.where('documentId').equals(documentId).delete()
+    await target.attachments.where('documentId').equals(documentId).delete()
+    await target.workflowSessions.where('documentId').equals(documentId).delete()
+    await target.depositMetrics.where('documentId').equals(documentId).delete()
+    await target.depositProvenance.bulkDelete([...new Set([...sourceProvenanceIds, ...targetProvenanceIds])])
+    if (batchIds.length) {
+      await target.depositWorkspaceTransactions.where('batchId').anyOf(batchIds).delete()
+      await target.depositBatches.bulkDelete(batchIds)
+    }
+  })
+}
+
 /** 智能沉淀的候选与来源独立保存，不污染导图 JSON 或普通导出格式。 */
 export async function saveDepositBatch(batch: DepositBatch): Promise<void> {
   await database.depositBatches.put(batch)

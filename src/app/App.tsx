@@ -12,11 +12,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositBatches, listAllDepositProvenance, listAllDocumentVersions, listAllWorkflowSessions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, pruneStoredAttachmentsForDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata, setDepositBatchAppliedState } from '../persistence/database'
+import { deleteLocalDocument, deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositBatches, listAllDepositProvenance, listAllDocumentVersions, listAllWorkflowSessions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, pruneStoredAttachmentsForDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata, setDepositBatchAppliedState } from '../persistence/database'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
 import { AssistantDock, AssistantDockToggleButton, loadAssistantDockOpen, loadAssistantDockWidth, saveAssistantDockOpen, saveAssistantDockWidth } from '../ai/AssistantDock'
+import { DraftDocumentItem } from './DraftDocumentItem'
 import type { MindMapDocument, NodeMark } from '../domain/document.types'
 import { SyncDialog } from '../sync/SyncDialog'
 import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
@@ -174,6 +175,7 @@ export function App() {
   const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
+  const deletedDocumentIdsRef = useRef(new Set<string>())
   const observedVersionRef = useRef<{ documentId: string; updatedAt: number } | null>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -441,6 +443,7 @@ export function App() {
   })
 
   const persistDocument = useCallback(async (documentToSave: MindMapDocument) => {
+    if (deletedDocumentIdsRef.current.has(documentToSave.id)) return
     await saveDocument(documentToSave)
     await pruneStoredAttachmentsForDocument(documentToSave)
     setDocuments((current) => [documentToSave, ...current.filter((item) => item.id !== documentToSave.id)]
@@ -691,6 +694,39 @@ export function App() {
 
   const startNewDocument = useCallback(() => requestNavigation({ kind: 'new-map' }), [requestNavigation])
   const startQuickNote = useCallback(() => requestNavigation({ kind: 'quick-note' }), [requestNavigation])
+
+  const deleteQuickNote = useCallback(async (draft: MindMapDocument, navigationAfterDelete: PendingNavigation | null = null) => {
+    if (!draft.isDraft || !window.confirm(`删除随手记“${draft.title}”？\n\n正文、附件和历史版本将从本机永久删除。`)) return
+    const deletingCurrent = draft.id === useEditorStore.getState().document.id
+    deletedDocumentIdsRef.current.add(draft.id)
+    if (deletingCurrent) {
+      if (pendingSaveRef.current !== null) window.clearTimeout(pendingSaveRef.current)
+      if (pendingSnapshotRef.current !== null) window.clearTimeout(pendingSnapshotRef.current)
+      pendingSaveRef.current = null
+      pendingSnapshotRef.current = null
+    }
+    try {
+      await deleteLocalDocument(draft.id)
+    } catch (error) {
+      deletedDocumentIdsRef.current.delete(draft.id)
+      if (deletingCurrent) await persistDocument(useEditorStore.getState().document).catch(console.warn)
+      window.alert(error instanceof Error ? `删除失败：${error.message}` : '删除失败，请重试。')
+      return
+    }
+    const remaining = documents.filter((item) => item.id !== draft.id)
+    setDocuments(remaining)
+    if (!deletingCurrent) return
+    setDraftSaveOpen(false)
+    setPendingNavigation(null)
+    observedVersionRef.current = null
+    if (navigationAfterDelete) {
+      await runNavigation(navigationAfterDelete).catch((error) => window.alert(error instanceof Error ? error.message : '切换失败，请重试。'))
+      return
+    }
+    const next = remaining.find((item) => !isBackgroundBackup(item))
+    if (next) hydrate(next)
+    else createDocument()
+  }, [createDocument, documents, hydrate, persistDocument, runNavigation])
 
   const openTask = useCallback((task: MindTreeTask) => {
     setTaskCenterOpen(false)
@@ -1080,7 +1116,7 @@ export function App() {
           <AssistantDockToggleButton open={assistantOpen} onToggle={toggleAssistantDock} />
           <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
-          {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
+          {document.isDraft && <><button className="topbar-utility__discard" onClick={() => { void deleteQuickNote(document) }} title="永久删除这份随手记"><Icon>×</Icon><span>删除</span></button><button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button></>}
         </div>
       </header>
 
@@ -1117,7 +1153,7 @@ export function App() {
               <div className="sidebar-panel__heading"><span>导图记录</span><span className="sidebar-import-actions"><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree、OPML 或 Markdown 文件">⇧ 导入</button><button className="sidebar-import-button" onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">↥ 恢复</button></span></div>
               <small className="sidebar-import-hint">导入 MindTree / OPML / Markdown，或恢复工作区备份。</small>
               <input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" />
-              {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => openDocument(item)}><span className="sidebar-document__icon">✦</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>草稿 · 已自动保存到本机</small></span></button>)}</div>}
+              {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <DraftDocumentItem key={item.id} title={item.title} active={item.id === document.id} onOpen={() => openDocument(item)} onDelete={() => { void deleteQuickNote(item) }} />)}</div>}
               {matchingDocuments.map((item) => (
                 <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => { void openDocument(item) }}>
                   <span className="sidebar-document__icon">◈</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>{categoryName(item.categoryId)}</small></span>
@@ -1287,6 +1323,7 @@ export function App() {
           <div className="draft-save-dialog__actions">
             <button className="draft-save-dialog__primary" onClick={() => { void saveDraftAndNavigate() }}>保存为正式导图</button>
             {pendingNavigation && <button className="draft-save-dialog__secondary" onClick={() => { void keepDraftAndNavigate() }}>保留草稿并切换</button>}
+            <button className="draft-save-dialog__delete" onClick={() => { void deleteQuickNote(document, pendingNavigation) }}>删除这份随手记</button>
             <button className="draft-save-dialog__cancel" onClick={closeDraftSave}>继续编辑</button>
           </div>
         </section>
