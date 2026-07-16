@@ -7,7 +7,7 @@ import { createInitialDocument } from '../domain/document.factory'
 
 const nodeId = 'node-under-edit'
 
-function renderEditingNode() {
+function renderEditingNode(dataOverrides: Partial<MindNodeData> = {}) {
   act(() => useEditorStore.getState().editNode(nodeId))
   const data: MindNodeData = {
     label: '需要全选的节点文本',
@@ -24,6 +24,7 @@ function renderEditingNode() {
     accentColor: '#467566',
     isRelationSource: false,
     layoutHeight: 44,
+    ...dataOverrides,
   }
   return render(<ReactFlowProvider><MindNode id={nodeId} type="mind" data={data} selected={true} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
 }
@@ -74,6 +75,16 @@ describe('MindNode text editing', () => {
     } finally {
       window.removeEventListener('keydown', onWindowKeyDown)
     }
+  })
+
+  it('keeps a single-line editor vertically centered inside a manually enlarged node', () => {
+    const { container } = renderEditingNode({ layoutHeight: 120 })
+    const shell = container.querySelector('.node-input-shell') as HTMLElement
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+
+    expect(shell.style.minHeight).toBe('104px')
+    expect(shell.style.alignItems).toBe('center')
+    expect(input.style.height).toBe('19px')
   })
 })
 

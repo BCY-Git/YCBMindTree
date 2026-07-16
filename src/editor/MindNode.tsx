@@ -112,16 +112,14 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         Math.ceil(input.scrollHeight),
         Math.ceil(mirrorRef.current?.scrollHeight ?? 0),
       )
-      // 展示态本来容得下的文本，在进入编辑态时必须仍然完整可见；
-      // `layoutHeight` 已含节点边框与内边距，编辑区只取其中的内容空间。
-      const minimumVisibleHeight = Math.max(19, node.layoutHeight - 16)
-      const nextHeight = Math.max(contentHeight, minimumVisibleHeight)
+      // 输入框只占文本本身的高度，由外层在节点内容区中垂直居中。
+      // 不能让 textarea 撑满人工放大的节点，否则浏览态居中的单行文字会在双击后跳到顶部。
+      const nextHeight = contentHeight
       input.style.height = `${nextHeight}px`
       setEditorHeight((current) => current === nextHeight ? current : nextHeight)
 
-      // 节点本体有 6px 内边距与边框；把编辑内容的实际高度交给画布临时布局，
-      // 让同级节点随之平滑让位，而不是把幽灵文本裁在旧卡片高度内。
-      const layoutHeight = nextHeight + 16
+      // 多行文本或幽灵续写超过原卡片时再扩高；短文本进入编辑不能缩小已有卡片。
+      const layoutHeight = Math.max(node.layoutHeight, nextHeight + 16)
       if (reportedHeightRef.current !== layoutHeight) {
         reportedHeightRef.current = layoutHeight
         node.onEditingHeightChange?.(layoutHeight)
@@ -208,7 +206,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         </button>
       )}
       {isEditing ? (
-        <div className="node-input-shell" style={{ minHeight: `${Math.max(editorHeight ?? 0, node.layoutHeight - 16)}px` }}>
+        <div className="node-input-shell" style={{ display: 'flex', alignItems: 'center', minHeight: `${Math.max(editorHeight ?? 0, node.layoutHeight - 16)}px` }}>
           {suggestion && <div ref={mirrorRef} className="node-input-mirror" aria-hidden="true"><span>{topic}</span><span className="node-input-mirror__suggestion">{suggestion}</span></div>}
           <textarea
             ref={inputRef}
@@ -216,7 +214,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
             value={topic}
             rows={1}
             wrap="soft"
-            style={{ height: `${editorHeight ?? Math.max(19, node.layoutHeight - 16)}px` }}
+            style={{ height: `${editorHeight ?? 19}px` }}
             onPointerDown={keepEditingGesture}
             onMouseDown={keepEditingGesture}
             onDoubleClick={keepEditingGesture}
