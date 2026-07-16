@@ -1,6 +1,7 @@
 import type { MindMapDocument, MindNode } from '../domain/document.types'
 import { loadTags } from '../domain/tag-library'
 import { nodeMarkMeta } from '../domain/node-semantics'
+import { saveExportFile } from './export-file'
 
 export type MarkdownExportMode = 'outline' | 'minutes' | 'ai-context' | 'tasks'
 
@@ -94,13 +95,15 @@ export function exportMarkdown(document: MindMapDocument, mode: MarkdownExportMo
   return outline(document)
 }
 
-export function downloadMarkdown(document: MindMapDocument, mode: MarkdownExportMode): void {
+export function downloadMarkdown(document: MindMapDocument, mode: MarkdownExportMode) {
   const safeName = document.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'mindtree'
-  const blob = new Blob([exportMarkdown(document, mode)], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = window.document.createElement('a')
-  link.href = url
-  link.download = `${safeName}-${mode}.md`
-  link.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  const label: Record<MarkdownExportMode, string> = { outline: 'Markdown 大纲', minutes: '会议纪要', tasks: '任务清单', 'ai-context': 'AI 上下文' }
+  return saveExportFile({
+    content: exportMarkdown(document, mode),
+    suggestedName: `${safeName}-${mode}.md`,
+    dialogTitle: `导出${label[mode]}`,
+    typeName: 'Markdown',
+    extensions: ['md'],
+    mimeType: 'text/markdown;charset=utf-8',
+  })
 }

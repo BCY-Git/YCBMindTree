@@ -123,3 +123,4 @@
 @keyframes attachment-viewer-in { from { opacity: 0; } to { opacity: 1; } }
 .document-import-status { position: fixed; z-index: 71; right: 22px; bottom: 38px; display: flex; max-width: min(420px, calc(100vw - 44px)); align-items: center; gap: 12px; border: 1px solid color-mix(in srgb, var(--accent, #47766a) 30%, var(--line, #d9dad0)); border-radius: 10px; background: var(--panel-bg, #fafaf6); box-shadow: 0 12px 32px rgba(22, 35, 28, .16); color: var(--app-text, #353831); padding: 11px 12px; font-size: 13px; line-height: 1.4; }
 .document-import-status button { border: 0; background: transparent; color: var(--muted-text, #77786f); font-size: 18px; line-height: 1; }
+.document-import-status .document-import-status__action { border: 1px solid color-mix(in srgb, var(--accent, #47766a) 35%, transparent); border-radius: 6px; color: var(--accent, #47766a); padding: 6px 8px; font-size: 11px; white-space: nowrap; }

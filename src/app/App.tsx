@@ -45,6 +45,7 @@ import { NodeSearchDialog } from '../editor/NodeSearchDialog'
 import { createInternalNodeLink, parseInternalNodeLink, resolveInternalNodeLink } from '../links/internal-link'
 import { PresentationMode } from '../presentation/PresentationMode'
 import { AttachmentImage } from '../attachments/AttachmentImage'
+import { exportFileStatus, revealExportFile, type ExportFileResult } from '../export/export-file'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -166,6 +167,7 @@ export function App() {
   const [workspaceBackupCandidate, setWorkspaceBackupCandidate] = useState<WorkspaceBackup | null>(null)
   const [workspaceBackupBusy, setWorkspaceBackupBusy] = useState(false)
   const [workspaceBackupStatus, setWorkspaceBackupStatus] = useState<string | null>(null)
+  const [exportStatus, setExportStatus] = useState<{ message: string; path?: string } | null>(null)
   const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
   const pendingSnapshotRef = useRef<number | null>(null)
@@ -253,19 +255,30 @@ export function App() {
     setTagDraft('')
   }
 
-  const exportCurrentDocument = (mode: MarkdownExportMode) => {
-    downloadMarkdown(document, mode)
+  const runExport = (operation: () => Promise<ExportFileResult>) => {
     setExportOpen(false)
+    setExportStatus(null)
+    void operation()
+      .then((result) => setExportStatus({ message: exportFileStatus(result), path: result.path }))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          setExportStatus({ message: '已取消导出。' })
+          return
+        }
+        setExportStatus({ message: error instanceof Error ? `导出失败：${error.message}` : '导出失败，请重试。' })
+      })
+  }
+
+  const exportCurrentDocument = (mode: MarkdownExportMode) => {
+    runExport(() => downloadMarkdown(document, mode))
   }
 
   const exportCurrentOpml = () => {
-    downloadOpml(document)
-    setExportOpen(false)
+    runExport(() => downloadOpml(document))
   }
 
   const exportCurrentSvg = (transparent = false) => {
-    void downloadDocumentSvg(document, { transparent })
-    setExportOpen(false)
+    runExport(() => downloadDocumentSvg(document, { transparent }))
   }
 
   const addNodeLink = (event: FormEvent<HTMLFormElement>) => {
@@ -1271,6 +1284,7 @@ export function App() {
       </div>}
       {importStatus && <div className="document-import-status" role="status"><span>{importStatus}</span><button onClick={() => setImportStatus(null)} aria-label="关闭导入提示">×</button></div>}
       {workspaceBackupStatus && <div className="document-import-status" role="status"><span>{workspaceBackupStatus}</span><button onClick={() => setWorkspaceBackupStatus(null)} aria-label="关闭备份提示">×</button></div>}
+      {exportStatus && <div className="document-import-status export-save-status" role="status"><span>{exportStatus.message}</span>{exportStatus.path && <button className="document-import-status__action" onClick={() => { void revealExportFile(exportStatus.path!).catch(() => setExportStatus({ message: '文件已保存，但无法在 Finder 中定位。', path: exportStatus.path })) }}>在 Finder 中显示</button>}<button onClick={() => setExportStatus(null)} aria-label="关闭导出提示">×</button></div>}
     </main>
   )
 }

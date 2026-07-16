@@ -1,4 +1,5 @@
 import type { MindMapDocument } from '../domain/document.types'
+import { saveExportFile } from './export-file'
 import { createDocumentFromOutline, fileStem, type ImportedDocument, type ImportedOutlineNode } from './import-document'
 
 function outlineFromElement(element: Element): ImportedOutlineNode {
@@ -55,11 +56,12 @@ export function exportOpml(document: MindMapDocument): string {
 
 export function downloadOpml(document: MindMapDocument) {
   const safeName = document.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'mindtree'
-  const blob = new Blob([exportOpml(document)], { type: 'text/x-opml;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = window.document.createElement('a')
-  link.href = url
-  link.download = `${safeName}.opml`
-  link.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  return saveExportFile({
+    content: exportOpml(document),
+    suggestedName: `${safeName}.opml`,
+    dialogTitle: '导出 OPML 大纲',
+    typeName: 'OPML',
+    extensions: ['opml'],
+    mimeType: 'text/x-opml;charset=utf-8',
+  })
 }

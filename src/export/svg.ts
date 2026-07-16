@@ -2,6 +2,7 @@ import type { MindMapDocument } from '../domain/document.types'
 import { getTheme } from '../domain/themes'
 import { layoutTree, type PositionedNode } from '../layout/tree-layout'
 import { getNodeAttachment } from '../persistence/database'
+import { saveExportFile } from './export-file'
 
 type SvgExportOptions = { transparent?: boolean; images?: Record<string, string> }
 
@@ -134,11 +135,13 @@ export async function loadDocumentImageDataUrls(document: MindMapDocument): Prom
 export async function downloadDocumentSvg(document: MindMapDocument, options: SvgExportOptions = {}) {
   const safeName = document.title.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'mindtree'
   const images = options.images ?? await loadDocumentImageDataUrls(document)
-  const blob = new Blob([exportDocumentSvg(document, { ...options, images })], { type: 'image/svg+xml;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = window.document.createElement('a')
-  link.href = url
-  link.download = `${safeName}.svg`
-  link.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  const suffix = options.transparent ? '-transparent' : ''
+  return saveExportFile({
+    content: exportDocumentSvg(document, { ...options, images }),
+    suggestedName: `${safeName}${suffix}.svg`,
+    dialogTitle: options.transparent ? '导出透明背景 SVG' : '导出完整导图 SVG',
+    typeName: 'SVG',
+    extensions: ['svg'],
+    mimeType: 'image/svg+xml;charset=utf-8',
+  })
 }
