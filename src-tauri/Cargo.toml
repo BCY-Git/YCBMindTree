@@ -1,6 +1,6 @@
 [package]
 name = "mindtree"
-version = "1.14.2"
+version = "1.15.0"
 description = "MindTree 离线优先思维导图"
 authors = ["MindTree"]
 license = ""
