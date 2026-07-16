@@ -63,25 +63,32 @@ export function layoutTree(document: MindMapDocument, transientHeights?: Readonl
   // ── 第二遍：自顶向下放置节点 ───────────────────────────────────────
   // place() 接收当前节点的目标矩形（x, top），在内部计算 y 坐标（垂直居中）。
   const output: PositionedNode[] = []
-  const place = (id: string, x: number, top: number) => {
+  const place = (id: string, x: number, top: number, layoutRootId = document.rootId) => {
     const node = document.nodes[id]
     const { width, height } = nodeSize(node, id === document.rootId, transientHeights?.get(id))
     const subtreeHeight = heights.get(id) ?? height
     // 节点 y = 子树顶 + (子树高度 - 节点自身高度) / 2 → 垂直居中
     const y = top + (subtreeHeight - height) / 2
     // 叠加节点的自由偏移量，支持用户手动拖拽微调。
-    output.push({ id, x: x + node.offsetX, y: y + node.offsetY, width, height })
+    const isAnchoredRoot = id === layoutRootId && node.isFreeTopic
+    output.push({
+      id,
+      x: x + (isAnchoredRoot ? 0 : node.offsetX),
+      y: y + (isAnchoredRoot ? 0 : node.offsetY),
+      width,
+      height,
+    })
     if (node.collapsed) return
     const children = node.childIds
     // 根主题只有一条展开分支时，其余一级叶子并不需要为那条分支的全部后代让位。
     // 将一级节点按自身卡片高度紧凑排列，既减少大片空白，又不会与其他分支的后代相撞。
-    const expandedBranchCount = id === document.rootId
+    const expandedBranchCount = id === layoutRootId
       ? children.filter((childId) => {
         const child = document.nodes[childId]
         return !child.collapsed && child.childIds.length > 0
       }).length
       : 0
-    if (id === document.rootId && expandedBranchCount <= 1) {
+    if (id === layoutRootId && expandedBranchCount <= 1) {
       const directChildrenHeight = children.reduce((sum, childId) => sum + nodeSize(document.nodes[childId], false, transientHeights?.get(childId)).height, 0)
         + Math.max(0, children.length - 1) * document.layout.siblingGap
       let cardTop = y + height / 2 - directChildrenHeight / 2
@@ -90,7 +97,7 @@ export function layoutTree(document: MindMapDocument, transientHeights?: Readonl
         const childSubtreeHeight = heights.get(childId) ?? childHeight
         // place() 会把节点卡片放在 childTop + (subtreeHeight - ownHeight) / 2，
         // 因此反推 childTop，保证卡片正好落在紧凑的 cardTop 上。
-        place(childId, x + width + document.layout.levelGap, cardTop - (childSubtreeHeight - childHeight) / 2)
+        place(childId, x + width + document.layout.levelGap, cardTop - (childSubtreeHeight - childHeight) / 2, layoutRootId)
         cardTop += childHeight + document.layout.siblingGap
       })
       return
@@ -101,17 +108,19 @@ export function layoutTree(document: MindMapDocument, transientHeights?: Readonl
     let childTop = top + (subtreeHeight - childrenHeight) / 2
     children.forEach((childId) => {
       // 每向下一层，x 增加 levelGap（向右推移一个层级）。
-      place(childId, x + width + document.layout.levelGap, childTop)
+      place(childId, x + width + document.layout.levelGap, childTop, layoutRootId)
       childTop += (heights.get(childId) ?? 0) + document.layout.siblingGap
     })
   }
 
   measure(document.rootId)
   place(document.rootId, 0, 0)
-  // 自由主题不属于根节点 childIds，因此独立追加到画布坐标系，不参与主树间距计算。
+  // 每个自由主题都是一棵独立树的根。它的 offsetX/Y 是根卡片在画布中的锚点，
+  // 后代仍由同一套递归布局计算，因此整支拖出后不会丢失结构。
   Object.values(document.nodes).filter((node) => node.isFreeTopic).forEach((node) => {
-    const { width, height } = nodeSize(node, false, transientHeights?.get(node.id))
-    output.push({ id: node.id, x: node.offsetX, y: node.offsetY, width, height })
+    const subtreeHeight = measure(node.id)
+    const ownHeight = nodeSize(node, false, transientHeights?.get(node.id)).height
+    place(node.id, node.offsetX, node.offsetY - (subtreeHeight - ownHeight) / 2, node.id)
   })
   return output
 }

@@ -1,5 +1,17 @@
 export type TreeDropIntent = { parentId: string; index: number; kind: 'child' | 'sibling' }
 
+const TREE_BRANCH_DETACH_DISTANCE = 160
+
+export function shouldDetachTreeBranch({
+  offset,
+  nearbyTreeIntent,
+}: {
+  offset: { x: number; y: number }
+  nearbyTreeIntent: TreeDropIntent | null
+}) {
+  return nearbyTreeIntent === null && Math.hypot(offset.x, offset.y) >= TREE_BRANCH_DETACH_DISTANCE
+}
+
 /**
  * 常规节点默认维持树形自动布局：拖向同级只调整顺序；跨分支改结构必须显式
  * 按住 Shift，防止用户只是想整理位置时误把节点变成子节点。

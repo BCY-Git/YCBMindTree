@@ -6,8 +6,8 @@
  * 职责：
  * - 根据 document + layout 生成 nodes / edges，交给 React Flow 渲染
  * - 监听键盘快捷键（Tab/Enter/Space/Delete/方向键等），派发对应命令
- * - 处理节点拖拽：普通拖拽更新偏移量，Shift+拖拽触发结构移动，
- *   根节点拖拽平移整张导图
+ * - 处理节点拖拽：近距离重排、Shift+拖拽调整层级、远距离拖出独立主题树，
+ *   中心主题拖拽平移整张导图
  * - 管理右键菜单（ContextMenu）和命令面板（CommandPalette）的开关
  *
  * 所有命令通过 dispatch() 派发，状态更新由 editor.store 管理。
@@ -40,8 +40,8 @@ import { CommandPalette } from './CommandPalette'
 import { NodeSearchDialog } from './NodeSearchDialog'
 import { getTheme } from '../domain/themes'
 import { getTreeEdgeAnchors } from './tree-edge'
-import { retainDraggingNodePosition } from './drag-state'
-import { resolveRegularTreeDragIntent, type TreeDropIntent } from './drag-intent'
+import { retainDraggingNodePosition, translateDraggedSubtree } from './drag-state'
+import { resolveRegularTreeDragIntent, shouldDetachTreeBranch, type TreeDropIntent } from './drag-intent'
 import type { MindMapDocument, MindNode as DomainMindNode } from '../domain/document.types'
 import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
@@ -138,6 +138,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null)
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null)
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null)
+  const [detachingNodeId, setDetachingNodeId] = useState<string | null>(null)
   const [flowNodes, setFlowNodes] = useState<Node<MindNodeData>[]>([])
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
@@ -325,9 +326,21 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
   }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
 
+  const draggedSubtreeIds = useMemo(() => {
+    if (!draggingNodeId) return new Set<string>()
+    if (draggingNodeId === document.rootId) return new Set(Object.keys(document.nodes))
+    const ids = new Set<string>()
+    const visit = (nodeId: string) => {
+      ids.add(nodeId)
+      document.nodes[nodeId]?.childIds.forEach(visit)
+    }
+    visit(draggingNodeId)
+    return ids
+  }, [document.nodes, document.rootId, draggingNodeId])
+
   useEffect(() => {
-    setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId))
-  }, [baseNodes, draggingNodeId])
+    setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId, draggedSubtreeIds))
+  }, [baseNodes, draggedSubtreeIds, draggingNodeId])
 
   // 仅在首次打开或切换到另一张导图时自动适应视图；节点增删、编辑和布局更新都必须保留用户当前视角。
   useEffect(() => {
@@ -475,7 +488,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       return false
     }
     const target = baseNodes.find((candidate) => {
-      if (candidate.id === dragged.id || candidate.data.isFreeTopic || wouldCreateCycle(candidate.id)) return false
+      if (candidate.id === dragged.id || wouldCreateCycle(candidate.id)) return false
       const size = renderedSize(candidate)
       return point.x >= candidate.position.x && point.x <= candidate.position.x + size.width
         && point.y >= candidate.position.y && point.y <= candidate.position.y + size.height
@@ -521,28 +534,33 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     if (index === currentIndex || index === currentIndex + 1) return null
     return { parentId: current.parentId, index, kind: 'sibling' }
   }, [basePositionsById, document.nodes, getDragOffset])
-  // onNodesChange：处理 React Flow 内置的位置变化（批量移动、缩放等）。
-  // 特殊处理：若根节点位置变化，将该偏移量同步到所有节点，实现"拖根平移全图"效果。
+  // onNodesChange：拖动分支根时同步平移其可见后代；拖中心主题仍平移整张导图。
   const onNodesChange: OnNodesChange<Node<MindNodeData>> = useCallback((changes) => {
     setFlowNodes((current) => {
-      const rootMove = changes.find((change): change is NodePositionChange => (
-        change.type === 'position' && change.id === document.rootId && change.position !== undefined
+      const branchMove = changes.find((change): change is NodePositionChange => (
+        change.type === 'position' && change.position !== undefined && Boolean(document.nodes[change.id]?.childIds.length)
       ))
-      if (!rootMove?.position) return applyNodeChanges(changes, current)
+      if (!branchMove?.position) return applyNodeChanges(changes, current)
 
-      const root = current.find((node) => node.id === document.rootId)
-      if (!root) return applyNodeChanges(changes, current)
-      const deltaX = rootMove.position.x - root.position.x
-      const deltaY = rootMove.position.y - root.position.y
-      const nextNodes = applyNodeChanges(changes, current)
-      return nextNodes.map((node) => node.id === document.rootId
-        ? node
-        : { ...node, position: { x: node.position.x + deltaX, y: node.position.y + deltaY } })
+      const subtreeIds = branchMove.id === document.rootId
+        ? new Set(Object.keys(document.nodes))
+        : (() => {
+          const ids = new Set<string>()
+          const visit = (nodeId: string) => {
+            ids.add(nodeId)
+            document.nodes[nodeId]?.childIds.forEach(visit)
+          }
+          visit(branchMove.id)
+          return ids
+        })()
+      const translated = translateDraggedSubtree(current, branchMove.id, branchMove.position, subtreeIds)
+      return applyNodeChanges(changes.filter((change) => change !== branchMove), translated)
     })
-  }, [document.rootId])
-  // 普通树节点只会重排或调整层级；仅自由主题保留自由位置。
+  }, [document.nodes, document.rootId])
+  // 普通树节点靠近原树时只会重排或调整层级；拖离所有树目标后，整支转为独立主题树。
   const onNodeDragStop: OnNodeDrag<Node<MindNodeData>> = useCallback((event, node) => {
     setDraggingNodeId(null)
+    setDetachingNodeId(null)
     setFreeTopicAttachmentParentId(null)
     setDropIntent(null)
     setDragPreview(null)
@@ -563,10 +581,16 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       else setFlowNodes(baseNodes)
       return
     }
+    const structuralIntent = dropIntentNearTree(node)
+    if (offset && shouldDetachTreeBranch({ offset, nearbyTreeIntent: structuralIntent })) {
+      const detached = dispatch({ type: 'DETACH_AS_FREE_TOPIC', nodeId: node.id, x: node.position.x, y: node.position.y })
+      if (!detached) setFlowNodes(baseNodes)
+      return
+    }
     const intent = resolveRegularTreeDragIntent({
       shiftKey: Boolean((event as MouseEvent).shiftKey),
       siblingIntent: siblingReorderIntent(node),
-      structuralIntent: dropIntentNearTree(node),
+      structuralIntent,
     })
     if (intent) {
       const moved = dispatch({ type: 'MOVE_NODE', nodeId: node.id, newParentId: intent.parentId, index: intent.index })
@@ -578,6 +602,8 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const onNodeDrag: OnNodeDrag<Node<MindNodeData>> = useCallback((event, node) => {
     setDraggingNodeId((current) => current === node.id ? current : node.id)
     if (document.nodes[node.id]?.isFreeTopic) {
+      setDetachingNodeId(null)
+      setDropIntent(null)
       setFreeTopicAttachmentParentId((current) => {
         const next = attachmentParentNearBranch(node, current)
         return current === next ? current : next
@@ -585,16 +611,25 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       setDragPreview(null)
       return
     }
+    const offset = getDragOffset(node)
+    const structuralIntent = dropIntentNearTree(node)
+    if (offset && shouldDetachTreeBranch({ offset, nearbyTreeIntent: structuralIntent })) {
+      setDetachingNodeId((current) => current === node.id ? current : node.id)
+      setDropIntent(null)
+      setDragPreview(null)
+      return
+    }
+    setDetachingNodeId(null)
     const next = resolveRegularTreeDragIntent({
       shiftKey: Boolean((event as MouseEvent).shiftKey),
       siblingIntent: siblingReorderIntent(node),
-      structuralIntent: dropIntentNearTree(node),
+      structuralIntent,
     })
     setDropIntent((current) => current?.parentId === next?.parentId && current?.index === next?.index && current?.kind === next?.kind ? current : next)
     const currentParentId = document.nodes[node.id]?.parentId
     const preview = next?.kind === 'sibling' && next.parentId === currentParentId ? { nodeId: node.id, intent: next } : null
     setDragPreview((current) => current?.nodeId === preview?.nodeId && current?.intent.parentId === preview?.intent.parentId && current?.intent.index === preview?.intent.index ? current : preview)
-  }, [attachmentParentNearBranch, document.nodes, dropIntentNearTree, siblingReorderIntent])
+  }, [attachmentParentNearBranch, document.nodes, dropIntentNearTree, getDragOffset, siblingReorderIntent])
   // ── 右键菜单：画布空白处打开画布菜单，节点上打开节点菜单 ───────────────────────
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
   const openContextMenu = useCallback((event: MouseEvent, nodeId: string | null) => {
@@ -648,7 +683,12 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       if (meta && event.key.toLowerCase() === 'x') { event.preventDefault(); cutNode(selected); return }
       // 粘贴要等 ClipboardEvent 才能分辨图片还是内部复制的节点分支。
       if (meta && event.key.toLowerCase() === 'v') return
-      if (event.key === 'Enter') { event.preventDefault(); dispatch(selected === focusRootId ? { type: 'ADD_CHILD', parentId: selected } : { type: 'ADD_SIBLING', nodeId: selected }); return }
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        const selectedNode = editor.document.nodes[selected]
+        dispatch(selected === focusRootId || selectedNode?.isFreeTopic ? { type: 'ADD_CHILD', parentId: selected } : { type: 'ADD_SIBLING', nodeId: selected })
+        return
+      }
       if (event.key === 'Tab' && event.shiftKey) { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
       if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); dispatch({ type: 'INDENT_NODE', nodeId: selected }); return }
       if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); dispatch({ type: 'OUTDENT_NODE', nodeId: selected }); return }
@@ -753,7 +793,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         if (dispatch({ type: 'CREATE_RELATED_FREE_TOPIC', sourceIds: relationSourceIds, ...position })) cancelRelationCreation()
         return
       }
-      dispatch({ type: 'ADD_CHILD', parentId: focusRootId ?? document.rootId })
+      event.preventDefault()
+      event.stopPropagation()
+      const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      dispatch({ type: 'ADD_FREE_TOPIC', x: position.x, y: position.y })
     }}>
       <ReactFlow
         nodes={flowNodes}
@@ -859,6 +902,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       </ReactFlow>
       {relationSourceIds.length > 0 && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>单击已有节点，或双击空白处创建新主题 · Esc 取消</span></div>}
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
+      {detachingNodeId && <div className="tree-drop-hint" role="status">松开即可成为独立主题</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : `松开即可插入此分支的第 ${dropIntent.index + 1} 个位置`}</div>}
       {pasteAttachmentStatus && <div className="paste-attachment-hint" role="status">{pasteAttachmentStatus}</div>}
       {searchOpen && <NodeSearchDialog currentDocumentId={document.id} documents={[document, ...workspaceDocuments.filter((item) => item.id !== document.id)]} tags={tags} provenance={searchProvenance} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const parentId = selectedNodeId ?? document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}
@@ -914,7 +958,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           <CommandPalette
             onClose={() => setCommandPaletteOpen(false)}
             actions={[
-              { label: '新建子节点', detail: '在当前节点下继续展开想法', shortcut: '工具栏', disabled: selected.isFreeTopic, run: () => dispatch({ type: 'ADD_CHILD', parentId: selectedId }) },
+              { label: '新建子节点', detail: '在当前节点下继续展开想法', shortcut: '工具栏', run: () => dispatch({ type: 'ADD_CHILD', parentId: selectedId }) },
               { label: '新建同级节点', detail: '在当前层级增加一个主题', shortcut: '↵', disabled: selectedId === document.rootId || selectedId === focusRootId || selected.isFreeTopic, run: () => dispatch({ type: 'ADD_SIBLING', nodeId: selectedId }) },
               ...(selected.isFreeTopic ? [{ label: '附加到主节点', detail: '转为中心主题下的一级分支，并自动排列', shortcut: '—', run: () => dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: selectedId, parentId: document.rootId }) }] : []),
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },

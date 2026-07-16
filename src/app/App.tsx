@@ -1091,7 +1091,7 @@ export function App() {
           </div>
           <span className="floating-toolbar__divider" />
           <div className="floating-toolbar__cluster">
-            <button className="floating-toolbar__button" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题不能创建子节点' : '新建子节点 (Tab)'}><Icon>＋</Icon><span>子节点</span></button>
+            <button className="floating-toolbar__button" onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title="新建子节点 (Tab)"><Icon>＋</Icon><span>子节点</span></button>
             <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNodeId === focusedNodeId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNodeId === focusedNodeId ? '聚焦根节点请创建子节点，避免新节点出现在聚焦范围外' : selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon>↳</Icon><span>同级</span></button>
             <button
               className="floating-toolbar__button"

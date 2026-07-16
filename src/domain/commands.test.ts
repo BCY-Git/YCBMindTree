@@ -63,15 +63,39 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(attached)).not.toThrow()
   })
 
-  it('keeps free topics isolated until they are attached to the tree', () => {
+  it('detaches a complete branch as an independent root and preserves its descendants', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const descendantIds = [...document.nodes[branchId].childIds]
+
+    const detached = executeCommand(document, { type: 'DETACH_AS_FREE_TOPIC', nodeId: branchId, x: 620, y: 180 }).document
+
+    expect(detached.nodes[document.rootId].childIds).not.toContain(branchId)
+    expect(detached.nodes[branchId]).toMatchObject({ parentId: null, isFreeTopic: true, offsetX: 620, offsetY: 180 })
+    expect(detached.nodes[branchId].childIds).toEqual(descendantIds)
+    descendantIds.forEach((id) => expect(detached.nodes[id].parentId).toBe(branchId))
+    expect(() => assertValidDocument(detached)).not.toThrow()
+
+    const attached = executeCommand(detached, { type: 'ATTACH_FREE_TOPIC', nodeId: branchId, parentId: detached.rootId }).document
+    expect(attached.nodes[branchId]).toMatchObject({ parentId: attached.rootId, isFreeTopic: false })
+    expect(attached.nodes[branchId].childIds).toEqual(descendantIds)
+    expect(() => assertValidDocument(attached)).not.toThrow()
+  })
+
+  it('lets a free topic grow its own subtree before it is attached to the main tree', () => {
     const document = createInitialDocument()
     const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 420, y: 260, topic: '临时想法' })
     const freeId = free.focusNodeId!
+    const withChild = executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId, topic: '自由分支' }).document
+    const childId = withChild.nodes[freeId].childIds[0]
 
-    expect(() => executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId })).toThrow('自由主题不能创建子节点')
+    expect(withChild.nodes[childId]).toMatchObject({ parentId: freeId, isFreeTopic: false, topic: '自由分支' })
+    expect(() => assertValidDocument(withChild)).not.toThrow()
 
-    const attached = executeCommand(free.document, { type: 'ATTACH_FREE_TOPIC', nodeId: freeId, parentId: free.document.rootId }).document
+    const attached = executeCommand(withChild, { type: 'ATTACH_FREE_TOPIC', nodeId: freeId, parentId: withChild.rootId }).document
     expect(attached.nodes[freeId]).toMatchObject({ isFreeTopic: false, parentId: attached.rootId, offsetX: 0, offsetY: 0 })
+    expect(attached.nodes[freeId].childIds).toEqual([childId])
+    expect(attached.nodes[childId].parentId).toBe(freeId)
     expect(attached.nodes[attached.rootId].childIds).toContain(freeId)
     expect(() => assertValidDocument(attached)).not.toThrow()
   })

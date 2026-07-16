@@ -22,7 +22,7 @@ export function buildOutlineRows(document: MindMapDocument): OutlineRow[] {
   Object.values(document.nodes)
     .filter((node) => node.isFreeTopic && node.id !== document.rootId)
     .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
-    .forEach((node) => rows.push({ nodeId: node.id, node, depth: 0, hasChildren: false, hiddenChildCount: 0 }))
+    .forEach((node) => visit(node.id, 0))
   return rows
 }
 

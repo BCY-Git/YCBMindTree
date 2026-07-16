@@ -95,7 +95,7 @@ export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNo
                 if (command) dispatch(command)
               } else if (event.key === 'Enter') {
                 event.preventDefault()
-                if (!node.isFreeTopic) dispatch(node.id === viewDocument.rootId ? { type: 'ADD_CHILD', parentId: node.id } : { type: 'ADD_SIBLING', nodeId: node.id })
+                dispatch(node.id === viewDocument.rootId || node.isFreeTopic ? { type: 'ADD_CHILD', parentId: node.id } : { type: 'ADD_SIBLING', nodeId: node.id })
               } else if (event.key === 'Tab') {
                 event.preventDefault()
                 dispatch(event.shiftKey ? { type: 'OUTDENT_NODE', nodeId: node.id } : { type: 'INDENT_NODE', nodeId: node.id })

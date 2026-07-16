@@ -48,6 +48,25 @@ describe('tree layout', () => {
     expect(free).toMatchObject({ x: 511, y: 233 })
   })
 
+  it('lays out a free topic as the root of its own collapsible tree', () => {
+    const document = createInitialDocument()
+    const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 511, y: 233, topic: '自由主题' })
+    const freeId = free.focusNodeId!
+    const withChild = executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId, topic: '自由分支' })
+    const childId = withChild.focusNodeId!
+    const withGrandchild = executeCommand(withChild.document, { type: 'ADD_CHILD', parentId: childId, topic: '分支细节' }).document
+
+    const expanded = Object.fromEntries(layoutTree(withGrandchild).map((node) => [node.id, node]))
+    expect(expanded[freeId]).toMatchObject({ x: 511, y: 233 })
+    expect(expanded[childId].x).toBeGreaterThan(expanded[freeId].x)
+    expect(expanded[withGrandchild.nodes[childId].childIds[0]].x).toBeGreaterThan(expanded[childId].x)
+
+    withGrandchild.nodes[freeId].collapsed = true
+    const collapsedIds = layoutTree(withGrandchild).map((node) => node.id)
+    expect(collapsedIds).toContain(freeId)
+    expect(collapsedIds).not.toContain(childId)
+  })
+
   it('uses the persisted node size while keeping enough height for its text', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

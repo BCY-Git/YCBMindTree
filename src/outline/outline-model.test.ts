@@ -27,16 +27,19 @@ describe('outline model', () => {
     const branch = createNode('已折叠', root.id)
     const child = createNode('暂时隐藏', branch.id)
     const free = createNode('自由想法', null)
+    const freeChild = createNode('自由分支', free.id)
     branch.collapsed = true
     branch.childIds = [child.id]
     free.isFreeTopic = true
+    free.childIds = [freeChild.id]
     root.childIds = [branch.id]
-    document.nodes = { [root.id]: root, [branch.id]: branch, [child.id]: child, [free.id]: free }
+    document.nodes = { [root.id]: root, [branch.id]: branch, [child.id]: child, [free.id]: free, [freeChild.id]: freeChild }
 
     expect(buildOutlineRows(document).map(({ nodeId, depth, hiddenChildCount }) => ({ nodeId, depth, hiddenChildCount }))).toEqual([
       { nodeId: root.id, depth: 0, hiddenChildCount: 0 },
       { nodeId: branch.id, depth: 1, hiddenChildCount: 1 },
       { nodeId: free.id, depth: 0, hiddenChildCount: 0 },
+      { nodeId: freeChild.id, depth: 1, hiddenChildCount: 0 },
     ])
   })
 

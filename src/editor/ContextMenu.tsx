@@ -111,16 +111,22 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
         </>
       ) : node?.isFreeTopic ? (
         <>
+          <MenuItem onClick={onAddChild} shortcut="Tab">新建子节点</MenuItem>
+          <MenuItem onClick={onToggleCollapse} shortcut="Space" disabled={!node.childIds.length}>{node.collapsed ? '展开分支' : '折叠分支'}</MenuItem>
+          <MenuItem onClick={onCollapseDescendants} disabled={!node.childIds.length}>折叠所有次级分支</MenuItem>
+          <MenuItem onClick={onExpandDescendants} disabled={!node.childIds.length}>展开所有次级分支</MenuItem>
+          <MenuItem onClick={onPaste} shortcut="⌘ V" disabled={!hasClipboard}>粘贴为子节点</MenuItem>
+          <div className="context-menu__divider" />
           <MenuItem onClick={onAttachToRoot}>附加到主节点</MenuItem>
-          <div className="context-menu__hint">将自由主题归入中心主题，并自动按树形层级排列。</div>
+          <div className="context-menu__hint">将整棵独立主题树归入中心主题，并自动按树形层级排列。</div>
           <div className="context-menu__divider" />
           <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
           <div className="context-menu__hint">标记</div>
           {nodeMarkOrder.map((mark) => <MenuItem key={mark} onClick={() => onToggleMark(mark)}>{`${node.marks.includes(mark) ? '✓ ' : ''}${nodeMarkMeta[mark].icon} ${nodeMarkMeta[mark].label}`}</MenuItem>)}
           <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>
-          <MenuItem onClick={onCopy} shortcut="⌘ C">复制主题</MenuItem>
-          <MenuItem onClick={onCut} shortcut="⌘ X">剪切主题</MenuItem>
-          <MenuItem onClick={onDelete} shortcut="⌫" destructive>删除主题</MenuItem>
+          <MenuItem onClick={onCopy} shortcut="⌘ C">复制分支</MenuItem>
+          <MenuItem onClick={onCut} shortcut="⌘ X">剪切分支</MenuItem>
+          <MenuItem onClick={onDelete} shortcut="⌫" destructive>删除分支</MenuItem>
         </>
       ) : node ? (
         <>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveRegularTreeDragIntent } from './drag-intent'
+import { resolveRegularTreeDragIntent, shouldDetachTreeBranch } from './drag-intent'
 
 const reorder = { parentId: 'parent', index: 3, kind: 'sibling' as const }
 const attach = { parentId: 'target', index: 0, kind: 'child' as const }
@@ -15,5 +15,14 @@ describe('regular tree drag intent', () => {
 
   it('allows Shift+drag to attach the node beneath a new parent', () => {
     expect(resolveRegularTreeDragIntent({ shiftKey: true, siblingIntent: reorder, structuralIntent: attach })).toEqual(attach)
+  })
+
+  it('detaches a branch when it is dragged far away from every tree target', () => {
+    expect(shouldDetachTreeBranch({ offset: { x: 210, y: 20 }, nearbyTreeIntent: null })).toBe(true)
+    expect(shouldDetachTreeBranch({ offset: { x: 80, y: 20 }, nearbyTreeIntent: null })).toBe(false)
+  })
+
+  it('keeps a far drag attachable while it is still near a tree target', () => {
+    expect(shouldDetachTreeBranch({ offset: { x: 210, y: 20 }, nearbyTreeIntent: attach })).toBe(false)
   })
 })

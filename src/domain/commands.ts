@@ -25,6 +25,7 @@ export type MindMapCommand =
   | { type: 'ADD_CHILD'; parentId: string; topic?: string }
   | { type: 'ADD_SIBLING'; nodeId: string; topic?: string }
   | { type: 'ADD_FREE_TOPIC'; x: number; y: number; topic?: string }
+  | { type: 'DETACH_AS_FREE_TOPIC'; nodeId: string; x: number; y: number }
   | { type: 'ATTACH_FREE_TOPIC'; nodeId: string; parentId: string }
   | { type: 'UPDATE_NODE_TOPIC'; nodeId: string; topic: string }
   | { type: 'UPDATE_NODE_NOTE'; nodeId: string; note: string }
@@ -345,7 +346,6 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     case 'ADD_CHILD': {
       const parent = document.nodes[command.parentId]
       if (!parent) throw new Error('父节点不存在')
-      if (parent.isFreeTopic) throw new Error('自由主题不能创建子节点')
       const child = createNode(command.topic ?? '新节点', parent.id)
       parent.childIds.push(child.id)
       // 新增子节点时自动展开父节点，让子节点立即可见。
@@ -375,6 +375,20 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       topic.offsetX = Math.round(command.x)
       topic.offsetY = Math.round(command.y)
       document.nodes[topic.id] = topic
+      focusNodeId = topic.id
+      break
+    }
+    case 'DETACH_AS_FREE_TOPIC': {
+      const topic = document.nodes[command.nodeId]
+      if (!topic?.parentId) throw new Error('根节点不能转为自由主题')
+      const parent = document.nodes[topic.parentId]
+      parent.childIds = parent.childIds.filter((id) => id !== topic.id)
+      removeNodeFromBoundaries(document, topic.id)
+      removeNodeFromSummaries(document, topic.id)
+      topic.parentId = null
+      topic.isFreeTopic = true
+      topic.offsetX = Math.round(command.x)
+      topic.offsetY = Math.round(command.y)
       focusNodeId = topic.id
       break
     }
