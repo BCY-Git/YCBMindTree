@@ -1,5 +1,5 @@
 /**
- * AI 助手侧边栏面板。
+ * 右侧 AI 工作台内容。
  *
  * 支持配置自定义 OpenAI-compatible API 端点、模型名称和 API Key，
  * 将当前导图的结构化 JSON 作为上下文发给 AI 模型，
@@ -79,7 +79,7 @@ function ReorganizationPreview({ plan, document }: { plan: MapReorganization; do
   })}</ul>
 }
 
-export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void }) {
+export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, heading = 'AI 助手' }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; heading?: string }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
@@ -450,7 +450,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   return (
     <section className="ai-assistant" aria-label="AI 助手">
       <div className="ai-assistant__heading">
-        <div><span className="ai-assistant__spark">✦</span><span>AI 助手</span></div>
+        <div><span className="ai-assistant__spark">✦</span><span>{heading}</span></div>
         <button type="button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>{settingsOpen ? '收起' : '配置'}</button>
       </div>
       <p className="ai-assistant__status">{notice}</p>

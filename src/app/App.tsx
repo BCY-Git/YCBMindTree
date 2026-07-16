@@ -2,7 +2,7 @@
  * App — 应用根组件，组装整体布局和各功能模块。
  *
  * 整体布局为三行：顶部工具栏（topbar）→ 工作区（workspace）→ 状态栏（statusbar）。
- * 工作区为三列：左侧栏（工作区/分类/导图列表 + AI 助手）→ 画布 → 右侧检查器。
+ * 工作区为四个可组合区域：左侧工作区 → 画布 → 右侧 AI 工作台 → 属性检查器。
  *
  * 生命周期：
  * 1. 挂载时从 IndexedDB 并行加载最新文档和文档列表（hydrate + setDocuments）
@@ -16,6 +16,7 @@ import { deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositB
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
+import { AssistantDock, AssistantDockToggleButton, loadAssistantDockOpen, loadAssistantDockWidth, saveAssistantDockOpen, saveAssistantDockWidth } from '../ai/AssistantDock'
 import type { MindMapDocument, NodeMark } from '../domain/document.types'
 import { SyncDialog } from '../sync/SyncDialog'
 import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
@@ -66,7 +67,7 @@ type PendingNavigation =
   | { kind: 'new-map' }
   | { kind: 'quick-note' }
 
-type SidebarPanel = 'projects' | 'maps' | 'tasks' | 'assistant'
+type SidebarPanel = 'projects' | 'maps' | 'tasks'
 type InspectorTab = 'content' | 'tasks' | 'resources' | 'map'
 type UniversalImportCandidate = ImportedDocument & { format: 'OPML' | 'Markdown' }
 
@@ -131,6 +132,8 @@ export function App() {
     return stored === null ? true : stored === 'true'
   })
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>('projects')
+  const [assistantOpen, setAssistantOpen] = useState(loadAssistantDockOpen)
+  const [assistantDockWidth, setAssistantDockWidth] = useState(loadAssistantDockWidth)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('content')
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(loadSyncConfig)
@@ -212,6 +215,11 @@ export function App() {
   const openTaskCount = useMemo(() => tasks.filter((task) => task.status !== 'done').length, [tasks])
   const tagReferenceCount = (tagId: string) => taskDocuments.reduce((count, item) => count + Object.values(item.nodes).filter((node) => node.tagIds.includes(tagId)).length, 0)
   const toggleSidebarPanel = (panel: SidebarPanel) => setSidebarPanel((current) => current === panel ? null : panel)
+  const toggleAssistantDock = () => setAssistantOpen((open) => {
+    const next = !open
+    saveAssistantDockOpen(next)
+    return next
+  })
 
   useEffect(() => {
     const refresh = () => setTags(loadTags())
@@ -1019,7 +1027,7 @@ export function App() {
   }, [document.id, hydrated, autoSync])
 
   return (
-    <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''} ${inspectorCollapsed ? 'is-inspector-collapsed' : ''}`} style={{
+    <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''} ${inspectorCollapsed ? 'is-inspector-collapsed' : ''} ${assistantOpen ? 'is-assistant-open' : ''}`} style={{
       '--app-bg': theme.canvas,
       '--chrome-bg': theme.chrome,
       '--panel-bg': theme.surface,
@@ -1027,6 +1035,7 @@ export function App() {
       '--muted-text': theme.id === 'cyber' || theme.id === 'midnight' ? '#aab4c8' : '#898a80',
       '--line': theme.nodeBorder,
       '--accent': theme.selected,
+      '--assistant-dock-width': `${assistantDockWidth}px`,
     } as CSSProperties}>
       <input ref={importInputRef} className="document-import-input" type="file" accept=".mindtree.json,.json,.opml,.xml,.md,.markdown,application/json,text/x-opml,text/xml,text/markdown" onChange={(event) => { void importDocumentFromFile(event) }} aria-hidden="true" tabIndex={-1} />
       <input ref={workspaceBackupInputRef} className="document-import-input" type="file" accept=".mindtree-backup.zip,.zip,application/zip" onChange={(event) => { void selectWorkspaceBackupFile(event) }} aria-hidden="true" tabIndex={-1} />
@@ -1068,6 +1077,7 @@ export function App() {
           <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
           <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentSvg()}>导出完整导图 SVG</button><button onClick={() => exportCurrentSvg(true)}>导出透明背景 SVG</button><hr /><button onClick={() => exportCurrentOpml()}>导出 OPML 大纲</button><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
           <PanelToggleButton side="left" collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+          <AssistantDockToggleButton open={assistantOpen} onToggle={toggleAssistantDock} />
           <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
           <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
           {document.isDraft && <button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button>}
@@ -1083,7 +1093,6 @@ export function App() {
               <button className={sidebarPanel === 'projects' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('projects')} aria-expanded={sidebarPanel === 'projects'}><span>◫</span><strong>项目</strong><small>{categories.length}</small><i>›</i></button>
               <button className={sidebarPanel === 'maps' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('maps')} aria-expanded={sidebarPanel === 'maps'}><span>◇</span><strong>导图</strong><small>{savedDocuments.length + draftDocuments.length}</small><i>›</i></button>
               <button className={sidebarPanel === 'tasks' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('tasks')} aria-expanded={sidebarPanel === 'tasks'}><span>☑</span><strong>任务中心</strong><small>{openTaskCount}</small><i>›</i></button>
-              <button className={sidebarPanel === 'assistant' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('assistant')} aria-expanded={sidebarPanel === 'assistant'}><span>✦</span><strong>AI 助手</strong><i>›</i></button>
             </nav>
 
             {sidebarPanel === 'projects' && <section className="sidebar-panel" aria-label="项目分类">
@@ -1124,10 +1133,6 @@ export function App() {
 
             {sidebarPanel === 'tasks' && <section className="sidebar-panel sidebar-panel--tasks" aria-label="任务中心"><p>跨导图汇总待办，统一处理进度与截止日期。</p><button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>打开任务中心</strong><small>{openTaskCount ? `${openTaskCount} 项未完成` : '当前没有未完成任务'}</small></span><i>›</i></button></section>}
 
-            {sidebarPanel === 'assistant' && <section className="sidebar-panel sidebar-panel--assistant" aria-label="AI 助手">
-              <div className="sidebar-panel__heading"><span>AI 助手</span><small>基于当前导图</small></div>
-              <AiAssistant document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} />
-            </section>}
           </div>
           <footer className="sidebar-footer">
             <button className="sidebar-footer-action" type="button"><span>⚙</span>设置</button>
@@ -1151,6 +1156,10 @@ export function App() {
               : <OutlineView tags={tags} workspaceDocuments={taskDocuments} onRevealWorkspaceNode={revealWorkspaceNode} focusRootId={focusedNodeId} />}
           </div>
         </section>
+
+        {assistantOpen && <AssistantDock width={assistantDockWidth} onWidthChange={setAssistantDockWidth} onWidthCommit={saveAssistantDockWidth} onClose={toggleAssistantDock}>
+          <AiAssistant heading="当前协作" document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} />
+        </AssistantDock>}
 
         <aside className="inspector">
           <header className="inspector__header">

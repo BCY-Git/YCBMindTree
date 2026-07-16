@@ -57,7 +57,7 @@ export function QuickAssistant({ document, workspaceDocuments }: { document: Min
     if (!content || sending) return
     const settings = loadAiSettings()
     if (!settings.endpoint.trim() || !settings.model.trim() || (!settings.apiKey.trim() && !import.meta.env.DEV)) {
-      setNotice('请先在左侧 AI 助手中完成模型连接配置。')
+      setNotice('请先在右侧 AI 助手中完成模型连接配置。')
       return
     }
     const question: QuickMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt: Date.now() }
@@ -96,7 +96,7 @@ export function QuickAssistant({ document, workspaceDocuments }: { document: Min
       <span className="quick-assistant-fab__spark">✦</span>
     </button>
     {open && <section className="quick-assistant" aria-label="随手助手">
-      <header><div><span className="quick-assistant__mark">✦</span><strong>随手助手</strong><small>独立于左侧 AI 助手</small></div><button onClick={() => setOpen(false)} aria-label="关闭随手助手">×</button></header>
+      <header><div><span className="quick-assistant__mark">✦</span><strong>随手助手</strong><small>独立于右侧 AI 工作台</small></div><button onClick={() => setOpen(false)} aria-label="关闭随手助手">×</button></header>
       <p className="quick-assistant__notice">{notice}</p>
       <div className="quick-assistant__quick-actions">{quickPrompts.map((item) => <button key={item} disabled={sending} onClick={() => { void ask(undefined, item) }}>{item}</button>)}</div>
       <div className="quick-assistant__history" aria-live="polite">

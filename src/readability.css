@@ -46,6 +46,27 @@
 .quick-assistant form textarea { min-height: 46px; padding: 9px; font-size: 13px; }
 .quick-assistant form button { min-width: 58px; font-size: 13px; }
 
+/* AI 工作台是主要工作面，使用与属性编辑器一致的正文尺度。 */
+.assistant-dock .ai-assistant__heading { font-size: 14px; }
+.assistant-dock .ai-assistant__heading button { font-size: 12px; }
+.assistant-dock .ai-assistant__status { font-size: 12px; line-height: 1.55; }
+.assistant-dock .ai-settings { gap: 9px; }
+.assistant-dock .ai-settings label, .assistant-dock .ai-ghost-toggle { font-size: 12px !important; }
+.assistant-dock .ai-settings input, .assistant-dock .ai-prompt textarea { font-size: 13px; }
+.assistant-dock .ai-settings input { height: 35px; padding: 0 9px; }
+.assistant-dock .ai-save-button, .assistant-dock .ai-prompt button { min-height: 35px; font-size: 12px; }
+.assistant-dock .ai-assistant__privacy { font-size: 11px; line-height: 1.55; }
+.assistant-dock .ai-prompt { gap: 8px; margin-top: 13px; }
+.assistant-dock .ai-prompt textarea { min-height: 76px; padding: 9px; }
+.assistant-dock .ai-response { font-size: 13px; line-height: 1.65; }
+.assistant-dock .workflow-panel { gap: 9px; padding: 11px; }
+.assistant-dock .workflow-panel strong { font-size: 12px; }
+.assistant-dock .workflow-panel small, .assistant-dock .workflow-panel--empty p, .assistant-dock .workflow-panel label, .assistant-dock .workflow-panel details summary, .assistant-dock .workflow-checkpoint dl { font-size: 11px; }
+.assistant-dock .workflow-panel input, .assistant-dock .workflow-panel select, .assistant-dock .workflow-panel textarea, .assistant-dock .workflow-panel__modes button, .assistant-dock .workflow-panel__actions button { min-height: 32px; font-size: 12px; }
+.assistant-dock .deposit-inbox__heading, .assistant-dock .deposit-candidate, .assistant-dock .ai-branch-preview__heading, .assistant-dock .ai-branch-preview__list { font-size: 12px; }
+.assistant-dock .deposit-inbox__heading span, .assistant-dock .deposit-inbox__summary, .assistant-dock .deposit-inbox__empty, .assistant-dock .deposit-candidate__main small, .assistant-dock .deposit-candidate__reason, .assistant-dock .deposit-candidate > p { font-size: 11px; }
+.assistant-dock .deposit-inbox__actions button, .assistant-dock .ai-deposit-preview button, .assistant-dock .ai-branch-preview__actions button { min-height: 32px; font-size: 12px; }
+
 /* 顶栏菜单要跨过工作区与左右面板，但仍低于真正的模态对话框。 */
 .topbar { z-index: 40; }
 .topbar-utility, .export-menu-wrap { z-index: 41; }
