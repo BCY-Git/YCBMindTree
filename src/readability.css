@@ -23,6 +23,7 @@
 .inspector-tabs button { height: 31px; font-size: 11px; }
 .field-label, .property-row { font-size: 12px; }
 .inspector textarea { font-size: 14px; }
+.ghost-note-editor { --note-editor-font-size: 14px; }
 .empty-inspector { font-size: 13px; }
 .danger-button { font-size: 12px; }
 .tag-manager__input, .tag-manager__row input, .tag-manager__row button, .tag-manager__empty { font-size: 12px; }
