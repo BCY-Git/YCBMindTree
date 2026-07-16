@@ -16,6 +16,7 @@ import { requestGhostCompletion } from '../ai/ghost-completion'
 import type { MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
 import { AttachmentImage } from '../attachments/AttachmentImage'
+import type { SemanticZoomLevel } from './semantic-zoom'
 
 export type MindNodeData = {
   label: string
@@ -32,6 +33,8 @@ export type MindNodeData = {
   accentColor: string
   isRelationSource: boolean
   imageAttachment?: MindNodeAttachment | null
+  /** 当前画布的信息密度；只影响内容显隐，不改变布局尺寸。 */
+  semanticZoomLevel: SemanticZoomLevel
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
   layoutHeight: number
   onEditingHeightChange?: (height: number | null) => void
@@ -161,6 +164,10 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   }
   const taskIcon = node.taskStatus === 'todo' ? '○' : node.taskStatus === 'doing' ? '◐' : node.taskStatus === 'done' ? '✓' : null
   const taskLabel = node.taskStatus === 'todo' ? '待办' : node.taskStatus === 'doing' ? '进行中' : node.taskStatus === 'done' ? '已完成' : ''
+  // 被选中或编辑的节点始终恢复完整工作能力，远景下仍可直接继续当前任务。
+  const effectiveDetailLevel: SemanticZoomLevel = selected || isEditing ? 'workspace' : node.semanticZoomLevel
+  const showWorkspaceDetails = effectiveDetailLevel === 'workspace'
+  const showStructureSignals = effectiveDetailLevel === 'structure'
   const beginEditing = (event: React.MouseEvent<HTMLDivElement>) => {
     if (isEditing || (event.target as HTMLElement).closest('.collapse-toggle, .node-resize-control')) return
     event.preventDefault()
@@ -175,13 +182,13 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
 
   return (
     <div
-      className={`mind-node ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`}
+      className={`mind-node mind-node--detail-${effectiveDetailLevel} ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`}
       style={{ '--node-accent': node.accentColor } as CSSProperties}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
       onDoubleClick={beginEditing}
     >
-      {!isEditing && (selected || isHovering) && <NodeResizeControl
+      {!isEditing && showWorkspaceDetails && (selected || isHovering) && <NodeResizeControl
         position="bottom-right"
         className="node-resize-control"
         minWidth={node.isRoot ? 196 : 118}
@@ -255,8 +262,15 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {suggestion && <span className="sr-only">按 Tab 接受 AI 续写，按 Esc 忽略</span>}
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
-      ) : <div className={`node-label ${node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
-        {(taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span ref={markerControlsRef} className="node-markers" title={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
+      ) : <div className={`node-label ${showWorkspaceDetails && node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
+        {showStructureSignals && (taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0 || node.imageAttachment) && <span className="node-semantic-signals" aria-label="节点包含任务或资源信息">
+          {taskIcon && <i>{taskIcon}</i>}
+          {node.priority > 0 && <i>P{node.priority}</i>}
+          {node.marks.length > 0 && <i>◆</i>}
+          {node.tags.length > 0 && <i>●</i>}
+          {node.imageAttachment && <i>▧</i>}
+        </span>}
+        {showWorkspaceDetails && (taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span ref={markerControlsRef} className="node-markers" title={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
           {taskIcon && <button type="button" className={`node-task node-task--${node.taskStatus} nodrag`} aria-label={`任务状态：${taskLabel}，点击修改`} aria-haspopup="menu" aria-expanded={markerMenu === 'task'} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); selectNode(id); setMarkerMenu((current) => current === 'task' ? null : 'task') }}>{taskIcon}</button>}
           {markerMenu === 'task' && <span className="node-marker-menu nodrag" role="menu" aria-label="设置任务状态" onPointerDown={(event) => event.stopPropagation()}>{([['none', '普通主题'], ['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as Array<[MindNodeTaskStatus, string]>).map(([status, label]) => <button key={status} type="button" role="menuitem" className={node.taskStatus === status ? 'is-active' : ''} onClick={(event) => { event.stopPropagation(); dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: id, taskStatus: status }); setMarkerMenu(null) }}>{label}</button>)}</span>}
           {node.priority > 0 && <button type="button" className="node-priority nodrag" aria-label={`优先级 P${node.priority}，点击修改`} aria-haspopup="menu" aria-expanded={markerMenu === 'priority'} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); selectNode(id); setMarkerMenu((current) => current === 'priority' ? null : 'priority') }}>P{node.priority}</button>}
@@ -265,7 +279,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {node.tags.map((tag) => <i key={tag.id} className="node-tag-dot" title={tag.name} style={{ '--tag-color': tag.color } as CSSProperties} aria-hidden="true" />)}
         </span>}
         <span>{node.label}</span>
-        {node.imageAttachment && <AttachmentImage attachment={node.imageAttachment} variant="node" />}
+        {showWorkspaceDetails && node.imageAttachment && <AttachmentImage attachment={node.imageAttachment} variant="node" />}
       </div>}
       <Handle
         id="source-left"

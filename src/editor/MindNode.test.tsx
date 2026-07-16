@@ -23,13 +23,14 @@ function renderEditingNode(dataOverrides: Partial<MindNodeData> = {}) {
     hiddenDescendantCount: 0,
     accentColor: '#467566',
     isRelationSource: false,
+    semanticZoomLevel: 'workspace',
     layoutHeight: 44,
     ...dataOverrides,
   }
   return render(<ReactFlowProvider><MindNode id={nodeId} type="mind" data={data} selected={true} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
 }
 
-function renderNode(dataOverrides: Partial<MindNodeData> = {}, id = 'parent-node') {
+function renderNode(dataOverrides: Partial<MindNodeData> = {}, id = 'parent-node', selected = false) {
   const data: MindNodeData = {
     label: '父节点',
     isRoot: false,
@@ -44,10 +45,11 @@ function renderNode(dataOverrides: Partial<MindNodeData> = {}, id = 'parent-node
     hiddenDescendantCount: 0,
     accentColor: '#467566',
     isRelationSource: false,
+    semanticZoomLevel: 'workspace',
     layoutHeight: 44,
     ...dataOverrides,
   }
-  return render(<ReactFlowProvider><MindNode id={id} type="mind" data={data} selected={false} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
+  return render(<ReactFlowProvider><MindNode id={id} type="mind" data={data} selected={selected} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
 }
 
 beforeEach(() => {
@@ -156,5 +158,31 @@ describe('MindNode task markers', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'P2 · 中' }))
 
     expect(useEditorStore.getState().document.nodes[nodeId].priority).toBe(2)
+  })
+})
+
+describe('MindNode semantic zoom', () => {
+  it('keeps only the topic and collapse control in overview detail', () => {
+    renderNode({ semanticZoomLevel: 'overview', taskStatus: 'todo', priority: 1, hasChildren: true })
+
+    expect(screen.getByText('父节点')).toBeDefined()
+    expect(screen.getByRole('button', { name: '折叠节点' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: '任务状态：待办，点击修改' })).toBeNull()
+    expect(screen.queryByText('P1')).toBeNull()
+  })
+
+  it('shows compact non-interactive signals in structure detail', () => {
+    const { container } = renderNode({ semanticZoomLevel: 'structure', taskStatus: 'doing', priority: 2 })
+
+    expect(container.querySelector('.node-semantic-signals')?.textContent).toContain('◐')
+    expect(container.querySelector('.node-semantic-signals')?.textContent).toContain('P2')
+    expect(screen.queryByRole('button', { name: '任务状态：进行中，点击修改' })).toBeNull()
+  })
+
+  it('restores full node controls when an overview node is selected', () => {
+    renderNode({ semanticZoomLevel: 'overview', taskStatus: 'todo', priority: 1 }, 'selected-node', true)
+
+    expect(screen.getByRole('button', { name: '任务状态：待办，点击修改' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '优先级 P1，点击修改' })).toBeDefined()
   })
 })

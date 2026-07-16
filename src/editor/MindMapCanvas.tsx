@@ -49,6 +49,13 @@ import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/dat
 import { findClipboardImageFile } from './clipboard-image'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 import { projectFocusedDocument } from '../focus/focus-projection'
+import {
+  loadSemanticZoomEnabled,
+  resolveSemanticZoomLevel,
+  saveSemanticZoomEnabled,
+  semanticZoomLevelLabel,
+  type SemanticZoomLevel,
+} from './semantic-zoom'
 
 const nodeTypes = { mindNode: MindNode }
 // 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
@@ -141,6 +148,8 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const [detachingNodeId, setDetachingNodeId] = useState<string | null>(null)
   const [flowNodes, setFlowNodes] = useState<Node<MindNodeData>[]>([])
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node<MindNodeData>, Edge> | null>(null)
+  const [semanticZoomEnabled, setSemanticZoomEnabled] = useState(loadSemanticZoomEnabled)
+  const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>(() => resolveSemanticZoomLevel(null, 1, loadSemanticZoomEnabled()))
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
   const [pasteAttachmentStatus, setPasteAttachmentStatus] = useState<string | null>(null)
   const viewDocument = useMemo(() => focusRootId ? projectFocusedDocument(document, focusRootId) : document, [document, focusRootId])
@@ -251,6 +260,8 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
           isRelationSource: relationSourceIds.includes(item.id),
           imageAttachment: mindNode.attachments.find((attachment) => attachment.type.startsWith('image/')) ?? null,
+          // 语义层级在渲染前单独覆盖，不能成为 layoutTree 的输入或触发布局重算。
+          semanticZoomLevel: 'workspace',
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
         },
@@ -326,6 +337,22 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
   }, [document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
 
+  const onViewportMove = useCallback((_: MouseEvent | TouchEvent | null, viewport: { zoom: number }) => {
+    setSemanticZoomLevel((current) => resolveSemanticZoomLevel(current, viewport.zoom, semanticZoomEnabled))
+  }, [semanticZoomEnabled])
+
+  const initializeFlow = useCallback((instance: ReactFlowInstance<Node<MindNodeData>, Edge>) => {
+    setFlowInstance(instance)
+    setSemanticZoomLevel(resolveSemanticZoomLevel(null, instance.getZoom(), semanticZoomEnabled))
+  }, [semanticZoomEnabled])
+
+  const toggleSemanticZoom = useCallback(() => {
+    const nextEnabled = !semanticZoomEnabled
+    saveSemanticZoomEnabled(nextEnabled)
+    setSemanticZoomEnabled(nextEnabled)
+    setSemanticZoomLevel(resolveSemanticZoomLevel(null, flowInstance?.getZoom() ?? 1, nextEnabled))
+  }, [flowInstance, semanticZoomEnabled])
+
   const draggedSubtreeIds = useMemo(() => {
     if (!draggingNodeId) return new Set<string>()
     if (draggingNodeId === document.rootId) return new Set(Object.keys(document.nodes))
@@ -341,6 +368,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   useEffect(() => {
     setFlowNodes((current) => retainDraggingNodePosition(baseNodes, current, draggingNodeId, draggedSubtreeIds))
   }, [baseNodes, draggedSubtreeIds, draggingNodeId])
+
+  const renderedFlowNodes = useMemo(() => flowNodes.map((node) => node.data.semanticZoomLevel === semanticZoomLevel
+    ? node
+    : { ...node, data: { ...node.data, semanticZoomLevel } }), [flowNodes, semanticZoomLevel])
 
   // 仅在首次打开或切换到另一张导图时自动适应视图；节点增删、编辑和布局更新都必须保留用户当前视角。
   useEffect(() => {
@@ -758,7 +789,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   }, [dispatch, document.id, document.rootId, pasteIntoNode])
 
   return (
-    <div className="canvas-shell" style={{
+    <div className={`canvas-shell canvas-shell--detail-${semanticZoomLevel}`} style={{
       '--canvas': theme.canvas,
       '--grid': theme.grid,
       '--node-bg': theme.nodeBackground,
@@ -799,11 +830,12 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       dispatch({ type: 'ADD_FREE_TOPIC', x: position.x, y: position.y })
     }}>
       <ReactFlow
-        nodes={flowNodes}
+        nodes={renderedFlowNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
-        onInit={setFlowInstance}
+        onInit={initializeFlow}
+        onMove={onViewportMove}
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onNodeDrag={onNodeDrag}
@@ -898,7 +930,17 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             </div>
           ))}
         </ViewportPortal>
-        <Controls showInteractive={false}><ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton><ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton></Controls>
+        <Controls showInteractive={false}>
+          <ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton>
+          <ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton>
+          <ControlButton
+            className={`semantic-zoom-control ${semanticZoomEnabled ? 'is-active' : ''}`}
+            onClick={toggleSemanticZoom}
+            title={semanticZoomEnabled ? `语义缩放已开启 · 当前${semanticZoomLevelLabel[semanticZoomLevel]}层` : '语义缩放已关闭 · 始终显示完整节点'}
+            aria-label={semanticZoomEnabled ? `关闭语义缩放，当前${semanticZoomLevelLabel[semanticZoomLevel]}层` : '开启语义缩放'}
+            aria-pressed={semanticZoomEnabled}
+          >层</ControlButton>
+        </Controls>
       </ReactFlow>
       {relationSourceIds.length > 0 && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>单击已有节点，或双击空白处创建新主题 · Esc 取消</span></div>}
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
