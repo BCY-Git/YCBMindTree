@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReactFlowProvider } from '@xyflow/react'
 import { MindNode, type MindNodeData } from './MindNode'
 import { useEditorStore } from '../store/editor.store'
+import { createInitialDocument } from '../domain/document.factory'
 
 const nodeId = 'node-under-edit'
 
@@ -27,7 +28,7 @@ function renderEditingNode() {
   return render(<ReactFlowProvider><MindNode id={nodeId} type="mind" data={data} selected={true} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
 }
 
-function renderNode(dataOverrides: Partial<MindNodeData> = {}) {
+function renderNode(dataOverrides: Partial<MindNodeData> = {}, id = 'parent-node') {
   const data: MindNodeData = {
     label: '父节点',
     isRoot: false,
@@ -45,8 +46,13 @@ function renderNode(dataOverrides: Partial<MindNodeData> = {}) {
     layoutHeight: 44,
     ...dataOverrides,
   }
-  return render(<ReactFlowProvider><MindNode id="parent-node" type="mind" data={data} selected={false} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
+  return render(<ReactFlowProvider><MindNode id={id} type="mind" data={data} selected={false} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
 }
+
+beforeEach(() => {
+  const document = createInitialDocument()
+  useEditorStore.getState().hydrate(document)
+})
 
 afterEach(() => act(() => useEditorStore.getState().editNode(null)))
 
@@ -110,5 +116,34 @@ describe('MindNode relation handles', () => {
 
     expect(targetHandles).toHaveLength(2)
     targetHandles.forEach((handle) => expect(handle.classList.contains('connectable')).toBe(true))
+  })
+})
+
+describe('MindNode task markers', () => {
+  it('lets the user change task status directly from the visible task marker', () => {
+    const document = useEditorStore.getState().document
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    act(() => useEditorStore.getState().dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId, taskStatus: 'todo' }))
+    renderNode({ taskStatus: 'todo' }, nodeId)
+
+    fireEvent.click(screen.getByRole('button', { name: '任务状态：待办，点击修改' }))
+    expect(useEditorStore.getState().selectedNodeId).toBe(nodeId)
+    fireEvent.click(screen.getByRole('menuitem', { name: '进行中' }))
+
+    expect(useEditorStore.getState().document.nodes[nodeId].taskStatus).toBe('doing')
+    expect(useEditorStore.getState().past).not.toHaveLength(0)
+  })
+
+  it('lets the user choose priority and offers a clear option from the visible marker', () => {
+    const document = useEditorStore.getState().document
+    const nodeId = document.nodes[document.rootId].childIds[0]
+    act(() => useEditorStore.getState().dispatch({ type: 'SET_NODE_PRIORITY', nodeId, priority: 1 }))
+    renderNode({ priority: 1 }, nodeId)
+
+    fireEvent.click(screen.getByRole('button', { name: '优先级 P1，点击修改' }))
+    expect(screen.getByRole('menuitem', { name: '未设置' })).toBeDefined()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'P2 · 中' }))
+
+    expect(useEditorStore.getState().document.nodes[nodeId].priority).toBe(2)
   })
 })

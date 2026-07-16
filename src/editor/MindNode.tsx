@@ -13,7 +13,7 @@ import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/rea
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
-import type { MindNodeAttachment, NodeMark } from '../domain/document.types'
+import type { MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
 import { AttachmentImage } from '../attachments/AttachmentImage'
 
@@ -41,6 +41,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const node = data as MindNodeData
   const editingNodeId = useEditorStore((state) => state.editingNodeId)
   const editNode = useEditorStore((state) => state.editNode)
+  const selectNode = useEditorStore((state) => state.selectNode)
   const dispatch = useEditorStore((state) => state.dispatch)
   const isEditing = editingNodeId === id
   // 非编辑节点不订阅整份文档，避免输入一个字导致画布上每个卡片都随之重渲染。
@@ -59,8 +60,18 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const [isHovering, setIsHovering] = useState(false)
   const [editorHeight, setEditorHeight] = useState<number | null>(null)
   const reportedHeightRef = useRef<number | null>(null)
+  const markerControlsRef = useRef<HTMLSpanElement>(null)
+  const [markerMenu, setMarkerMenu] = useState<'task' | 'priority' | null>(null)
 
   useEffect(() => setTopic(node.label), [node.label])
+  useEffect(() => {
+    if (!markerMenu) return
+    const closeMarkerMenu = (event: PointerEvent) => {
+      if (!markerControlsRef.current?.contains(event.target as globalThis.Node)) setMarkerMenu(null)
+    }
+    globalThis.document.addEventListener('pointerdown', closeMarkerMenu, true)
+    return () => globalThis.document.removeEventListener('pointerdown', closeMarkerMenu, true)
+  }, [markerMenu])
   useLayoutEffect(() => {
     if (!isEditing) return
     let settleFrame = 0
@@ -247,9 +258,11 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
       ) : <div className={`node-label ${node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
-        {(taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span className="node-markers" aria-label={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
-          {taskIcon && <i className={`node-task node-task--${node.taskStatus}`} aria-hidden="true">{taskIcon}</i>}
-          {node.priority > 0 && <i className="node-priority" aria-hidden="true">P{node.priority}</i>}
+        {(taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span ref={markerControlsRef} className="node-markers" title={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
+          {taskIcon && <button type="button" className={`node-task node-task--${node.taskStatus} nodrag`} aria-label={`任务状态：${taskLabel}，点击修改`} aria-haspopup="menu" aria-expanded={markerMenu === 'task'} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); selectNode(id); setMarkerMenu((current) => current === 'task' ? null : 'task') }}>{taskIcon}</button>}
+          {markerMenu === 'task' && <span className="node-marker-menu nodrag" role="menu" aria-label="设置任务状态" onPointerDown={(event) => event.stopPropagation()}>{([['none', '普通主题'], ['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as Array<[MindNodeTaskStatus, string]>).map(([status, label]) => <button key={status} type="button" role="menuitem" className={node.taskStatus === status ? 'is-active' : ''} onClick={(event) => { event.stopPropagation(); dispatch({ type: 'SET_NODE_TASK_STATUS', nodeId: id, taskStatus: status }); setMarkerMenu(null) }}>{label}</button>)}</span>}
+          {node.priority > 0 && <button type="button" className="node-priority nodrag" aria-label={`优先级 P${node.priority}，点击修改`} aria-haspopup="menu" aria-expanded={markerMenu === 'priority'} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); selectNode(id); setMarkerMenu((current) => current === 'priority' ? null : 'priority') }}>P{node.priority}</button>}
+          {markerMenu === 'priority' && <span className="node-marker-menu nodrag" role="menu" aria-label="设置优先级" onPointerDown={(event) => event.stopPropagation()}>{([[0, '未设置'], [1, 'P1 · 高'], [2, 'P2 · 中'], [3, 'P3 · 低']] as Array<[MindNodePriority, string]>).map(([priority, label]) => <button key={priority} type="button" role="menuitem" className={node.priority === priority ? 'is-active' : ''} onClick={(event) => { event.stopPropagation(); dispatch({ type: 'SET_NODE_PRIORITY', nodeId: id, priority }); setMarkerMenu(null) }}>{label}</button>)}</span>}
           {node.marks.map((mark) => <i key={mark} className={`node-mark node-mark--${mark}`} title={nodeMarkMeta[mark].label} aria-hidden="true">{nodeMarkMeta[mark].icon}</i>)}
           {node.tags.map((tag) => <i key={tag.id} className="node-tag-dot" title={tag.name} style={{ '--tag-color': tag.color } as CSSProperties} aria-hidden="true" />)}
         </span>}
