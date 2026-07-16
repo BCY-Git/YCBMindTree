@@ -46,6 +46,7 @@ import type { MindMapDocument, MindNode as DomainMindNode } from '../domain/docu
 import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/database'
+import { findClipboardImageFile } from './clipboard-image'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 import { projectFocusedDocument } from '../focus/focus-projection'
 
@@ -694,9 +695,9 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, [contenteditable="true"]')) return
-      const image = Array.from(event.clipboardData?.items ?? []).find((item) => item.type.startsWith('image/'))?.getAsFile()
+      const target = event.target
+      if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
+      const image = findClipboardImageFile(event.clipboardData)
       const selected = useEditorStore.getState().selectedNodeId ?? document.rootId
       if (!image) {
         event.preventDefault()
