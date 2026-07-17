@@ -48,6 +48,10 @@ import { createInternalNodeLink, parseInternalNodeLink, resolveInternalNodeLink 
 import { PresentationMode } from '../presentation/PresentationMode'
 import { AttachmentImage } from '../attachments/AttachmentImage'
 import { exportFileStatus, revealExportFile, type ExportFileResult } from '../export/export-file'
+import { ProjectStatusPanel } from '../projects/ProjectStatusPanel'
+import { buildProjectStatus } from '../projects/project-status'
+import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
+import type { WorkflowSession } from '../ai/workflow/workflow-types'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -69,7 +73,7 @@ type PendingNavigation =
   | { kind: 'quick-note' }
 
 type SidebarPanel = 'projects' | 'maps' | 'tasks'
-type InspectorTab = 'content' | 'tasks' | 'resources' | 'map'
+type InspectorTab = 'content' | 'tasks' | 'resources' | 'project' | 'map'
 type UniversalImportCandidate = ImportedDocument & { format: 'OPML' | 'Markdown' }
 
 function toggleValue<T>(values: T[], value: T) {
@@ -171,6 +175,8 @@ export function App() {
   const [workspaceBackupCandidate, setWorkspaceBackupCandidate] = useState<WorkspaceBackup | null>(null)
   const [workspaceBackupBusy, setWorkspaceBackupBusy] = useState(false)
   const [workspaceBackupStatus, setWorkspaceBackupStatus] = useState<string | null>(null)
+  const [projectStatusData, setProjectStatusData] = useState<{ batches: DepositBatch[]; provenance: DepositProvenance[]; workflowSessions: WorkflowSession[] }>({ batches: [], provenance: [], workflowSessions: [] })
+  const [projectStatusRefreshing, setProjectStatusRefreshing] = useState(false)
   const [exportStatus, setExportStatus] = useState<{ message: string; path?: string } | null>(null)
   const [documentQuery, setDocumentQuery] = useState('')
   const pendingSaveRef = useRef<number | null>(null)
@@ -182,6 +188,7 @@ export function App() {
   const workspaceBackupInputRef = useRef<HTMLInputElement>(null)
   const pendingNodeFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
+  const projectStatus = useMemo(() => selectedNode ? buildProjectStatus({ document, rootNodeId: selectedNode.id, ...projectStatusData }) : null, [document, projectStatusData, selectedNode])
   const focusBreadcrumb = useMemo(() => focusedNodeId ? buildFocusBreadcrumb(document, focusedNodeId) : [], [document, focusedNodeId])
   const canGroupSelection = useMemo(() => {
     if (selectedNodeIds.length < 2) return false
@@ -441,6 +448,21 @@ export function App() {
     localStorage.setItem('mindtree.workspace-view', next)
     return next
   })
+
+  /** 项目状态只读取已确认的沉淀与协作会话；刷新不会改写任何节点或原始记录。 */
+  const refreshProjectStatus = useCallback(async () => {
+    setProjectStatusRefreshing(true)
+    try {
+      const [batches, provenance, workflowSessions] = await Promise.all([listAllDepositBatches(), listAllDepositProvenance(), listAllWorkflowSessions()])
+      setProjectStatusData({ batches, provenance, workflowSessions })
+    } catch (error) {
+      console.warn('无法刷新项目状态', error)
+    } finally {
+      setProjectStatusRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => { void refreshProjectStatus() }, [document.id, document.updatedAt, refreshProjectStatus])
 
   const persistDocument = useCallback(async (documentToSave: MindMapDocument) => {
     if (deletedDocumentIdsRef.current.has(documentToSave.id)) return
@@ -1204,6 +1226,7 @@ export function App() {
               <button className={inspectorTab === 'content' ? 'is-active' : ''} onClick={() => setInspectorTab('content')}>内容</button>
               <button className={inspectorTab === 'tasks' ? 'is-active' : ''} onClick={() => setInspectorTab('tasks')}>任务</button>
               <button className={inspectorTab === 'resources' ? 'is-active' : ''} onClick={() => setInspectorTab('resources')}>资源</button>
+              <button className={inspectorTab === 'project' ? 'is-active' : ''} onClick={() => setInspectorTab('project')}>项目</button>
               <button className={inspectorTab === 'map' ? 'is-active' : ''} onClick={() => setInspectorTab('map')}>图谱</button>
             </nav>}
           </header>
@@ -1226,6 +1249,7 @@ export function App() {
                 <div className="node-semantic-section"><p className="field-label">标签</p><div className="node-tag-list">{selectedNode.tagIds.flatMap((tagId) => { const tag = tags.find((item) => item.id === tagId); return tag ? [<button key={tag.id} onClick={() => setSelectedNodeTags(selectedNode.tagIds.filter((id) => id !== tag.id))}><i style={{ background: tag.color }} />{tag.name} ×</button>] : [] })}</div><form className="node-tag-add" onSubmit={(event) => { event.preventDefault(); addTagToSelectedNode() }}><input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="输入标签，如 #工作" /><button type="submit">添加</button></form>{tags.length > 0 && <div className="node-tag-library">{tags.filter((tag) => !selectedNode.tagIds.includes(tag.id)).map((tag) => <button key={tag.id} onClick={() => setSelectedNodeTags([...selectedNode.tagIds, tag.id])}><i style={{ background: tag.color }} />{tag.name}</button>)}</div>}<details className="tag-library-manager"><summary>管理标签库</summary>{tags.map((tag) => <div key={tag.id}><input type="color" value={tag.color} onChange={(event) => { recolorTag(tag.id, event.target.value) }} /><input defaultValue={tag.name} aria-label={`${tag.name} 标签名称`} onBlur={(event) => { if (event.target.value.trim() !== tag.name) renameTag(tag.id, event.target.value) }} /><button onClick={() => { const count = tagReferenceCount(tag.id); if (window.confirm(`删除“${tag.name}”？${count ? `仍有 ${count} 个节点保留该标签引用。` : ''}`)) deleteTag(tag.id) }}>删除</button></div>)}</details></div>
               </section>}
               {inspectorTab === 'resources' && <section className="inspector-pane"><div className="node-resource-section"><p className="field-label">链接</p>{selectedNode.links.map((link) => { const internal = parseInternalNodeLink(link.url); const resolution = internal ? resolveInternalNodeLink(link.url, taskDocuments) : null; return <div className={`node-resource ${internal && resolution?.status !== 'ok' ? 'is-stale' : ''}`} key={link.id}>{internal ? <button className="node-resource__internal" onClick={() => followNodeLink(link.url)} title={resolution?.status === 'ok' ? `前往 ${resolution.document.title}` : '内部链接已失效'}><span>↗ {link.label}</span><small>{resolution?.status === 'ok' ? resolution.document.title : '链接已失效'}</small></button> : <a href={link.url} target="_blank" rel="noreferrer" title={link.url}>{link.label}</a>}<button onClick={() => dispatch({ type: 'DELETE_NODE_LINK', nodeId: selectedNode.id, linkId: link.id })} aria-label={`删除链接 ${link.label}`}>×</button></div> })}<div className="node-internal-link-actions"><button className="subtle-button" onClick={() => setInternalLinkPickerOpen(true)}>链接工作区节点</button><button className="subtle-button" onClick={() => { void copySelectedNodeLink() }}>复制当前节点链接</button></div><form className="node-link-form" onSubmit={addNodeLink}><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://…" type="url" /><input value={linkLabel} onChange={(event) => setLinkLabel(event.target.value)} placeholder="链接名称（可选）" /><button type="submit">添加网页链接</button></form>{linkStatus && <small className="node-resource__hint">{linkStatus}</small>}</div><div className="node-resource-section"><p className="field-label">附件</p><div className="node-image-resources">{selectedNode.attachments.filter((attachment) => attachment.type.startsWith('image/')).map((attachment) => <div className="node-image-resource" key={attachment.id}><AttachmentImage attachment={attachment} variant="inspector" /><button onClick={() => dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: selectedNode.id, attachmentId: attachment.id })} aria-label={`移除附件 ${attachment.name}`}>×</button></div>)}</div>{selectedNode.attachments.filter((attachment) => !attachment.type.startsWith('image/')).map((attachment) => <div className="node-resource" key={attachment.id}><button className="node-resource__file" onClick={() => { void downloadNodeAttachment(attachment.id) }} title="下载本机附件">⌁ {attachment.name}<small>{Math.max(1, Math.ceil(attachment.size / 1024))} KB</small></button><button onClick={() => dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: selectedNode.id, attachmentId: attachment.id })} aria-label={`移除附件 ${attachment.name}`}>×</button></div>)}<input ref={attachmentInputRef} className="node-attachment-input" type="file" accept="image/*,.pdf,.txt,.md,.zip" onChange={(event) => { void uploadNodeAttachment(event) }} /><button className="subtle-button" onClick={() => attachmentInputRef.current?.click()}>添加图片或附件</button><small className="node-resource__hint">图片会显示在节点中；附件仅保存在本机，单个最大 15 MB。</small>{attachmentStatus && <small className="node-resource__hint">{attachmentStatus}</small>}</div></section>}
+              {inspectorTab === 'project' && projectStatus && <section className="inspector-pane"><ProjectStatusPanel status={projectStatus} documents={taskDocuments} onRevealSource={revealWorkspaceNode} onRefresh={() => { void refreshProjectStatus() }} refreshing={projectStatusRefreshing} /></section>}
               {inspectorTab === 'map' && <section className="inspector-pane"><div className="property-row"><span>子节点</span><strong>{selectedNode.childIds.length}</strong></div><div className="property-row"><span>状态</span><strong>{selectedNode.collapsed ? '已折叠' : '已展开'}</strong></div><button className="subtle-button" onClick={() => dispatch({ type: 'RESET_NODE_OFFSET', nodeId: selectedNode.id })}>重置节点位置</button><button className="danger-button" disabled={selectedNode.id === document.rootId} onClick={() => dispatch({ type: 'DELETE_NODE', nodeId: selectedNode.id })}>删除此分支</button><div className="theme-picker"><p className="eyebrow">主题</p><div className="theme-grid">{themes.map((candidate) => <button key={candidate.id} className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`} onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })} title={candidate.description}><span className="theme-preview" style={{ background: candidate.canvas }}><i style={{ background: candidate.rootBackground }} />{candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}</span><span>{candidate.name}</span></button>)}</div></div><div className="layout-controls"><p className="eyebrow">布局</p><label>层级间距 <output>{document.layout.levelGap}</output></label><input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} /><label>同级间距 <output>{document.layout.siblingGap}</output></label><input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} /></div></section>}
             </> : <section className="inspector-pane"><p className="empty-inspector">选择一个节点，即可编辑内容和查看分支信息。</p><div className="theme-picker"><p className="eyebrow">主题</p><div className="theme-grid">{themes.map((candidate) => <button key={candidate.id} className={`theme-option ${candidate.id === theme.id ? 'is-active' : ''}`} onClick={() => dispatch({ type: 'APPLY_THEME', themeId: candidate.id })} title={candidate.description}><span className="theme-preview" style={{ background: candidate.canvas }}><i style={{ background: candidate.rootBackground }} />{candidate.palette.slice(0, 3).map((color) => <b key={color} style={{ background: color }} />)}</span><span>{candidate.name}</span></button>)}</div></div><div className="layout-controls"><p className="eyebrow">布局</p><label>层级间距 <output>{document.layout.levelGap}</output></label><input type="range" min="48" max="180" value={document.layout.levelGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { levelGap: Number(event.target.value) } })} /><label>同级间距 <output>{document.layout.siblingGap}</output></label><input type="range" min="8" max="72" value={document.layout.siblingGap} onChange={(event) => dispatch({ type: 'UPDATE_LAYOUT', layout: { siblingGap: Number(event.target.value) } })} /></div></section>}
           </div>
