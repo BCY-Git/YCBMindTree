@@ -24,6 +24,7 @@ function renderEditingNode(dataOverrides: Partial<MindNodeData> = {}) {
     accentColor: '#467566',
     isRelationSource: false,
     semanticZoomLevel: 'workspace',
+    depth: 0,
     layoutHeight: 44,
     ...dataOverrides,
   }
@@ -46,6 +47,7 @@ function renderNode(dataOverrides: Partial<MindNodeData> = {}, id = 'parent-node
     accentColor: '#467566',
     isRelationSource: false,
     semanticZoomLevel: 'workspace',
+    depth: 0,
     layoutHeight: 44,
     ...dataOverrides,
   }
@@ -184,5 +186,14 @@ describe('MindNode semantic zoom', () => {
 
     expect(screen.getByRole('button', { name: '任务状态：待办，点击修改' })).toBeDefined()
     expect(screen.getByRole('button', { name: '优先级 P1，点击修改' })).toBeDefined()
+  })
+
+  it('renders deep overview nodes as context while preserving the full selected node', () => {
+    const deep = renderNode({ semanticZoomLevel: 'overview', depth: 4 })
+    expect(deep.container.querySelector('.mind-node')?.classList.contains('mind-node--emphasis-context')).toBe(true)
+    deep.unmount()
+
+    const selected = renderNode({ semanticZoomLevel: 'overview', depth: 4 }, 'selected-deep-node', true)
+    expect(selected.container.querySelector('.mind-node')?.classList.contains('mind-node--emphasis-full')).toBe(true)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadSemanticZoomEnabled, resolveSemanticZoomLevel, saveSemanticZoomEnabled } from './semantic-zoom'
+import { loadSemanticZoomEnabled, resolveSemanticNodeEmphasis, resolveSemanticZoomLevel, saveSemanticZoomEnabled, shouldShowRelationLabel } from './semantic-zoom'
 
 describe('resolveSemanticZoomLevel', () => {
   it('maps the initial viewport to overview, structure, or workspace detail', () => {
@@ -38,5 +38,23 @@ describe('semantic zoom preference', () => {
     expect(loadSemanticZoomEnabled(storage)).toBe(true)
     saveSemanticZoomEnabled(false, storage)
     expect(loadSemanticZoomEnabled(storage)).toBe(false)
+  })
+})
+
+describe('resolveSemanticNodeEmphasis', () => {
+  it('keeps the trunk prominent while progressively quieting deep overview nodes', () => {
+    expect(resolveSemanticNodeEmphasis('overview', 0)).toBe('primary')
+    expect(resolveSemanticNodeEmphasis('overview', 1)).toBe('primary')
+    expect(resolveSemanticNodeEmphasis('overview', 2)).toBe('secondary')
+    expect(resolveSemanticNodeEmphasis('overview', 4)).toBe('context')
+  })
+})
+
+describe('shouldShowRelationLabel', () => {
+  it('removes relation copy from overview unless the relation is selected', () => {
+    expect(shouldShowRelationLabel('overview', false)).toBe(false)
+    expect(shouldShowRelationLabel('overview', true)).toBe(true)
+    expect(shouldShowRelationLabel('structure', false)).toBe(true)
+    expect(shouldShowRelationLabel('workspace', false)).toBe(true)
   })
 })

@@ -16,7 +16,7 @@ import { requestGhostCompletion } from '../ai/ghost-completion'
 import type { MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
 import { AttachmentImage } from '../attachments/AttachmentImage'
-import type { SemanticZoomLevel } from './semantic-zoom'
+import { resolveSemanticNodeEmphasis, type SemanticZoomLevel } from './semantic-zoom'
 
 export type MindNodeData = {
   label: string
@@ -35,6 +35,8 @@ export type MindNodeData = {
   imageAttachment?: MindNodeAttachment | null
   /** 当前画布的信息密度；只影响内容显隐，不改变布局尺寸。 */
   semanticZoomLevel: SemanticZoomLevel
+  /** 中心主题为 0；仅用于远景视觉权重，不参与节点尺寸与布局。 */
+  depth: number
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
   layoutHeight: number
   onEditingHeightChange?: (height: number | null) => void
@@ -168,6 +170,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const effectiveDetailLevel: SemanticZoomLevel = selected || isEditing ? 'workspace' : node.semanticZoomLevel
   const showWorkspaceDetails = effectiveDetailLevel === 'workspace'
   const showStructureSignals = effectiveDetailLevel === 'structure'
+  const semanticEmphasis = resolveSemanticNodeEmphasis(effectiveDetailLevel, node.depth)
   const beginEditing = (event: React.MouseEvent<HTMLDivElement>) => {
     if (isEditing || (event.target as HTMLElement).closest('.collapse-toggle, .node-resize-control')) return
     event.preventDefault()
@@ -182,7 +185,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
 
   return (
     <div
-      className={`mind-node mind-node--detail-${effectiveDetailLevel} ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`}
+      className={`mind-node mind-node--detail-${effectiveDetailLevel} mind-node--emphasis-${semanticEmphasis} mind-node--depth-${Math.min(node.depth, 4)} ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`}
       style={{ '--node-accent': node.accentColor } as CSSProperties}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}

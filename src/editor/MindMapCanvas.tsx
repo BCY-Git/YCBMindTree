@@ -54,6 +54,7 @@ import {
   resolveSemanticZoomLevel,
   saveSemanticZoomEnabled,
   semanticZoomLevelLabel,
+  shouldShowRelationLabel,
   type SemanticZoomLevel,
 } from './semantic-zoom'
 
@@ -262,6 +263,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           imageAttachment: mindNode.attachments.find((attachment) => attachment.type.startsWith('image/')) ?? null,
           // 语义层级在渲染前单独覆盖，不能成为 layoutTree 的输入或触发布局重算。
           semanticZoomLevel: 'workspace',
+          depth,
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
         },
@@ -280,6 +282,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             sourceHandle: anchors?.sourceHandle,
             targetHandle: anchors?.targetHandle,
             type: 'default',
+            className: `mind-tree-edge mind-tree-edge--depth-${Math.min(depthOf(item.id), 4)}`,
             reconnectable: false,
             style: {
               stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : (theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch),
@@ -372,6 +375,14 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const renderedFlowNodes = useMemo(() => flowNodes.map((node) => node.data.semanticZoomLevel === semanticZoomLevel
     ? node
     : { ...node, data: { ...node.data, semanticZoomLevel } }), [flowNodes, semanticZoomLevel])
+
+  const renderedEdges = useMemo(() => edges.map((edge) => {
+    if (!String(edge.className ?? '').includes('mind-relation-edge')) return edge
+    const selected = edge.id === selectedRelationId
+    if (shouldShowRelationLabel(semanticZoomLevel, selected)) return edge
+    const opacity = typeof edge.style?.opacity === 'number' ? Math.min(edge.style.opacity, .42) : .42
+    return { ...edge, label: undefined, style: { ...edge.style, opacity } }
+  }), [edges, selectedRelationId, semanticZoomLevel])
 
   // 仅在首次打开或切换到另一张导图时自动适应视图；节点增删、编辑和布局更新都必须保留用户当前视角。
   useEffect(() => {
@@ -831,7 +842,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     }}>
       <ReactFlow
         nodes={renderedFlowNodes}
-        edges={edges}
+        edges={renderedEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onInit={initializeFlow}

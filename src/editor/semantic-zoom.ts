@@ -3,6 +3,7 @@
  * 阈值成对出现：进入更精简层级要比离开它更深，避免触控板在边界附近抖动。
  */
 export type SemanticZoomLevel = 'overview' | 'structure' | 'workspace'
+export type SemanticNodeEmphasis = 'primary' | 'secondary' | 'context' | 'full'
 
 const OVERVIEW_ENTER_ZOOM = 0.52
 const OVERVIEW_LEAVE_ZOOM = 0.6
@@ -45,6 +46,21 @@ export function resolveSemanticZoomLevel(
   if (zoom < OVERVIEW_ENTER_ZOOM) return 'overview'
   if (zoom >= WORKSPACE_ENTER_ZOOM) return 'workspace'
   return 'structure'
+}
+
+/**
+ * 返回节点在当前视野中的阅读权重。权重只用于视觉呈现，不隐藏节点，也不改变尺寸。
+ */
+export function resolveSemanticNodeEmphasis(level: SemanticZoomLevel, depth: number): SemanticNodeEmphasis {
+  if (level === 'workspace') return 'full'
+  if (level === 'structure') return depth <= 2 ? 'primary' : 'secondary'
+  if (depth <= 1) return 'primary'
+  if (depth <= 3) return 'secondary'
+  return 'context'
+}
+
+export function shouldShowRelationLabel(level: SemanticZoomLevel, selected: boolean) {
+  return level !== 'overview' || selected
 }
 
 export function loadSemanticZoomEnabled(storage: Pick<Storage, 'getItem'> = window.localStorage) {
