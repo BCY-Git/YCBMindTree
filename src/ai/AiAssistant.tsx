@@ -12,7 +12,7 @@
  * - 发送请求时将导图节点列表（id、父子关系、topic、collapsed）作为上下文，
  *   让 AI 理解当前思维导图结构
  */
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
@@ -28,7 +28,7 @@ import { buildDepositPlan, previewDepositOperation } from './deposit/deposit-pla
 import type { DepositBatch, DepositCandidate, DepositPlan, DepositProvenance } from './deposit/deposit-types'
 import { applyDepositBatch, applyWorkspaceDepositPlan, listAppliedDepositFingerprints, listDepositBatches, revertWorkspaceDepositBatch, saveDepositBatch } from '../persistence/database'
 import { DepositInbox } from './deposit/DepositInbox'
-import { depositNudgeReason } from './deposit/deposit-nudge'
+import { depositNudgeReason, disableDepositNudges, shouldShowDepositNudge, snoozeDepositNudge } from './deposit/deposit-nudge'
 import { WorkflowPanel } from './workflow/WorkflowPanel'
 import { createWorkflowSession, workflowCheckpointPrompt } from './workflow/workflow-service'
 import { parseWorkflowCheckpoint } from './workflow/workflow-schema'
@@ -79,7 +79,7 @@ function ReorganizationPreview({ plan, document }: { plan: MapReorganization; do
   })}</ul>
 }
 
-export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, heading = 'AI 助手' }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; heading?: string }) {
+export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, heading = 'AI 助手', depositRequestId = 0 }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; heading?: string; depositRequestId?: number }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
@@ -97,6 +97,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const [lastWorkspaceDepositBatchId, setLastWorkspaceDepositBatchId] = useState<string | null>(null)
   const [workflowSession, setWorkflowSession] = useState<WorkflowSession | null>(null)
   const [depositNudgeHidden, setDepositNudgeHidden] = useState(false)
+  const handledDepositRequestId = useRef(0)
 
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
   useEffect(() => {
@@ -151,8 +152,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       setNotice('当前浏览器无法保存配置，请检查本地存储权限。')
     }
   }
-  const depositNudgeDisabled = localStorage.getItem(`mindtree.deposit-nudge.disabled.${document.id}`) === 'true'
-  const depositNudge = !depositNudgeDisabled && !depositNudgeHidden && !depositBatch ? depositNudgeReason(document, targetNodeId) : null
+  const depositNudge = !depositNudgeHidden && !depositBatch && shouldShowDepositNudge(document.id) ? depositNudgeReason(document, targetNodeId) : null
 
   const toggleGhostCompletion = (enabled: boolean) => {
     setGhostCompletionEnabled(enabled)
@@ -293,6 +293,13 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       setIsSending(false)
     }
   }
+
+  /** 项目状态页的按钮等同于用户主动点击“生成沉淀建议”，不会自行触发模型调用。 */
+  useEffect(() => {
+    if (!depositRequestId || depositRequestId <= handledDepositRequestId.current) return
+    handledDepositRequestId.current = depositRequestId
+    void requestAssistant('deposit')
+  }, [depositRequestId, requestAssistant])
 
   const sendPrompt = (event: FormEvent) => {
     event.preventDefault()
@@ -467,7 +474,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       )}
 
       <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />
-      {depositNudge && <div className="deposit-nudge"><p>{depositNudge}</p><div><button type="button" onClick={() => { void requestAssistant('deposit') }}>现在分析</button><button type="button" onClick={() => setDepositNudgeHidden(true)}>稍后</button><button type="button" onClick={() => { localStorage.setItem(`mindtree.deposit-nudge.disabled.${document.id}`, 'true'); setDepositNudgeHidden(true) }}>不再提示</button></div></div>}
+      {depositNudge && <div className="deposit-nudge"><p>{depositNudge}</p><div><button type="button" onClick={() => { void requestAssistant('deposit') }}>现在分析</button><button type="button" onClick={() => { snoozeDepositNudge(document.id); setDepositNudgeHidden(true) }}>24 小时后提醒</button><button type="button" onClick={() => { disableDepositNudges(document.id); setDepositNudgeHidden(true) }}>不再提示此导图</button></div></div>}
 
       <form className="ai-prompt" onSubmit={sendPrompt}>
         <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="例如：帮我找出这张导图缺少的分支" />

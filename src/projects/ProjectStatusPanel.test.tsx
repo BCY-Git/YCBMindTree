@@ -21,7 +21,7 @@ describe('ProjectStatusPanel', () => {
     daily.nodes = { 'daily-node': daily.nodes[daily.rootId] }
     const onReveal = vi.fn()
 
-    render(<ProjectStatusPanel status={status} documents={[daily]} onRevealSource={onReveal} onRefresh={vi.fn()} refreshing={false} />)
+    render(<ProjectStatusPanel status={status} documents={[daily]} onRevealSource={onReveal} onRefresh={vi.fn()} onStartDeposit={vi.fn()} refreshing={false} />)
 
     expect(screen.getByRole('heading', { name: '无人项目' })).toBeTruthy()
     expect(screen.getByText('完成 2 / 5 项任务')).toBeTruthy()
@@ -32,8 +32,15 @@ describe('ProjectStatusPanel', () => {
 
   it('offers a refresh action without making state changes itself', () => {
     const onRefresh = vi.fn()
-    render(<ProjectStatusPanel status={status} documents={[]} onRevealSource={vi.fn()} onRefresh={onRefresh} refreshing={false} />)
+    render(<ProjectStatusPanel status={status} documents={[]} onRevealSource={vi.fn()} onRefresh={onRefresh} onStartDeposit={vi.fn()} refreshing={false} />)
     fireEvent.click(screen.getByRole('button', { name: '刷新项目状态' }))
     expect(onRefresh).toHaveBeenCalledOnce()
+  })
+
+  it('offers an explicit route from project state to deposit analysis', () => {
+    const onStartDeposit = vi.fn()
+    render(<ProjectStatusPanel status={status} documents={[]} onRevealSource={vi.fn()} onRefresh={vi.fn()} onStartDeposit={onStartDeposit} refreshing={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '整理本分支' }))
+    expect(onStartDeposit).toHaveBeenCalledOnce()
   })
 })

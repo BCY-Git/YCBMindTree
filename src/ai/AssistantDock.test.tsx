@@ -17,6 +17,11 @@ describe('AssistantDockToggleButton', () => {
     rerender(<AssistantDockToggleButton open onToggle={onToggle} />)
     expect(screen.getByRole('button', { name: '收起 AI 助手' }).getAttribute('aria-pressed')).toBe('true')
   })
+
+  it('quietly signals a record that is ready for deposit while the panel is closed', () => {
+    render(<AssistantDockToggleButton open={false} hasNudge onToggle={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '显示 AI 助手 · 有待整理记录' })).toBeTruthy()
+  })
 })
 
 describe('AssistantDock resizing', () => {

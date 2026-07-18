@@ -25,9 +25,10 @@ export function saveAssistantDockWidth(width: number) {
   localStorage.setItem(assistantDockWidthKey, String(clampAssistantDockWidth(width)))
 }
 
-export function AssistantDockToggleButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+export function AssistantDockToggleButton({ open, hasNudge = false, onToggle }: { open: boolean; hasNudge?: boolean; onToggle: () => void }) {
   const label = open ? '收起 AI 助手' : '显示 AI 助手'
-  return <button className={`topbar-utility__button assistant-dock-toggle ${open ? 'is-active' : ''}`} onClick={onToggle} title={label} aria-label={label} aria-pressed={open}><span className="toolbar-icon" aria-hidden="true">✦</span></button>
+  const accessibleLabel = !open && hasNudge ? `${label} · 有待整理记录` : label
+  return <button className={`topbar-utility__button assistant-dock-toggle ${open ? 'is-active' : ''} ${!open && hasNudge ? 'has-nudge' : ''}`} onClick={onToggle} title={accessibleLabel} aria-label={accessibleLabel} aria-pressed={open}><span className="toolbar-icon" aria-hidden="true">✦</span>{!open && hasNudge && <i className="assistant-dock-toggle__nudge" aria-hidden="true" />}</button>
 }
 
 type AssistantDockProps = {

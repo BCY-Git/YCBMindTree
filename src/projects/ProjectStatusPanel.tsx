@@ -26,16 +26,17 @@ function StatusGroup({ label, items, documents, onRevealSource }: { label: strin
 }
 
 /** 项目状态是已有树、任务、确认沉淀的只读投影，不额外复制项目数据。 */
-export function ProjectStatusPanel({ status, documents, onRevealSource, onRefresh, refreshing }: {
+export function ProjectStatusPanel({ status, documents, onRevealSource, onRefresh, onStartDeposit, refreshing }: {
   status: ProjectStatus
   documents: MindMapDocument[]
   onRevealSource: (documentId: string, nodeId: string) => void
   onRefresh: () => void
+  onStartDeposit: () => void
   refreshing: boolean
 }) {
   const hasContent = status.active.length || status.blockers.length || status.recentResults.length || status.decisions.length || status.nextActions.length
   return <section className="project-status" aria-label="项目状态">
-    <header><div><p className="field-label">项目状态</p><h3>{status.goal}</h3></div><button type="button" onClick={onRefresh} disabled={refreshing} aria-label="刷新项目状态">{refreshing ? '刷新中…' : '刷新'}</button></header>
+    <header><div><p className="field-label">项目状态</p><h3>{status.goal}</h3></div><div className="project-status__actions"><button type="button" className="project-status__deposit" onClick={onStartDeposit}>整理本分支</button><button type="button" onClick={onRefresh} disabled={refreshing} aria-label="刷新项目状态">{refreshing ? '刷新中…' : '刷新'}</button></div></header>
     <div className="project-status__progress"><strong>完成 {status.progress.done} / {status.progress.total} 项任务</strong><span aria-hidden="true"><i style={{ width: `${status.progress.total ? Math.round(status.progress.done / status.progress.total * 100) : 0}%` }} /></span></div>
     {hasContent ? <div className="project-status__groups">
       <StatusGroup label="正在推进" items={status.active} documents={documents} onRevealSource={onRevealSource} />
