@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MindTree",
-  "version": "1.19.0",
+  "version": "1.20.1",
   "identifier": "asia.bcy.mindtree",
   "build": {
     "frontendDist": "../dist",
@@ -35,6 +35,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
