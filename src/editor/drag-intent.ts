@@ -13,8 +13,8 @@ export function shouldDetachTreeBranch({
 }
 
 /**
- * 常规节点默认维持树形自动布局：拖向同级只调整顺序；跨分支改结构必须显式
- * 按住 Shift，防止用户只是想整理位置时误把节点变成子节点。
+ * 常规节点遵循 XMind 一类导图工具的直接拖放语义：明确落在节点卡片上时改为
+ * 该节点的子节点，落在同级插入区时调整顺序。Shift 保留兼容，但不再是改层级的门槛。
  */
 export function resolveRegularTreeDragIntent({
   shiftKey,
@@ -25,5 +25,6 @@ export function resolveRegularTreeDragIntent({
   siblingIntent: TreeDropIntent | null
   structuralIntent: TreeDropIntent | null
 }): TreeDropIntent | null {
-  return shiftKey ? (structuralIntent ?? siblingIntent) : siblingIntent
+  void shiftKey
+  return structuralIntent ?? siblingIntent
 }

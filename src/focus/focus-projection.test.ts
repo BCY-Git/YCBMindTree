@@ -33,8 +33,8 @@ describe('focus projection', () => {
     root.childIds = [focus.id, outside.id]
     document.nodes = { [root.id]: root, [focus.id]: focus, [first.id]: first, [second.id]: second, [outside.id]: outside }
     document.relations = [
-      { id: 'inside', sourceId: first.id, targetId: second.id, label: '形成', createdAt: 1, updatedAt: 1 },
-      { id: 'outside', sourceId: first.id, targetId: outside.id, label: '无关', createdAt: 1, updatedAt: 1 },
+      { id: 'inside', sourceId: first.id, targetId: second.id, label: '形成', lineStyle: 'dashed', color: null, controlOffsetX: 0, controlOffsetY: 0, createdAt: 1, updatedAt: 1 },
+      { id: 'outside', sourceId: first.id, targetId: outside.id, label: '无关', lineStyle: 'dashed', color: null, controlOffsetX: 0, controlOffsetY: 0, createdAt: 1, updatedAt: 1 },
     ]
     document.boundaries = [{ id: 'boundary', parentId: focus.id, nodeIds: [first.id, second.id, outside.id], label: '范围', createdAt: 1, updatedAt: 1 }]
 

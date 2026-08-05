@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createInitialDocument } from '../domain/document.factory'
+import { createInitialDocument, createNode } from '../domain/document.factory'
 import { executeCommand } from '../domain/commands'
 import { layoutTree } from './tree-layout'
 
@@ -52,9 +52,15 @@ describe('tree layout', () => {
     const document = createInitialDocument()
     const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 511, y: 233, topic: '自由主题' })
     const freeId = free.focusNodeId!
-    const withChild = executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId, topic: '自由分支' })
-    const childId = withChild.focusNodeId!
-    const withGrandchild = executeCommand(withChild.document, { type: 'ADD_CHILD', parentId: childId, topic: '分支细节' }).document
+    // 兼容旧数据：历史版本曾允许自由主题包含子树，布局仍需正确展示；新交互不再允许继续追加。
+    const withGrandchild = structuredClone(free.document)
+    const child = createNode('自由分支', freeId)
+    const grandchild = createNode('分支细节', child.id)
+    child.childIds.push(grandchild.id)
+    withGrandchild.nodes[freeId].childIds.push(child.id)
+    withGrandchild.nodes[child.id] = child
+    withGrandchild.nodes[grandchild.id] = grandchild
+    const childId = child.id
 
     const expanded = Object.fromEntries(layoutTree(withGrandchild).map((node) => [node.id, node]))
     expect(expanded[freeId]).toMatchObject({ x: 511, y: 233 })

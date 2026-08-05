@@ -5,15 +5,15 @@ const reorder = { parentId: 'parent', index: 3, kind: 'sibling' as const }
 const attach = { parentId: 'target', index: 0, kind: 'child' as const }
 
 describe('regular tree drag intent', () => {
-  it('uses a normal drag to reorder siblings instead of accidentally becoming a child', () => {
-    expect(resolveRegularTreeDragIntent({ shiftKey: false, siblingIntent: reorder, structuralIntent: attach })).toEqual(reorder)
+  it('uses an explicit node drop target to change hierarchy without requiring Shift', () => {
+    expect(resolveRegularTreeDragIntent({ shiftKey: false, siblingIntent: reorder, structuralIntent: attach })).toEqual(attach)
   })
 
-  it('does not change the tree structure on a normal drag without a sibling reorder target', () => {
-    expect(resolveRegularTreeDragIntent({ shiftKey: false, siblingIntent: null, structuralIntent: attach })).toBeNull()
+  it('uses a normal drag to reorder siblings when there is no node drop target', () => {
+    expect(resolveRegularTreeDragIntent({ shiftKey: false, siblingIntent: reorder, structuralIntent: null })).toEqual(reorder)
   })
 
-  it('allows Shift+drag to attach the node beneath a new parent', () => {
+  it('keeps the same structural result when Shift is held for compatibility', () => {
     expect(resolveRegularTreeDragIntent({ shiftKey: true, siblingIntent: reorder, structuralIntent: attach })).toEqual(attach)
   })
 

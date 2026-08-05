@@ -1,5 +1,6 @@
 import type { MindMapDocument } from '../domain/document.types'
 import { getTheme } from '../domain/themes'
+import { relationControlPoint, relationDashArray, relationPath } from '../editor/relation-geometry'
 import { layoutTree, type PositionedNode } from '../layout/tree-layout'
 import { getNodeAttachment } from '../persistence/database'
 import { saveExportFile } from './export-file'
@@ -72,16 +73,24 @@ export function exportDocumentSvg(document: MindMapDocument, options: SvgExportO
     treeEdges.push(`<path data-tree-edge="${escapeXml(node.parentId)}:${escapeXml(node.id)}" d="${treePath(parent, child, shiftX, shiftY)}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`)
   })
 
+  const relationMarkers: string[] = []
   const relationEdges = document.relations.flatMap((relation) => {
     const source = byId.get(relation.sourceId)
     const target = byId.get(relation.targetId)
     if (!source || !target) return []
-    const x1 = source.x + source.width / 2 + shiftX
+    const targetIsRight = target.x + target.width / 2 >= source.x + source.width / 2
+    const x1 = (targetIsRight ? source.x + source.width : source.x) + shiftX
     const y1 = source.y + source.height / 2 + shiftY
-    const x2 = target.x + target.width / 2 + shiftX
+    const x2 = (targetIsRight ? target.x : target.x + target.width) + shiftX
     const y2 = target.y + target.height / 2 + shiftY
+    const control = relationControlPoint({ x: x1, y: y1 }, { x: x2, y: y2 }, relation.controlOffsetX, relation.controlOffsetY)
+    const geometry = relationPath({ x: x1, y: y1 }, { x: x2, y: y2 }, control)
+    const color = relation.color ?? theme.branch
+    const dashArray = relationDashArray(relation.lineStyle)
+    const markerId = `relation-arrow-${relation.id}`
+    relationMarkers.push(`<marker id="${escapeXml(markerId)}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${color}"/></marker>`)
     const label = relation.label.trim()
-    return [`<g data-relation-edge="${escapeXml(relation.id)}"><path d="M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - 26}, ${x2} ${y2}" fill="none" stroke="${theme.branch}" stroke-width="2" stroke-dasharray="8 7" marker-end="url(#relation-arrow)"/>${label ? `<text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2 - 10}" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="650" fill="${theme.nodeText}">${escapeXml(label)}</text>` : ''}</g>`]
+    return [`<g data-relation-edge="${escapeXml(relation.id)}"><path d="${geometry.path}" fill="none" stroke="${color}" stroke-width="2"${dashArray ? ` stroke-dasharray="${dashArray}"` : ''} stroke-linecap="round" marker-end="url(#${escapeXml(markerId)})"/>${label ? `<text x="${geometry.label.x}" y="${geometry.label.y - 9}" text-anchor="middle" paint-order="stroke" stroke="${theme.canvas}" stroke-width="7" stroke-linejoin="round" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="650" fill="${theme.nodeText}">${escapeXml(label)}</text>` : ''}</g>`]
   })
 
   const nodes = positions.map((position) => {
@@ -111,7 +120,7 @@ export function exportDocumentSvg(document: MindMapDocument, options: SvgExportO
   })
 
   const background = options.transparent ? '' : `<rect width="100%" height="100%" fill="${theme.canvas}"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeXml(document.title)}"><title>${escapeXml(document.title)}</title><defs><marker id="relation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${theme.branch}"/></marker></defs>${background}${treeEdges.join('')}${relationEdges.join('')}${nodes.join('')}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeXml(document.title)}"><title>${escapeXml(document.title)}</title><defs>${relationMarkers.join('')}</defs>${background}${treeEdges.join('')}${relationEdges.join('')}${nodes.join('')}</svg>`
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {

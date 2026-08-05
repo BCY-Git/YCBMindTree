@@ -62,6 +62,19 @@ beforeEach(() => {
 afterEach(() => act(() => useEditorStore.getState().editNode(null)))
 
 describe('MindNode text editing', () => {
+  it('starts direct typing with the pressed character instead of appending to the old topic', () => {
+    act(() => useEditorStore.getState().editNode(nodeId, 'X'))
+    const data: MindNodeData = {
+      label: '旧主题', isRoot: false, isFreeTopic: false, taskStatus: 'none', priority: 0,
+      marks: [], tags: [], isDropTarget: false, hasChildren: false, collapsed: false,
+      hiddenDescendantCount: 0, accentColor: '#467566', isRelationSource: false,
+      semanticZoomLevel: 'workspace', depth: 0, layoutHeight: 44,
+    }
+    render(<ReactFlowProvider><MindNode id={nodeId} type="mind" data={data} selected={true} selectable deletable draggable dragging={false} zIndex={0} isConnectable positionAbsoluteX={0} positionAbsoluteY={0} /></ReactFlowProvider>)
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('X')
+  })
+
   it('uses Command+A inside an editing node to select only its text', () => {
     const onWindowKeyDown = vi.fn()
     window.addEventListener('keydown', onWindowKeyDown)
@@ -89,6 +102,15 @@ describe('MindNode text editing', () => {
     expect(shell.style.minHeight).toBe('104px')
     expect(shell.style.alignItems).toBe('center')
     expect(input.style.height).toBe('19px')
+  })
+
+  it('keeps editing and allows a line break on Shift+Enter', () => {
+    renderEditingNode()
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+
+    expect(useEditorStore.getState().editingNodeId).toBe(nodeId)
   })
 })
 

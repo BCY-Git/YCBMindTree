@@ -107,6 +107,19 @@ describe('editor history', () => {
     expect(useEditorStore.getState().document.nodes[childId]).toBeDefined()
   })
 
+  it('deletes a multi-selection as one undoable action', () => {
+    const { document, dispatch, undo } = useEditorStore.getState()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const childIds = [...document.nodes[branchId].childIds]
+
+    dispatch({ type: 'DELETE_NODES', nodeIds: childIds })
+
+    expect(useEditorStore.getState().document.nodes[branchId].childIds).toEqual([])
+    expect(useEditorStore.getState().past).toHaveLength(1)
+    undo()
+    expect(useEditorStore.getState().document.nodes[branchId].childIds).toEqual(childIds)
+  })
+
   it('creates and edits a relation topic as one undoable action', () => {
     const { document, dispatch, undo } = useEditorStore.getState()
     const sourceId = document.nodes[document.rootId].childIds[0]

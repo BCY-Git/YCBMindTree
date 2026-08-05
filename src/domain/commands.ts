@@ -23,7 +23,9 @@ import type { ThemeId } from './themes'
  */
 export type MindMapCommand =
   | { type: 'ADD_CHILD'; parentId: string; topic?: string }
-  | { type: 'ADD_SIBLING'; nodeId: string; topic?: string }
+  | { type: 'ADD_SIBLING'; nodeId: string; topic?: string; placement?: 'before' | 'after' }
+  | { type: 'ADD_PARENT'; nodeId: string; topic?: string }
+  | { type: 'DUPLICATE_NODE'; nodeId: string }
   | { type: 'ADD_FREE_TOPIC'; x: number; y: number; topic?: string }
   | { type: 'DETACH_AS_FREE_TOPIC'; nodeId: string; x: number; y: number }
   | { type: 'ATTACH_FREE_TOPIC'; nodeId: string; parentId: string }
@@ -39,6 +41,8 @@ export type MindMapCommand =
   | { type: 'TOGGLE_NODE_MARK'; nodeId: string; mark: NodeMark }
   | { type: 'SET_NODE_TAGS'; nodeId: string; tagIds: string[] }
   | { type: 'DELETE_NODE'; nodeId: string }
+  /** 仅删除当前主题，并把其子节点提升到原位置。 */
+  | { type: 'DELETE_SINGLE_NODE'; nodeId: string }
   | { type: 'DELETE_NODES'; nodeIds: string[] }
   | { type: 'CREATE_RELATION'; sourceId: string; targetId: string; label?: string }
   | { type: 'CREATE_RELATIONS'; sourceIds: string[]; targetId: string; label?: string }
@@ -46,6 +50,7 @@ export type MindMapCommand =
   | { type: 'CREATE_RELATED_FREE_TOPIC'; sourceIds: string[]; x: number; y: number; topic?: string; label?: string }
   | { type: 'RETARGET_RELATION'; relationId: string; targetId: string }
   | { type: 'UPDATE_RELATION_LABEL'; relationId: string; label: string }
+  | { type: 'UPDATE_RELATION_STYLE'; relationId: string; patch: Partial<Pick<MindMapRelation, 'lineStyle' | 'color' | 'controlOffsetX' | 'controlOffsetY'>> }
   | { type: 'DELETE_RELATION'; relationId: string }
   | { type: 'CREATE_BOUNDARY'; nodeIds: string[]; label?: string }
   | { type: 'UPDATE_BOUNDARY_LABEL'; boundaryId: string; label: string }
@@ -163,7 +168,11 @@ function removeSubtree(document: MindMapDocument, nodeId: string) {
 
 function createRelation(sourceId: string, targetId: string, label: string): MindMapRelation {
   const now = Date.now()
-  return { id: crypto.randomUUID(), sourceId, targetId, label: label.trim() || '关联', createdAt: now, updatedAt: now }
+  return {
+    id: crypto.randomUUID(), sourceId, targetId, label: label.trim() || '关联',
+    lineStyle: 'dashed', color: null, controlOffsetX: 0, controlOffsetY: 0,
+    createdAt: now, updatedAt: now,
+  }
 }
 
 function createBoundary(parentId: string, nodeIds: string[], label: string): MindMapBoundary {
@@ -274,9 +283,8 @@ export function createNodeClipboard(document: MindMapDocument, nodeId: string): 
 }
 
 // 递归创建子树（为每个节点分配新 id），返回插入的根节点 id。
-function pasteSubtree(document: MindMapDocument, parentId: string, clipboard: MindNodeClipboard): string {
-  const parent = document.nodes[parentId]
-  if (!parent) throw new Error('父节点不存在')
+function pasteSubtree(document: MindMapDocument, parentId: string | null, clipboard: MindNodeClipboard): string {
+  if (parentId !== null && !document.nodes[parentId]) throw new Error('父节点不存在')
   const node = createNode(clipboard.topic, parentId)
   node.collapsed = clipboard.collapsed
   node.note = clipboard.note
@@ -346,6 +354,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     case 'ADD_CHILD': {
       const parent = document.nodes[command.parentId]
       if (!parent) throw new Error('父节点不存在')
+      if (parent.isFreeTopic) throw new Error('自由主题请先附加到主节点，再创建子节点')
       const child = createNode(command.topic ?? '新节点', parent.id)
       parent.childIds.push(child.id)
       // 新增子节点时自动展开父节点，让子节点立即可见。
@@ -363,10 +372,46 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const sibling = createNode(command.topic ?? '新节点', parent.id)
       // 插入到当前节点之后，保持同级顺序。
       const index = parent.childIds.indexOf(node.id)
-      parent.childIds.splice(index + 1, 0, sibling.id)
+      parent.childIds.splice(command.placement === 'before' ? index : index + 1, 0, sibling.id)
       document.nodes[sibling.id] = sibling
       arrangeAfterInsert(document)
       focusNodeId = sibling.id
+      break
+    }
+    case 'ADD_PARENT': {
+      const node = document.nodes[command.nodeId]
+      if (!node?.parentId) throw new Error('中心主题不能再插入父节点')
+      if (node.isFreeTopic) throw new Error('自由主题请先附加到主节点')
+      const parent = document.nodes[node.parentId]
+      const index = parent.childIds.indexOf(node.id)
+      if (index < 0) throw new Error('节点层级无效')
+      const inserted = createNode(command.topic ?? '新父节点', parent.id)
+      inserted.childIds = [node.id]
+      document.nodes[inserted.id] = inserted
+      parent.childIds.splice(index, 1, inserted.id)
+      node.parentId = inserted.id
+      arrangeAfterInsert(document)
+      focusNodeId = inserted.id
+      break
+    }
+    case 'DUPLICATE_NODE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      if (node.id === document.rootId) throw new Error('中心主题不能复制为同级节点')
+      const duplicateId = pasteSubtree(document, node.parentId, createNodeClipboard(document, node.id))
+      const duplicate = document.nodes[duplicateId]
+      if (node.isFreeTopic) {
+        duplicate.isFreeTopic = true
+        duplicate.offsetX = node.offsetX + 32
+        duplicate.offsetY = node.offsetY + 32
+      } else {
+        if (!node.parentId) throw new Error('节点层级无效')
+        const parent = document.nodes[node.parentId]
+        const index = parent.childIds.indexOf(node.id)
+        parent.childIds.splice(index + 1, 0, duplicateId)
+        arrangeAfterInsert(document)
+      }
+      focusNodeId = duplicateId
       break
     }
     case 'ADD_FREE_TOPIC': {
@@ -497,10 +542,33 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       if (!node) throw new Error('节点不存在')
       if (!node.parentId && !node.isFreeTopic) throw new Error('根节点不能删除')
       const parent = node.parentId ? document.nodes[node.parentId] : null
-      if (parent) parent.childIds = parent.childIds.filter((id) => id !== node.id)
-      // 递归删除整个子树，删除后焦点回到被删节点的父节点。
+      let nextFocus = document.rootId
+      if (parent) {
+        const index = parent.childIds.indexOf(node.id)
+        nextFocus = parent.childIds[index + 1] ?? parent.childIds[index - 1] ?? parent.id
+        parent.childIds = parent.childIds.filter((id) => id !== node.id)
+      }
+      // 递归删除整个子树；焦点优先留在相邻同级，减少连续整理时的鼠标往返。
       removeSubtree(document, node.id)
-      focusNodeId = parent?.id ?? document.rootId
+      focusNodeId = document.nodes[nextFocus] ? nextFocus : document.rootId
+      break
+    }
+    case 'DELETE_SINGLE_NODE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      if (!node.parentId || node.isFreeTopic) throw new Error('中心主题或自由主题不能仅删除当前节点')
+      const parent = document.nodes[node.parentId]
+      const index = parent.childIds.indexOf(node.id)
+      if (index < 0) throw new Error('父子节点引用不一致')
+      parent.childIds.splice(index, 1, ...node.childIds)
+      node.childIds.forEach((childId) => {
+        document.nodes[childId].parentId = parent.id
+      })
+      document.relations = document.relations.filter((relation) => relation.sourceId !== node.id && relation.targetId !== node.id)
+      removeNodeFromBoundaries(document, node.id)
+      removeNodeFromSummaries(document, node.id)
+      delete document.nodes[node.id]
+      focusNodeId = node.childIds[0] ?? parent.childIds[index] ?? parent.childIds[index - 1] ?? parent.id
       break
     }
     case 'DELETE_NODES': {
@@ -516,16 +584,23 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
         return true
       })
       let nextFocus = document.rootId
+      const firstNode = document.nodes[topLevel[0]]
+      if (firstNode?.parentId) {
+        const parent = document.nodes[firstNode.parentId]
+        const index = parent.childIds.indexOf(firstNode.id)
+        nextFocus = parent.childIds.slice(index + 1).find((id) => !selectedSet.has(id))
+          ?? [...parent.childIds.slice(0, index)].reverse().find((id) => !selectedSet.has(id))
+          ?? parent.id
+      }
       topLevel.forEach((nodeId) => {
         const node = document.nodes[nodeId]
         const parent = node?.parentId ? document.nodes[node.parentId] : null
         if (parent) {
           parent.childIds = parent.childIds.filter((id) => id !== nodeId)
-          nextFocus = parent.id
         }
         removeSubtree(document, nodeId)
       })
-      focusNodeId = nextFocus
+      focusNodeId = document.nodes[nextFocus] ? nextFocus : document.rootId
       break
     }
     case 'CREATE_RELATION': {
@@ -580,6 +655,17 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const relation = document.relations.find((item) => item.id === command.relationId)
       if (!relation) throw new Error('关系不存在')
       relation.label = command.label.trim() || '关联'
+      relation.updatedAt = Date.now()
+      focusRelationId = relation.id
+      break
+    }
+    case 'UPDATE_RELATION_STYLE': {
+      const relation = document.relations.find((item) => item.id === command.relationId)
+      if (!relation) throw new Error('关系不存在')
+      if (command.patch.color !== undefined && command.patch.color !== null && !/^#[0-9a-f]{6}$/i.test(command.patch.color)) throw new Error('关系颜色格式无效')
+      if (command.patch.controlOffsetX !== undefined && (!Number.isFinite(command.patch.controlOffsetX) || Math.abs(command.patch.controlOffsetX) > 2000)) throw new Error('关系控制点无效')
+      if (command.patch.controlOffsetY !== undefined && (!Number.isFinite(command.patch.controlOffsetY) || Math.abs(command.patch.controlOffsetY) > 2000)) throw new Error('关系控制点无效')
+      Object.assign(relation, command.patch)
       relation.updatedAt = Date.now()
       focusRelationId = relation.id
       break
@@ -779,6 +865,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
     case 'PASTE_SUBTREE': {
       const parent = document.nodes[command.parentId]
       if (!parent) throw new Error('父节点不存在')
+      if (parent.isFreeTopic) throw new Error('自由主题请先附加到主节点，再粘贴子节点')
       const rootId = pasteSubtree(document, parent.id, command.clipboard)
       parent.childIds.push(rootId)
       parent.collapsed = false

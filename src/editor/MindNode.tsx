@@ -45,6 +45,7 @@ export type MindNodeData = {
 export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps) {
   const node = data as MindNodeData
   const editingNodeId = useEditorStore((state) => state.editingNodeId)
+  const editingInitialText = useEditorStore((state) => state.editingNodeId === id ? state.editingInitialText : null)
   const editNode = useEditorStore((state) => state.editNode)
   const selectNode = useEditorStore((state) => state.selectNode)
   const dispatch = useEditorStore((state) => state.dispatch)
@@ -53,6 +54,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const document = useEditorStore((state) => state.editingNodeId === id ? state.document : null)
   const [topic, setTopic] = useState(node.label)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const preparedEditRef = useRef<string | null>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef<AbortController | null>(null)
   const [suggestion, setSuggestion] = useState('')
@@ -68,7 +70,9 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const markerControlsRef = useRef<HTMLSpanElement>(null)
   const [markerMenu, setMarkerMenu] = useState<'task' | 'priority' | null>(null)
 
-  useEffect(() => setTopic(node.label), [node.label])
+  useEffect(() => {
+    if (!isEditing || editingInitialText === null) setTopic(node.label)
+  }, [editingInitialText, isEditing, node.label])
   useEffect(() => {
     if (!markerMenu) return
     const closeMarkerMenu = (event: PointerEvent) => {
@@ -78,7 +82,18 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     return () => globalThis.document.removeEventListener('pointerdown', closeMarkerMenu, true)
   }, [markerMenu])
   useLayoutEffect(() => {
-    if (!isEditing) return
+    if (!isEditing) {
+      preparedEditRef.current = null
+      return
+    }
+    const editKey = `${id}:${editingInitialText ?? '__existing__'}`
+    const initialTopic = editingInitialText ?? node.label
+    if (preparedEditRef.current !== editKey && topic !== initialTopic) {
+      setTopic(initialTopic)
+      return
+    }
+    if (preparedEditRef.current === editKey) return
+    preparedEditRef.current = editKey
     let settleFrame = 0
     const frame = window.requestAnimationFrame(() => {
       const input = inputRef.current
@@ -96,7 +111,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       window.cancelAnimationFrame(frame)
       window.cancelAnimationFrame(settleFrame)
     }
-  }, [isEditing])
+  }, [editingInitialText, id, isEditing, node.label, topic])
   useLayoutEffect(() => {
     if (!isEditing) {
       setEditorHeight(null)
@@ -255,6 +270,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
               if (event.key === 'Escape') { event.preventDefault(); setSuggestion(''); setTopic(node.label); editNode(null); return }
               if (event.key === 'Tab') { event.preventDefault(); if (!acceptSuggestion()) commit(event.currentTarget.value); return }
               if (event.key === 'Enter') {
+                if (event.shiftKey) return
                 event.preventDefault()
                 if (Date.now() - lastCompositionEndAtRef.current < 160) return
                 commit(event.currentTarget.value)

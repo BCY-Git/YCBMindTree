@@ -21,6 +21,19 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
+  it('inserts sibling topics before or after the selected topic', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const [firstChild, secondChild] = document.nodes[branchId].childIds
+
+    const before = executeCommand(document, { type: 'ADD_SIBLING', nodeId: secondChild, topic: '前置主题', placement: 'before' })
+    const beforeId = before.focusNodeId!
+    expect(before.document.nodes[branchId].childIds).toEqual([firstChild, beforeId, secondChild])
+
+    const after = executeCommand(before.document, { type: 'ADD_SIBLING', nodeId: secondChild, topic: '后置主题' })
+    expect(after.document.nodes[branchId].childIds).toEqual([firstChild, beforeId, secondChild, after.focusNodeId])
+  })
+
   it('toggles built-in marks in a stable order and replaces custom tag references', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]
@@ -82,33 +95,46 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(attached)).not.toThrow()
   })
 
-  it('lets a free topic grow its own subtree before it is attached to the main tree', () => {
+  it('requires a free topic to attach to the main tree before adding children', () => {
     const document = createInitialDocument()
     const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 420, y: 260, topic: '临时想法' })
     const freeId = free.focusNodeId!
-    const withChild = executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId, topic: '自由分支' }).document
-    const childId = withChild.nodes[freeId].childIds[0]
 
-    expect(withChild.nodes[childId]).toMatchObject({ parentId: freeId, isFreeTopic: false, topic: '自由分支' })
-    expect(() => assertValidDocument(withChild)).not.toThrow()
-
-    const attached = executeCommand(withChild, { type: 'ATTACH_FREE_TOPIC', nodeId: freeId, parentId: withChild.rootId }).document
-    expect(attached.nodes[freeId]).toMatchObject({ isFreeTopic: false, parentId: attached.rootId, offsetX: 0, offsetY: 0 })
-    expect(attached.nodes[freeId].childIds).toEqual([childId])
-    expect(attached.nodes[childId].parentId).toBe(freeId)
-    expect(attached.nodes[attached.rootId].childIds).toContain(freeId)
-    expect(() => assertValidDocument(attached)).not.toThrow()
+    expect(() => executeCommand(free.document, { type: 'ADD_CHILD', parentId: freeId, topic: '不应创建' })).toThrow('自由主题请先附加到主节点')
   })
 
-  it('deletes an entire branch and returns focus to its parent', () => {
+  it('deletes an entire branch and focuses the nearest remaining sibling', () => {
     const document = createInitialDocument()
     const branchId = document.nodes[document.rootId].childIds[0]
-    const descendantIds = document.nodes[branchId].childIds
+    const [firstChild, secondChild] = document.nodes[branchId].childIds
+    const result = executeCommand(document, { type: 'DELETE_NODE', nodeId: firstChild })
+
+    expect(result.focusNodeId).toBe(secondChild)
+    expect(result.document.nodes[firstChild]).toBeUndefined()
+    expect(result.document.nodes[branchId].childIds).toEqual([secondChild])
+  })
+
+  it('falls back to the parent when deleting its only child branch', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
     const result = executeCommand(document, { type: 'DELETE_NODE', nodeId: branchId })
 
     expect(result.focusNodeId).toBe(document.rootId)
     expect(result.document.nodes[branchId]).toBeUndefined()
-    descendantIds.forEach((id) => expect(result.document.nodes[id]).toBeUndefined())
+  })
+
+  it('deletes only the selected topic while promoting its children in place', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const childIds = [...document.nodes[branchId].childIds]
+
+    const result = executeCommand(document, { type: 'DELETE_SINGLE_NODE', nodeId: branchId })
+
+    expect(result.document.nodes[branchId]).toBeUndefined()
+    expect(result.document.nodes[document.rootId].childIds).toEqual(childIds)
+    childIds.forEach((childId) => expect(result.document.nodes[childId].parentId).toBe(document.rootId))
+    expect(result.focusNodeId).toBe(childIds[0])
+    expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
   it('deletes a multi-selection as one command without deleting descendants twice', () => {
@@ -156,6 +182,24 @@ describe('MindTree command executor', () => {
     expect(renamed.relations[0].label).toBe('说明')
     expect(deleted.relations).toEqual([])
     expect(deleted.nodes).toEqual(document.nodes)
+  })
+
+  it('updates relation curvature, line style and color as one valid command', () => {
+    const document = createInitialDocument()
+    const sourceId = document.nodes[document.rootId].childIds[0]
+    const targetId = document.nodes[sourceId].childIds[0]
+    const created = executeCommand(document, { type: 'CREATE_RELATION', sourceId, targetId }).document
+    const relationId = created.relations[0].id
+
+    expect(created.relations[0]).toMatchObject({ lineStyle: 'dashed', color: null, controlOffsetX: 0, controlOffsetY: 0 })
+    const updated = executeCommand(created, {
+      type: 'UPDATE_RELATION_STYLE', relationId,
+      patch: { lineStyle: 'solid', color: '#2f80ed', controlOffsetX: 64, controlOffsetY: -28 },
+    }).document
+
+    expect(updated.relations[0]).toMatchObject({ lineStyle: 'solid', color: '#2f80ed', controlOffsetX: 64, controlOffsetY: -28 })
+    expect(() => assertValidDocument(updated)).not.toThrow()
+    expect(() => executeCommand(updated, { type: 'UPDATE_RELATION_STYLE', relationId, patch: { color: 'blue' } })).toThrow('关系颜色格式无效')
   })
 
   it('creates one shared free target for multiple relation sources as one undoable command', () => {
@@ -444,6 +488,49 @@ describe('MindTree command executor', () => {
     expect(pastedId).not.toBe(branchId)
     expect(result.document.nodes[pastedId].topic).toBe(document.nodes[branchId].topic)
     expect(result.document.nodes[pastedId].childIds).toHaveLength(document.nodes[branchId].childIds.length)
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
+  it('inserts a parent topic at the selected branch position', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const originalIndex = document.nodes[document.rootId].childIds.indexOf(branchId)
+
+    const result = executeCommand(document, { type: 'ADD_PARENT', nodeId: branchId, topic: '新增父主题' })
+    const parentId = result.focusNodeId!
+
+    expect(result.document.nodes[document.rootId].childIds[originalIndex]).toBe(parentId)
+    expect(result.document.nodes[parentId]).toMatchObject({ topic: '新增父主题', parentId: document.rootId, childIds: [branchId] })
+    expect(result.document.nodes[branchId].parentId).toBe(parentId)
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
+  it('duplicates a complete branch beside the original with fresh ids', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    document.nodes[branchId].note = '保留备注'
+
+    const result = executeCommand(document, { type: 'DUPLICATE_NODE', nodeId: branchId })
+    const duplicateId = result.focusNodeId!
+    const siblings = result.document.nodes[document.rootId].childIds
+
+    expect(siblings.indexOf(duplicateId)).toBe(siblings.indexOf(branchId) + 1)
+    expect(duplicateId).not.toBe(branchId)
+    expect(result.document.nodes[duplicateId]).toMatchObject({ topic: document.nodes[branchId].topic, note: '保留备注', parentId: document.rootId })
+    expect(result.document.nodes[duplicateId].childIds).toHaveLength(document.nodes[branchId].childIds.length)
+    expect(result.document.nodes[duplicateId].childIds).not.toEqual(document.nodes[branchId].childIds)
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
+  it('duplicates a free topic as an independent nearby branch', () => {
+    const document = createInitialDocument()
+    const free = executeCommand(document, { type: 'ADD_FREE_TOPIC', x: 420, y: 260, topic: '独立想法' })
+    const freeId = free.focusNodeId!
+
+    const result = executeCommand(free.document, { type: 'DUPLICATE_NODE', nodeId: freeId })
+    const duplicateId = result.focusNodeId!
+
+    expect(result.document.nodes[duplicateId]).toMatchObject({ topic: '独立想法', parentId: null, isFreeTopic: true, offsetX: 452, offsetY: 292 })
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 })

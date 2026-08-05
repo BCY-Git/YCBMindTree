@@ -73,6 +73,12 @@ export type MindMapRelation = {
   sourceId: string
   targetId: string
   label: string
+  lineStyle: 'solid' | 'dashed' | 'dotted'
+  /** null 表示跟随当前导图主题的分支色。 */
+  color: string | null
+  /** 相对默认弧线控制点的偏移；节点移动后仍保持相同弯曲意图。 */
+  controlOffsetX: number
+  controlOffsetY: number
   createdAt: number
   updatedAt: number
 }

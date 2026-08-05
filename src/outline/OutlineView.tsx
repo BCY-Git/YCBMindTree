@@ -89,13 +89,23 @@ export function OutlineView({ tags, workspaceDocuments = [], onRevealWorkspaceNo
             onFocus={() => selectNode(node.id)}
             onChange={(event) => dispatch({ type: 'UPDATE_NODE_TOPIC', nodeId: node.id, topic: event.target.value })}
             onKeyDown={(event) => {
-              if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+              const meta = event.metaKey || event.ctrlKey
+              if (meta && event.key.toLowerCase() === 'd') {
+                event.preventDefault()
+                if (node.id !== document.rootId) dispatch({ type: 'DUPLICATE_NODE', nodeId: node.id })
+              } else if (meta && event.key === 'Enter') {
+                event.preventDefault()
+                if (node.id !== document.rootId && !node.isFreeTopic) dispatch({ type: 'ADD_PARENT', nodeId: node.id })
+              } else if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
                 event.preventDefault()
                 const command = outlineSiblingMove(document, node.id, event.key === 'ArrowUp' ? 'up' : 'down')
                 if (command) dispatch(command)
               } else if (event.key === 'Enter') {
                 event.preventDefault()
-                dispatch(node.id === viewDocument.rootId || node.isFreeTopic ? { type: 'ADD_CHILD', parentId: node.id } : { type: 'ADD_SIBLING', nodeId: node.id })
+                if (node.isFreeTopic) return
+                dispatch(node.id === viewDocument.rootId
+                  ? { type: 'ADD_CHILD', parentId: node.id }
+                  : { type: 'ADD_SIBLING', nodeId: node.id, placement: event.shiftKey ? 'before' : 'after' })
               } else if (event.key === 'Tab') {
                 event.preventDefault()
                 dispatch(event.shiftKey ? { type: 'OUTDENT_NODE', nodeId: node.id } : { type: 'INDENT_NODE', nodeId: node.id })

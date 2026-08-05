@@ -33,6 +33,22 @@ describe('SVG visual export', () => {
     expect(collapsedSvg).not.toContain('data-relation-edge')
   })
 
+  it('preserves relation curve, color and line style in SVG exports', () => {
+    const document = createInitialDocument()
+    const branchId = document.nodes[document.rootId].childIds[0]
+    const childId = document.nodes[branchId].childIds[0]
+    const created = executeCommand(document, { type: 'CREATE_RELATION', sourceId: document.rootId, targetId: childId, label: '依赖' }).document
+    const relationId = created.relations[0].id
+    const styled = executeCommand(created, { type: 'UPDATE_RELATION_STYLE', relationId, patch: { lineStyle: 'solid', color: '#c15f48', controlOffsetX: 38, controlOffsetY: -26 } }).document
+
+    const svg = exportDocumentSvg(styled)
+
+    expect(svg).toContain('stroke="#c15f48"')
+    expect(svg).toContain(`id="relation-arrow-${relationId}"`)
+    expect(svg).not.toContain('stroke-dasharray="9 7"')
+    expect(svg).toContain(' Q ')
+  })
+
   it('embeds an available local image inside its reserved node thumbnail area', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]

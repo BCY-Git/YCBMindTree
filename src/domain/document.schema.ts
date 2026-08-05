@@ -40,6 +40,10 @@ export const mindMapRelationSchema = z.object({
   sourceId: z.string().min(1),
   targetId: z.string().min(1),
   label: z.string(),
+  lineStyle: z.enum(['solid', 'dashed', 'dotted']).default('dashed'),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().default(null),
+  controlOffsetX: z.number().finite().min(-2000).max(2000).default(0),
+  controlOffsetY: z.number().finite().min(-2000).max(2000).default(0),
   createdAt: z.number(),
   updatedAt: z.number(),
 })
