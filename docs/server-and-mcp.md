@@ -34,6 +34,8 @@ MindTree Server (Node.js / Express)
 
 浏览器直连 API 时，`ALLOWED_ORIGINS` 必须明确列出前端来源（开发环境为 `http://127.0.0.1:5174`）；服务端只对名单内来源返回 CORS 响应头，且仅允许 `GET`、`POST`、`PUT` 与 `OPTIONS`，防止任意网站借用本机 Token 调用同步 API。
 
+Windows 上暂时没有反向代理时，优先设置服务端 `MINDTREE_WEB_ROOT` 指向前端 `dist` 目录，使网页、`/api/v1` 与 `/mcp` 共用同步服务端口，避免新增安全组规则与跨端口 CORS。也可用 [web-server.mjs](../server/deploy/windows/web-server.mjs) 将前端作为独立静态站点运行；默认监听 `81` 端口，此时必须同时放行 Windows 防火墙和云厂商安全组，并把完整网页来源加入 `ALLOWED_ORIGINS`。HTTP 形态只适合短期联调；账号密码与会话 Token 跨公网使用前应迁移到 HTTPS。
+
 ## 同步数据模型
 
 `documents` 保存当前快照和 `version`；每一次写入要求客户端携带 `baseVersion`。版本一致才提交，并生成新的 `version` 与一条 `document_changes` 记录；不一致时返回 `409 VERSION_CONFLICT`，客户端先拉取最新快照后再决定合并策略。

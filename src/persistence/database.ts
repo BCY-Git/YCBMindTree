@@ -22,6 +22,7 @@ import type { DepositPlan, DepositWorkspaceTransaction } from '../ai/deposit/dep
 import { executeCommand } from '../domain/commands'
 import type { WorkflowSession } from '../ai/workflow/workflow-types'
 import { workflowSessionSchema } from '../ai/workflow/workflow-schema'
+import { randomUuid } from '../platform/random-uuid'
 
 export type SyncMetadata = {
   documentId: string
@@ -184,7 +185,7 @@ export async function saveWorkflowSession(session: WorkflowSession): Promise<voi
 
 /** 只记录本地聚合所需事件，不保存节点原文、候选标题或模型回复。 */
 export async function recordDepositMetric(event: Omit<DepositMetricEvent, 'id' | 'createdAt'>, target = database): Promise<void> {
-  await target.depositMetrics.put({ ...event, id: crypto.randomUUID(), createdAt: Date.now() })
+  await target.depositMetrics.put({ ...event, id: randomUuid(), createdAt: Date.now() })
 }
 
 export async function getDepositMetricSummary(documentId: string, source = database): Promise<Record<DepositMetricEvent['type'], number>> {
@@ -273,10 +274,10 @@ export async function applyWorkspaceDepositPlan(plan: DepositPlan, batch: Deposi
         targetNodeId = after.nodes[planned.operation.parentId]?.childIds.find((id) => !before.nodes[id] && !claimedCreatedNodes.has(id) && after.nodes[id]?.topic === candidate.title) ?? null
         if (targetNodeId) claimedCreatedNodes.add(targetNodeId)
       } else if (planned && 'nodeId' in planned.operation) targetNodeId = planned.operation.nodeId
-      return { id: crypto.randomUUID(), batchId: batch.id, candidateId: candidate.id, sourceDocumentId: batch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: batch.sourceSnapshot, targetDocumentId: planned?.documentId ?? null, targetNodeIds: targetNodeId ? [targetNodeId] : [], action: candidate.action, model, acceptedByUser: true, createdAt: Date.now() }
+      return { id: randomUuid(), batchId: batch.id, candidateId: candidate.id, sourceDocumentId: batch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: batch.sourceSnapshot, targetDocumentId: planned?.documentId ?? null, targetNodeIds: targetNodeId ? [targetNodeId] : [], action: candidate.action, model, acceptedByUser: true, createdAt: Date.now() }
     })
     const completed = appliedBatch(batch)
-    const transaction: DepositWorkspaceTransaction = { id: crypto.randomUUID(), batchId: batch.id, beforeDocuments, afterDocuments, status: 'applied', createdAt: Date.now(), revertedAt: null }
+    const transaction: DepositWorkspaceTransaction = { id: randomUuid(), batchId: batch.id, beforeDocuments, afterDocuments, status: 'applied', createdAt: Date.now(), revertedAt: null }
     await database.documents.bulkPut(afterDocuments)
     await database.depositBatches.put(completed)
     if (provenance.length) await database.depositProvenance.bulkPut(provenance)
@@ -356,7 +357,7 @@ export async function deleteDocumentVersions(documentId: string, kinds?: Documen
 /** 附件文件本体只留在当前浏览器，云同步的导图快照不会携带 Blob。 */
 export async function saveNodeAttachment(documentId: string, nodeId: string, file: File): Promise<MindNodeAttachment> {
   const attachment: MindNodeAttachment = {
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     name: file.name || '未命名附件',
     type: file.type,
     size: file.size,

@@ -65,6 +65,10 @@ const edgeTypes = { relation: RelationEdge }
 const FREE_TOPIC_ATTACH_ENTER_DISTANCE = 116
 const FREE_TOPIC_ATTACH_RETAIN_DISTANCE = 164
 
+function fitViewPadding() {
+  return window.matchMedia('(max-width: 620px)').matches ? .08 : .35
+}
+
 /**
  * 根据方向返回相邻节点 id。
  * 用于方向键导航：左键回到父节点，右键进入第一个子节点，上下键在同级节点间移动。
@@ -434,11 +438,23 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   useEffect(() => {
     const viewKey = `${document.id}:${focusRootId ?? 'all'}`
     if (!flowInstance || !baseNodes.length || fittedDocumentIdRef.current === viewKey) return
+    let settleTimer = 0
     const frame = window.requestAnimationFrame(() => {
-      flowInstance.fitView({ nodes: baseNodes, padding: .35, maxZoom: 1 })
+      const isMobile = window.matchMedia('(max-width: 620px)').matches
+      // 手机上先让中心主题及其一级分支以可编辑的尺寸出现；完整导图仍可通过“适应视图”查看。
+      const rootAndFirstBranches = baseNodes.filter((node) => node.id === document.rootId || document.nodes[node.id]?.parentId === document.rootId)
+      const options = {
+        nodes: isMobile && rootAndFirstBranches.length ? rootAndFirstBranches : baseNodes,
+        padding: isMobile ? .28 : fitViewPadding(),
+        maxZoom: isMobile ? .85 : 1,
+      }
+      flowInstance.fitView(options)
+      // 移动端首次布局期间 React Flow 可能尚未完成容器测量，延后一帧再适配一次，
+      // 避免初始导图落在手机视口外或缩放得无法阅读。
+      if (isMobile) settleTimer = window.setTimeout(() => flowInstance.fitView(options), 120)
       fittedDocumentIdRef.current = viewKey
     })
-    return () => window.cancelAnimationFrame(frame)
+    return () => { window.cancelAnimationFrame(frame); window.clearTimeout(settleTimer) }
   }, [baseNodes, document.id, flowInstance, focusRootId])
 
   useEffect(() => {
@@ -1111,7 +1127,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             </div>
           ))}
         </ViewportPortal>
-        <Controls showInteractive={false}>
+        <Controls showInteractive={false} fitViewOptions={{ padding: fitViewPadding(), maxZoom: 1 }}>
           <ControlButton onClick={() => setSearchOpen(true)} title="搜索导图">⌕</ControlButton>
           <ControlButton onClick={focusRoot} title="前往中心主题">◎</ControlButton>
           <ControlButton

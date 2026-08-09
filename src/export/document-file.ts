@@ -2,6 +2,7 @@ import type { MindMapDocument } from '../domain/document.types'
 import { mindMapDocumentSchema } from '../domain/document.schema'
 import { assertValidDocument } from '../domain/document.validator'
 import { isTauriRuntime } from '../platform/tauri'
+import { randomUuid } from '../platform/random-uuid'
 
 type FilePickerWindow = Window & {
   showSaveFilePicker?: (options: {
@@ -51,7 +52,7 @@ export function createImportedCopy(document: MindMapDocument, now = Date.now()):
   const copy = structuredClone(document)
   return {
     ...copy,
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     title: `${copy.title}（导入副本）`,
     createdAt: now,
     updatedAt: now,

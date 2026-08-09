@@ -1,5 +1,6 @@
 import { createNode } from '../domain/document.factory'
 import type { MindMapDocument, MindNodeTaskStatus } from '../domain/document.types'
+import { randomUuid } from '../platform/random-uuid'
 
 export type ImportedOutlineNode = {
   topic: string
@@ -33,7 +34,7 @@ export function createDocumentFromOutline(title: string, rootOutline: ImportedOu
   const now = Date.now()
   return {
     document: {
-      id: crypto.randomUUID(),
+      id: randomUuid(),
       schemaVersion: 1,
       title: title.trim() || rootOutline.topic.trim() || '导入的大纲',
       categoryId: 'uncategorized',

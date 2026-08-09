@@ -1,5 +1,6 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { randomUUID } from 'node:crypto'
+import compression from 'compression'
 import express from 'express'
 import { requireAccountBearer, requireAllowedHost, requireAllowedOrigin, type AuthenticatedRequest } from './auth.js'
 import { DocumentAccessError, DocumentRepository } from './document-repository.js'
@@ -18,11 +19,25 @@ export type AppOptions = {
 export function createApp(repository: DocumentRepository, options: AppOptions) {
   const app = express()
   app.disable('x-powered-by')
+  app.use(compression())
   app.use(requireAllowedHost(options.allowedHosts))
   app.use(requireAllowedOrigin(options.allowedOrigins))
   app.use(express.json({ limit: '1mb' }))
 
   app.get('/healthz', (_request, response) => response.json({ ok: true, service: 'mindtree-server', mcp: '/mcp' }))
+
+  const recentClientDiagnostics = new Map<string, number>()
+  app.post('/api/v1/client-diagnostics', (request, response) => {
+    const source = request.ip || request.socket.remoteAddress || 'unknown'
+    const now = Date.now()
+    if (now - (recentClientDiagnostics.get(source) ?? 0) < 10_000) return response.status(204).end()
+    recentClientDiagnostics.set(source, now)
+    const kind = typeof request.body?.kind === 'string' ? request.body.kind.slice(0, 80) : 'unknown'
+    const message = typeof request.body?.message === 'string' ? request.body.message.slice(0, 500) : ''
+    const asset = typeof request.body?.asset === 'string' ? request.body.asset.slice(0, 300) : ''
+    console.warn(`[client-diagnostic] kind=${JSON.stringify(kind)} message=${JSON.stringify(message)} asset=${JSON.stringify(asset)}`)
+    return response.status(204).end()
+  })
 
   const requireApiBearer = requireAccountBearer(repository, options.devToken)
   app.post('/api/v1/auth/register', (request, response) => {

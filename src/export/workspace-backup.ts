@@ -9,6 +9,7 @@ import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-type
 import { depositBatchSchema, depositProvenanceSchema } from '../ai/deposit/deposit-persistence-schema'
 import type { WorkflowSession } from '../ai/workflow/workflow-types'
 import { workflowSessionSchema } from '../ai/workflow/workflow-schema'
+import { randomUuid } from '../platform/random-uuid'
 
 export type WorkspaceCategory = { id: string; name: string }
 export type WorkspaceTag = { id: string; name: string; color: string }
@@ -260,7 +261,7 @@ function mapCategories(imported: WorkspaceCategory[], existing: WorkspaceCategor
     if (sameId && sameId.name === item.name) mapping.set(item.id, sameId.id)
     else if (sameName) mapping.set(item.id, sameName.id)
     else {
-      const id = ids.has(item.id) ? `category-${crypto.randomUUID()}` : item.id
+      const id = ids.has(item.id) ? `category-${randomUuid()}` : item.id
       result.push({ ...item, id })
       ids.add(id)
       mapping.set(item.id, id)
@@ -279,7 +280,7 @@ function mapTags(imported: WorkspaceTag[], existing: WorkspaceTag[]) {
     if (sameId && sameId.name === item.name && sameId.color === item.color) mapping.set(item.id, sameId.id)
     else if (sameName) mapping.set(item.id, sameName.id)
     else {
-      const id = ids.has(item.id) ? `tag-${crypto.randomUUID()}` : item.id
+      const id = ids.has(item.id) ? `tag-${randomUuid()}` : item.id
       result.push({ ...item, id })
       ids.add(id)
       mapping.set(item.id, id)
@@ -298,10 +299,10 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
   const copiedIds = new Set<string>()
   for (const document of backup.documents) {
     const collision = existingDocumentIds.has(document.id)
-    documentIdMap.set(document.id, collision ? crypto.randomUUID() : document.id)
+    documentIdMap.set(document.id, collision ? randomUuid() : document.id)
     if (collision) copiedIds.add(document.id)
   }
-  const attachmentIdMap = new Map(backup.attachments.map((attachment) => [attachment.id, crypto.randomUUID()]))
+  const attachmentIdMap = new Map(backup.attachments.map((attachment) => [attachment.id, randomUuid()]))
   const { categories, mapping: categoryIds } = mapCategories(backup.categories, target.categories)
   const { tags, mapping: tagIds } = mapTags(backup.tags, target.tags)
 
@@ -322,7 +323,7 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
   const documents = backup.documents.map((document) => rewriteDocument(document, true))
   const versions = backup.versions.map((version) => ({
     ...structuredClone(version),
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     documentId: documentIdMap.get(version.documentId) ?? version.documentId,
     snapshot: rewriteDocument(version.snapshot, false),
   }))
@@ -331,8 +332,8 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
     id: attachmentIdMap.get(attachment.id) ?? attachment.id,
     documentId: documentIdMap.get(attachment.documentId) ?? attachment.documentId,
   }))
-  const batchIdMap = new Map(backup.depositBatches.map((batch) => [batch.id, crypto.randomUUID()]))
-  const candidateIdMap = new Map(backup.depositBatches.flatMap((batch) => batch.candidates.map((candidate) => [candidate.id, crypto.randomUUID()] as const)))
+  const batchIdMap = new Map(backup.depositBatches.map((batch) => [batch.id, randomUuid()]))
+  const candidateIdMap = new Map(backup.depositBatches.flatMap((batch) => batch.candidates.map((candidate) => [candidate.id, randomUuid()] as const)))
   const depositBatches = backup.depositBatches.map((source) => {
     const batchId = batchIdMap.get(source.id) ?? source.id
     return {
@@ -350,12 +351,12 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
   })
   const depositProvenance = backup.depositProvenance.map((source) => ({
     ...structuredClone(source),
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     batchId: batchIdMap.get(source.batchId) ?? source.batchId,
     candidateId: candidateIdMap.get(source.candidateId) ?? source.candidateId,
     sourceDocumentId: documentIdMap.get(source.sourceDocumentId) ?? source.sourceDocumentId,
     targetDocumentId: source.targetDocumentId ? documentIdMap.get(source.targetDocumentId) ?? source.targetDocumentId : null,
   }))
-  const workflowSessions = backup.workflowSessions.map((source) => ({ ...structuredClone(source), id: crypto.randomUUID(), documentId: documentIdMap.get(source.documentId) ?? source.documentId }))
+  const workflowSessions = backup.workflowSessions.map((source) => ({ ...structuredClone(source), id: randomUuid(), documentId: documentIdMap.get(source.documentId) ?? source.documentId }))
   return { documents, versions, attachments, categories, tags, depositBatches, depositProvenance, workflowSessions, copiedDocumentCount: copiedIds.size }
 }

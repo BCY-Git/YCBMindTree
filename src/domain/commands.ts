@@ -16,6 +16,7 @@ import { createNode } from './document.factory'
 import { assertValidDocument } from './document.validator'
 import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from './document.types'
 import type { ThemeId } from './themes'
+import { randomUuid } from '../platform/random-uuid'
 
 /**
  * 所有可用命令的联合类型（判别联合）。
@@ -169,7 +170,7 @@ function removeSubtree(document: MindMapDocument, nodeId: string) {
 function createRelation(sourceId: string, targetId: string, label: string): MindMapRelation {
   const now = Date.now()
   return {
-    id: crypto.randomUUID(), sourceId, targetId, label: label.trim() || '关联',
+    id: randomUuid(), sourceId, targetId, label: label.trim() || '关联',
     lineStyle: 'dashed', color: null, controlOffsetX: 0, controlOffsetY: 0,
     createdAt: now, updatedAt: now,
   }
@@ -177,12 +178,12 @@ function createRelation(sourceId: string, targetId: string, label: string): Mind
 
 function createBoundary(parentId: string, nodeIds: string[], label: string): MindMapBoundary {
   const now = Date.now()
-  return { id: crypto.randomUUID(), parentId, nodeIds, label: label.trim() || '分组', createdAt: now, updatedAt: now }
+  return { id: randomUuid(), parentId, nodeIds, label: label.trim() || '分组', createdAt: now, updatedAt: now }
 }
 
 function createSummary(parentId: string, nodeIds: string[], topic: string): MindMapSummary {
   const now = Date.now()
-  return { id: crypto.randomUUID(), parentId, nodeIds, topic: topic.trim() || '总结', createdAt: now, updatedAt: now }
+  return { id: randomUuid(), parentId, nodeIds, topic: topic.trim() || '总结', createdAt: now, updatedAt: now }
 }
 
 // 检查 candidateId 是否在 ancestorId 的子树中（含自身），用于防止循环引用。
@@ -288,7 +289,7 @@ function pasteSubtree(document: MindMapDocument, parentId: string | null, clipbo
   const node = createNode(clipboard.topic, parentId)
   node.collapsed = clipboard.collapsed
   node.note = clipboard.note
-  node.links = clipboard.links.map((link) => ({ ...link, id: crypto.randomUUID() }))
+  node.links = clipboard.links.map((link) => ({ ...link, id: randomUuid() }))
   node.attachments = structuredClone(clipboard.attachments)
   node.taskStatus = clipboard.taskStatus
   node.priority = clipboard.priority
@@ -470,7 +471,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       try { url = new URL(command.url.trim()) } catch { throw new Error('请输入有效的链接地址') }
       if (!['http:', 'https:', 'mindtree:'].includes(url.protocol)) throw new Error('链接仅支持 HTTP、HTTPS 或 MindTree 节点地址')
       if (node.links.some((link) => link.url === url.toString())) throw new Error('该链接已添加')
-      node.links.push({ id: crypto.randomUUID(), url: url.toString(), label: command.label?.trim() || url.hostname })
+      node.links.push({ id: randomUuid(), url: url.toString(), label: command.label?.trim() || url.hostname })
       node.updatedAt = Date.now()
       break
     }

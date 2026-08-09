@@ -89,6 +89,14 @@ export async function fetchRemoteDocument(config: SyncConfig, documentId: string
   return parseRemoteRecord(await response.json())
 }
 
+export async function fetchRemoteDocuments(config: SyncConfig): Promise<RemoteDocument[]> {
+  const response = await request(config, '/documents', { method: 'GET' })
+  const body = await response.json().catch(() => null) as { documents?: unknown } | null
+  if (!response.ok) throw await responseError(response)
+  if (!body || !Array.isArray(body.documents)) throw new Error('服务端返回的导图库格式无效')
+  return body.documents.map(parseRemoteRecord)
+}
+
 export async function pushDocument(config: SyncConfig, document: MindMapDocument, baseVersion: number): Promise<PushResult> {
   const response = await request(config, `/documents/${encodeURIComponent(document.id)}`, {
     method: 'PUT',

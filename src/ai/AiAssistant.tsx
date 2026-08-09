@@ -19,6 +19,7 @@ import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
 import { parseMapReorganization, type MapReorganization } from './map-reorganization'
 import { useEditorStore } from '../store/editor.store'
 import { platformErrorMessage, requestAiChat } from '../platform/tauri'
+import { randomUuid } from '../platform/random-uuid'
 import { chatUrl, defaultAiSettings, isGhostCompletionEnabled, loadAiSettings, saveAiSettings, saveGhostCompletionEnabled, type AiSettings } from './ai-settings'
 import { buildDepositContext, serializeDepositSource } from './deposit/deposit-context'
 import { depositFingerprint, withDuplicateFlags } from './deposit/deposit-dedup'
@@ -232,7 +233,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         if (!workflowSession) throw new Error('请先开始一次智能协作。')
         const proposal = parseWorkflowCheckpoint(content)
         const sourceContext = buildDepositContext(document, target.id, [], [document])
-        const checkpoint = { ...proposal, id: crypto.randomUUID(), sourceNodeIds: sourceContext.source.nodes.map((node) => node.id), createdAt: Date.now() }
+        const checkpoint = { ...proposal, id: randomUuid(), sourceNodeIds: sourceContext.source.nodes.map((node) => node.id), createdAt: Date.now() }
         const unique = (values: string[]) => [...new Set(values)]
         const next: WorkflowSession = { ...workflowSession, confirmedFacts: unique([...workflowSession.confirmedFacts, ...proposal.confirmed]), rejectedOptions: unique([...workflowSession.rejectedOptions, ...proposal.rejected]), constraints: unique([...workflowSession.constraints, ...proposal.constraints]), openQuestions: proposal.openQuestions, nextActions: proposal.nextActions, checkpoints: [...workflowSession.checkpoints, checkpoint].slice(-100), updatedAt: Date.now() }
         await saveWorkflowSession(next)
@@ -245,10 +246,10 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           destinationNodeIdsByDocument: Object.fromEntries(depositContext.destinations.map((destination) => [destination.documentId, destination.candidateNodes.map((node) => node.id)])),
         })
         const now = Date.now()
-        const batchId = crypto.randomUUID()
+        const batchId = randomUuid()
         const candidates: DepositCandidate[] = proposal.candidates.map((candidate) => ({
           ...candidate,
-          id: crypto.randomUUID(),
+          id: randomUuid(),
           batchId,
           duplicateOfCandidateId: null,
           status: 'pending',
@@ -426,7 +427,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         ? after.nodes[candidate.suggestedParentId]?.childIds.find((id) => !document.nodes[id] && after.nodes[id]?.topic === candidate.title) ?? null
         : null
       const targetId = createdId ?? candidate.suggestedTargetNodeId
-      return { id: crypto.randomUUID(), batchId: depositBatch.id, candidateId: candidate.id, sourceDocumentId: depositBatch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: depositBatch.sourceSnapshot, targetDocumentId: planned?.documentId ?? (targetId ? after.id : null), targetNodeIds: targetId ? [targetId] : [], action: candidate.action, model: settings.model.trim(), acceptedByUser: true, createdAt: Date.now() }
+      return { id: randomUuid(), batchId: depositBatch.id, candidateId: candidate.id, sourceDocumentId: depositBatch.sourceDocumentId, sourceNodeIds: candidate.sourceNodeIds, sourceSnapshot: depositBatch.sourceSnapshot, targetDocumentId: planned?.documentId ?? (targetId ? after.id : null), targetNodeIds: targetId ? [targetId] : [], action: candidate.action, model: settings.model.trim(), acceptedByUser: true, createdAt: Date.now() }
     })
     try {
       const completed = await applyDepositBatch(depositBatch, provenance)

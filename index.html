@@ -5,9 +5,59 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f5f5ef" />
     <title>MindTree</title>
+    <style>
+      html, body { min-width: 320px; min-height: 100%; margin: 0; background: #eeeee8; color: #30332e; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mindtree-boot { position: fixed; inset: 0; display: grid; place-items: center; background: #eeeee8; }
+      .mindtree-boot__content { display: grid; justify-items: center; gap: 14px; padding: 32px; text-align: center; }
+      .mindtree-boot__mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px 13px 7px 13px; background: #47766a; color: white; font-size: 20px; font-weight: 750; box-shadow: 0 10px 28px rgba(47, 88, 75, .18); }
+      .mindtree-boot h1 { margin: 2px 0 0; font-size: 18px; letter-spacing: -.02em; }
+      .mindtree-boot p { max-width: 420px; margin: 0; color: #74786f; font-size: 12px; line-height: 1.65; }
+      .mindtree-boot__progress { width: 150px; height: 3px; overflow: hidden; border-radius: 999px; background: #d9ddd5; }
+      .mindtree-boot__progress::after { display: block; width: 45%; height: 100%; border-radius: inherit; background: #67a08f; content: ""; animation: mindtree-boot-progress 1.15s ease-in-out infinite alternate; }
+      .mindtree-boot__retry { display: none; min-height: 34px; margin-top: 3px; padding: 0 15px; border: 0; border-radius: 8px; background: #47766a; color: #fff; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
+      .mindtree-boot.is-error .mindtree-boot__progress { display: none; }
+      .mindtree-boot.is-error .mindtree-boot__retry { display: inline-block; }
+      @keyframes mindtree-boot-progress { from { transform: translateX(-105%); } to { transform: translateX(225%); } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="mindtree-boot" id="mindtree-boot" aria-live="polite">
+        <div class="mindtree-boot__content">
+          <div class="mindtree-boot__mark" aria-hidden="true">M</div>
+          <h1>正在打开 MindTree</h1>
+          <div class="mindtree-boot__progress" aria-hidden="true"></div>
+          <p id="mindtree-boot-status">正在加载工作区，首次打开可能需要几秒钟。</p>
+          <button class="mindtree-boot__retry" type="button" onclick="location.reload()">重新加载</button>
+        </div>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const boot = document.getElementById('mindtree-boot')
+        const status = document.getElementById('mindtree-boot-status')
+        let completed = false
+        const report = (kind, message, asset = '') => {
+          if (completed) return
+          boot?.classList.add('is-error')
+          if (status) status.textContent = message
+          fetch('/api/v1/client-diagnostics', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ kind, message, asset }),
+            keepalive: true,
+          }).catch(() => {})
+        }
+        const timer = setTimeout(() => report('boot-timeout', '加载时间超过 20 秒，请重新加载；问题已自动记录。'), 20_000)
+        window.addEventListener('mindtree:mounted', () => { completed = true; clearTimeout(timer) }, { once: true })
+        window.addEventListener('error', (event) => {
+          const target = event.target
+          if (target instanceof HTMLScriptElement) report('script-load', '应用资源加载失败，请重新加载；问题已自动记录。', target.src)
+          else report('runtime-error', `应用启动失败：${event.message || '未知错误'}`)
+        }, true)
+        window.addEventListener('unhandledrejection', (event) => report('unhandled-rejection', `应用启动失败：${String(event.reason?.message || event.reason || '未知错误')}`))
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

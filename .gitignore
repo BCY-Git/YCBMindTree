@@ -7,3 +7,5 @@ server/data/
 .env.*
 server/.env
 server/.env.*
+.playwright-cli/
+output/

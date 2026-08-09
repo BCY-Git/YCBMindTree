@@ -4,6 +4,7 @@ import { chatUrl, loadAiSettings } from './ai-settings'
 import { platformErrorMessage, requestAiChat } from '../platform/tauri'
 import { retrieveWorkspaceContext } from './workspace-retrieval'
 import { recordAiRetrievalUsage } from '../search/search-usage-metrics'
+import { randomUuid } from '../platform/random-uuid'
 
 type QuickMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
 type ChatResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
@@ -60,7 +61,7 @@ export function QuickAssistant({ document, workspaceDocuments }: { document: Min
       setNotice('请先在右侧 AI 助手中完成模型连接配置。')
       return
     }
-    const question: QuickMessage = { id: crypto.randomUUID(), role: 'user', content, createdAt: Date.now() }
+    const question: QuickMessage = { id: randomUuid(), role: 'user', content, createdAt: Date.now() }
     const history = [...messages, question].slice(-12)
     setMessages(history)
     setPrompt('')
@@ -81,7 +82,7 @@ export function QuickAssistant({ document, workspaceDocuments }: { document: Min
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const answer = payload.choices?.[0]?.message?.content?.trim()
       if (!answer) throw new Error('模型没有返回内容。')
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant' as const, content: answer, createdAt: Date.now() }].slice(-40))
+      setMessages((current) => [...current, { id: randomUuid(), role: 'assistant' as const, content: answer, createdAt: Date.now() }].slice(-40))
       setNotice('已记录到本机对话历史。')
     } catch (error) {
       setNotice(platformErrorMessage(error, '暂时无法连接助手。'))

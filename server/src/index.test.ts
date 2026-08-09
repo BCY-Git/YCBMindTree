@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -63,6 +63,17 @@ afterEach(() => {
 })
 
 describe('account and pairing HTTP API', () => {
+  it('compresses large browser responses and accepts one unauthenticated startup diagnostic', async () => {
+    const app = createTestApp()
+    app.get('/large-browser-asset.js', (_request, response) => response.type('text/javascript').send('x'.repeat(4_096)))
+    await request(app).get('/large-browser-asset.js').set('Host', host).set('Accept-Encoding', 'gzip').expect(200).expect('content-encoding', 'gzip')
+
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await api(app).post('/api/v1/client-diagnostics').send({ kind: 'boot-timeout', message: '加载超时', asset: '/assets/app.js' }).expect(204)
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('[client-diagnostic] kind="boot-timeout"'))
+    warning.mockRestore()
+  })
+
   it('registers, logs in, rejects a wrong password, and rejects an expired token', async () => {
     const app = createTestApp()
     const registered = await api(app).post('/api/v1/auth/register').send({ email: 'alice@example.com', password: 'correct horse battery staple' }).expect(201)

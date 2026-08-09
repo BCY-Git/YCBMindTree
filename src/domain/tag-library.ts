@@ -2,6 +2,8 @@
  * 轻量、跨导图复用的本地标签库。节点只持有 tagId，避免改名或改色时重写每份导图。
  * 标签库暂不进云端：账号体系稳定后再单独迁移，不能让标签配置阻塞导图同步。
  */
+import { randomUuid } from '../platform/random-uuid'
+
 export type Tag = { id: string; name: string; color: string }
 
 const storageKey = 'mindtree.tags.v1'
@@ -27,7 +29,7 @@ export function saveTags(tags: Tag[]): void {
 }
 
 export function createTag(name: string, color = colors[loadTags().length % colors.length]): Tag {
-  return { id: `tag-${crypto.randomUUID()}`, name: name.trim() || '未命名标签', color }
+  return { id: `tag-${randomUuid()}`, name: name.trim() || '未命名标签', color }
 }
 
 export function renameTag(id: string, name: string): Tag[] {

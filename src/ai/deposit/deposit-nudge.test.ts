@@ -30,4 +30,5 @@ describe('deposit nudge', () => {
     expect(shouldShowDepositNudge('quiet-document')).toBe(false)
     expect(shouldShowDepositNudge('another-document')).toBe(true)
   })
+  
 })

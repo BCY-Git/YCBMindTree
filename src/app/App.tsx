@@ -21,9 +21,11 @@ import { depositNudgeReason, shouldShowDepositNudge } from '../ai/deposit/deposi
 import { DraftDocumentItem } from './DraftDocumentItem'
 import type { MindMapDocument, NodeMark } from '../domain/document.types'
 import { SyncDialog } from '../sync/SyncDialog'
-import { createPairingInvite, fetchRemoteDocument, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
+import { createPairingInvite, fetchRemoteDocument, fetchRemoteDocuments, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
+import { isUntouchedStarterDocument, synchronizeAccountLibrary } from '../sync/account-library'
 import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
+import { randomUuid } from '../platform/random-uuid'
 import { downloadMarkdown, type MarkdownExportMode } from '../export/markdown'
 import { createImportedCopy, parseDocumentFile, saveDocumentToLocalFile } from '../export/document-file'
 import { downloadOpml, parseOpml } from '../export/opml'
@@ -139,6 +141,7 @@ export function App() {
   })
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>('projects')
   const [assistantOpen, setAssistantOpen] = useState(loadAssistantDockOpen)
+  const [mobilePanel, setMobilePanel] = useState<'navigation' | 'inspector' | null>(null)
   const [assistantDockWidth, setAssistantDockWidth] = useState(loadAssistantDockWidth)
   const [assistantDepositRequestId, setAssistantDepositRequestId] = useState(0)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('content')
@@ -149,6 +152,7 @@ export function App() {
   const [syncPreview, setSyncPreview] = useState<RemoteDocument | null>(null)
   const [syncConflict, setSyncConflict] = useState<RemoteDocument | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
+  const accountLibrarySyncKeyRef = useRef<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [versions, setVersions] = useState<DocumentVersion[]>([])
   const [historyBusy, setHistoryBusy] = useState(false)
@@ -394,7 +398,7 @@ export function App() {
   const addCategory = () => {
     const name = categoryDraft.trim()
     if (!name) return
-    const category = { id: `category-${crypto.randomUUID()}`, name }
+    const category = { id: `category-${randomUuid()}`, name }
     const next = [...categories, category]
     setCategories(next)
     saveCategories(next)
@@ -438,6 +442,10 @@ export function App() {
   }
 
   const toggleSidebar = () => {
+    if (window.matchMedia('(max-width: 620px)').matches) {
+      setMobilePanel((current) => current === 'navigation' ? null : 'navigation')
+      return
+    }
     setSidebarCollapsed((collapsed) => {
       const next = !collapsed
       localStorage.setItem('mindtree.sidebar-collapsed', String(next))
@@ -446,6 +454,10 @@ export function App() {
   }
 
   const toggleInspector = () => {
+    if (window.matchMedia('(max-width: 620px)').matches) {
+      setMobilePanel((current) => current === 'inspector' ? null : 'inspector')
+      return
+    }
     setInspectorCollapsed((collapsed) => {
       const next = !collapsed
       localStorage.setItem('mindtree.inspector-collapsed', String(next))
@@ -861,6 +873,29 @@ export function App() {
     setSyncStatus('连接设置已保存在此浏览器。')
   }, [])
 
+  const syncAccountLibrary = useCallback(async (config: SyncConfig) => {
+    setSyncStatus('正在同步账号导图库…')
+    const activeDocument = useEditorStore.getState().document
+    const result = await synchronizeAccountLibrary(config, {
+      listLocalDocuments: listDocuments,
+      listRemoteDocuments: fetchRemoteDocuments,
+      loadMetadata: getSyncMetadata,
+      saveLocalDocument: saveDocument,
+      saveMetadata: saveSyncMetadata,
+      pushLocalDocument: pushDocument,
+    })
+    setDocuments(result.documents)
+    if (result.preferredDocument && isUntouchedStarterDocument(activeDocument)) hydrate(result.preferredDocument)
+    const completed = [
+      result.imported ? `拉取 ${result.imported} 份` : '',
+      result.updated ? `更新 ${result.updated} 份` : '',
+      result.uploaded ? `上传 ${result.uploaded} 份` : '',
+    ].filter(Boolean).join('，')
+    setSyncStatus(result.conflicts
+      ? `${completed || '导图库已检查'}；${result.conflicts} 份存在两端修改，已保留本地版本。`
+      : completed ? `账号导图库同步完成：${completed}。` : '账号导图库已是最新状态。')
+  }, [hydrate])
+
   const authenticateAccount = useCallback(async (mode: 'login' | 'register', email: string, password: string) => {
     const session = mode === 'login'
       ? await loginAccount({ serverUrl: syncConfig.serverUrl }, email, password)
@@ -1094,8 +1129,22 @@ export function App() {
     void autoSync(config)
   }, [document.id, hydrated, autoSync])
 
+  // 同一账号在新设备登录后，先发现并导入整个云端导图库；账号云端为空时则上传现有本地导图。
+  useEffect(() => {
+    if (!hydrated || !accountSession) return
+    const config = loadSyncConfig()
+    if (!config.token.trim()) return
+    const syncKey = `${config.serverUrl}\u0000${accountSession.user.id}\u0000${config.token}`
+    if (accountLibrarySyncKeyRef.current === syncKey) return
+    accountLibrarySyncKeyRef.current = syncKey
+    void syncAccountLibrary(config).catch((error) => {
+      accountLibrarySyncKeyRef.current = null
+      setSyncStatus(error instanceof Error ? `账号导图库同步失败：${error.message}` : '账号导图库同步失败。')
+    })
+  }, [accountSession, hydrated, syncAccountLibrary])
+
   return (
-    <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''} ${inspectorCollapsed ? 'is-inspector-collapsed' : ''} ${assistantOpen ? 'is-assistant-open' : ''}`} style={{
+    <main className={`app-shell ${sidebarCollapsed ? 'is-sidebar-collapsed' : ''} ${inspectorCollapsed ? 'is-inspector-collapsed' : ''} ${assistantOpen ? 'is-assistant-open' : ''} ${mobilePanel === 'navigation' ? 'is-mobile-navigation-open' : ''} ${mobilePanel === 'inspector' ? 'is-mobile-inspector-open' : ''}`} style={{
       '--app-bg': theme.canvas,
       '--chrome-bg': theme.chrome,
       '--panel-bg': theme.surface,
@@ -1138,7 +1187,7 @@ export function App() {
           </div>
         </nav>
         <div className="topbar-utility">
-          <button className={`topbar-utility__button ${workspaceView === 'outline' ? 'is-active' : ''}`} onClick={toggleWorkspaceView} title={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-label={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-pressed={workspaceView === 'outline'}><Icon>{workspaceView === 'outline' ? '◇' : '≡'}</Icon></button>
+          <button className={`topbar-utility__button topbar-mobile-keep ${workspaceView === 'outline' ? 'is-active' : ''}`} onClick={toggleWorkspaceView} title={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-label={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-pressed={workspaceView === 'outline'}><Icon>{workspaceView === 'outline' ? '◇' : '≡'}</Icon></button>
           <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
           <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
           <button className="topbar-utility__button" onClick={() => setPresentationStartNodeId(selectedNodeId ?? focusedNodeId ?? document.rootId)} title={selectedNodeId && selectedNodeId !== document.rootId ? '从所选节点开始演示' : '演示当前导图'} aria-label="开始演示"><Icon>▷</Icon></button>
@@ -1147,10 +1196,16 @@ export function App() {
           <PanelToggleButton side="left" collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
           <AssistantDockToggleButton open={assistantOpen} hasNudge={hasDepositNudge} onToggle={toggleAssistantDock} />
           <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
-          <button className="topbar-utility__button" onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
+          <button className="topbar-utility__button topbar-mobile-action" onClick={toggleSidebar} title="打开导图与项目" aria-label="打开导图与项目" aria-expanded={mobilePanel === 'navigation'}><Icon>☰</Icon></button>
+          <button className="topbar-utility__button topbar-mobile-action" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题请先附加到主节点' : '新建子节点'} aria-label="新建子节点"><Icon>＋</Icon></button>
+          <button className="topbar-utility__button topbar-mobile-action" onClick={toggleInspector} title="打开节点属性" aria-label="打开节点属性" aria-expanded={mobilePanel === 'inspector'}><Icon>▤</Icon></button>
+          {!accountSession && <button className="topbar-utility__button topbar-mobile-account" onClick={() => setLoginOpen(true)} title="登录或注册账号" aria-label="登录或注册账号"><Icon>◉</Icon></button>}
+          <button className={`topbar-utility__button topbar-sync-button ${accountSession ? 'topbar-mobile-keep' : 'topbar-sync-button--guest'}`} onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
           {document.isDraft && <><button className="topbar-utility__discard" onClick={() => { void deleteQuickNote(document) }} title="永久删除这份随手记"><Icon>×</Icon><span>删除</span></button><button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button></>}
         </div>
       </header>
+
+      {mobilePanel && <button className="mobile-panel-scrim" aria-label="关闭侧栏" onClick={() => setMobilePanel(null)} />}
 
       <section className="workspace">
         <aside className="left-rail">

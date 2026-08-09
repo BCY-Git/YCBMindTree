@@ -1,4 +1,5 @@
 import type { MindMapDocument } from '../domain/document.types'
+import { randomUuid } from '../platform/random-uuid'
 
 export type DocumentVersionKind = 'auto' | 'manual' | 'restore-point' | 'sync-backup'
 
@@ -13,7 +14,7 @@ export type DocumentVersion = {
 
 export function createDocumentVersion(document: MindMapDocument, kind: DocumentVersionKind, label: string | null = null): DocumentVersion {
   return {
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     documentId: document.id,
     kind,
     label,
@@ -39,7 +40,7 @@ export function duplicateDocumentVersion(version: DocumentVersion): MindMapDocum
   const duplicate = structuredClone(version.snapshot)
   return {
     ...duplicate,
-    id: crypto.randomUUID(),
+    id: randomUuid(),
     title: `${duplicate.title}（历史副本）`,
     createdAt: now,
     updatedAt: now,

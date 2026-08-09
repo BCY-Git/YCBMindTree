@@ -8,14 +8,12 @@
  * 用于首次启动时给用户展示基本操作方式。
  */
 import type { MindMapDocument, MindNode } from './document.types'
+import { randomUuid } from '../platform/random-uuid'
 
-const id = () => crypto.randomUUID()
-
-// 用 `crypto.randomUUID()` 生成唯一 ID，无需引入额外依赖。
 export function createNode(topic: string, parentId: string | null): MindNode {
   const now = Date.now()
   return {
-    id: id(),
+    id: randomUuid(),
     parentId,
     isFreeTopic: false,
     childIds: [],
@@ -48,7 +46,7 @@ export function createInitialDocument(): MindMapDocument {
   root.childIds = [first.id]
   const now = Date.now()
   return {
-    id: id(),
+    id: randomUuid(),
     schemaVersion: 1,
     title: '未命名导图',
     categoryId: 'uncategorized',
@@ -72,7 +70,7 @@ export function createQuickNoteDocument(): MindMapDocument {
   const now = Date.now()
   const stamp = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(now)
   return {
-    id: id(),
+    id: randomUuid(),
     schemaVersion: 1,
     title: `随手记 · ${stamp}`,
     categoryId: 'uncategorized',

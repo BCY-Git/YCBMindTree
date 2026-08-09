@@ -17,3 +17,5 @@ createRoot(document.getElementById('root')!).render(
     <AppErrorBoundary><App /></AppErrorBoundary>
   </StrictMode>,
 )
+
+requestAnimationFrame(() => window.dispatchEvent(new Event('mindtree:mounted')))
