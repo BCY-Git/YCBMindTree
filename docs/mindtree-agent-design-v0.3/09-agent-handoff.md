@@ -7,7 +7,7 @@
 ## 2. 开工前必须完成
 
 1. 阅读本设计包指定文档。
-2. 阅读项目中的 `docs/architecture.md`、`docs/product-requirements.md`、`docs/release-0.2.2.md`。
+2. 阅读项目中的 `docs/engineering/architecture.md`、`docs/product/product-requirements.md`、`docs/releases/release-0.2.2.md`。
 3. 检查工作区是否有 `AGENTS.md`，若存在则遵守。
 4. 运行当前测试和构建，记录基线。
 5. 检查未提交修改，不覆盖用户已有工作。
@@ -125,4 +125,3 @@
 
 ## 建议下一步
 ```
-
