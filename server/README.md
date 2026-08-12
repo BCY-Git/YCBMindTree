@@ -1,5 +1,7 @@
 # MindTree 同步服务
 
+服务端基于 **NestJS**（Express Adapter）。REST API 由 Nest 控制器和认证守卫提供；MCP SDK 与静态网页托管继续通过受控的 Express 适配层接入，外部接口保持为 `/api/v1` 和 `/mcp`。
+
 ```bash
 npm install
 npm run dev

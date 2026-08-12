@@ -1,0 +1,19 @@
+/* 2026-08-09 mobile canvas hotfix — keep drawer columns out of the canvas grid. */
+@media (max-width: 620px) {
+  .app-shell .workspace,
+  .app-shell.is-inspector-collapsed .workspace,
+  .app-shell.is-sidebar-collapsed .workspace,
+  .app-shell.is-assistant-open .workspace,
+  .app-shell.is-inspector-collapsed.is-assistant-open .workspace,
+  .app-shell.is-sidebar-collapsed.is-assistant-open .workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .workspace-center,
+  .workspace-center__view,
+  .workspace-center__view > .canvas-shell { width: 100%; }
+
+  .topbar-utility > .topbar-mobile-keep:first-child { display: none; }
+  .topbar-utility { max-width: calc(100vw - 42px); overflow: hidden; }
+  .topbar-utility__button { width: 36px; height: 36px; }
+}

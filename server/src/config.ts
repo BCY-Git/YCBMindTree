@@ -17,4 +17,5 @@ export const config = {
   sessionLifetimeMs: Math.max(60 * 60 * 1000, Number(process.env.SESSION_LIFETIME_DAYS || 30) * 24 * 60 * 60 * 1000),
   allowedHosts: (process.env.ALLOWED_HOSTS || '127.0.0.1:8787,localhost:8787').split(',').map((host) => host.trim()).filter(Boolean),
   allowedOrigins: (process.env.ALLOWED_ORIGINS || 'http://127.0.0.1:5174,http://localhost:5174').split(',').map((origin) => origin.trim()).filter(Boolean),
+  aiAllowedHosts: (process.env.AI_ALLOWED_HOSTS || 'api.deepseek.com,api.openai.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean),
 }
