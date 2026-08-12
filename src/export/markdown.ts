@@ -1,7 +1,7 @@
-import type { MindMapDocument, MindNode } from '../domain/document.types'
-import { loadTags } from '../domain/tag-library'
-import { nodeMarkMeta } from '../domain/node-semantics'
-import { saveExportFile } from './export-file'
+import type { MindMapDocument, MindNode } from '@/domain/document.types'
+import { loadTags } from '@/domain/tag-library'
+import { nodeMarkMeta } from '@/domain/node-semantics'
+import { saveExportFile } from '@/export/export-file'
 
 export type MarkdownExportMode = 'outline' | 'minutes' | 'ai-context' | 'tasks'
 

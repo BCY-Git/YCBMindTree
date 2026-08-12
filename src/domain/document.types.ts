@@ -10,7 +10,7 @@
  *
  * 注意：这些类型仅描述内存结构；所有时间戳均为 Unix 毫秒时间戳。
  */
-import type { ThemeId } from './themes'
+import type { ThemeId } from '@/domain/themes'
 
 export type LayoutConfig = {
   levelGap: number
@@ -59,12 +59,21 @@ export type MindNodeLink = {
 }
 
 /** 附件二进制保存在本地 IndexedDB；导图快照仅保存这份轻量元数据。 */
+export type MindNodeAttachmentImage = {
+  /** 图片原始像素尺寸，用来保证所有缩放始终维持原始宽高比。 */
+  width: number
+  height: number
+  /** 节点内预览的显示宽度（px）；高度由原始宽高比推导。 */
+  displayWidth: number
+}
+
 export type MindNodeAttachment = {
   id: string
   name: string
   type: string
   size: number
   createdAt: number
+  image?: MindNodeAttachmentImage
 }
 
 /** 独立于父子树结构的横向关联。sourceId / targetId 用于定位两端节点。 */
@@ -108,6 +117,8 @@ export type MindMapDocument = {
   schemaVersion: 1
   title: string
   categoryId: string
+  /** 所属工作区项目；null 表示尚未归属到项目。 */
+  projectId: string | null
   /** 随手记草稿在本机保留，转为正式导图前不会参与云端同步。 */
   isDraft: boolean
   origin: 'standard' | 'quick-note'

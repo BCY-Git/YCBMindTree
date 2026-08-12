@@ -1,5 +1,5 @@
-import { apiBaseUrl, type SyncConfig } from '../sync/sync-client'
-import { platformFetch } from '../platform/tauri'
+import { apiBaseUrl, type SyncConfig } from '@/sync/sync-client'
+import { createApiClient } from '@/api/http-client'
 
 export type Account = { id: string; email: string; createdAt: number }
 export type AuthSession = { user: Account; token: string }
@@ -23,11 +23,8 @@ export function clearAccountSession() {
 }
 
 async function authRequest(config: Pick<SyncConfig, 'serverUrl'>, action: 'login' | 'register', email: string, password: string): Promise<AuthSession> {
-  const response = await platformFetch(`${apiBaseUrl(config.serverUrl)}/auth/${action}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }),
-  })
-  const body = await response.json().catch(() => null) as { user?: Account; token?: string; error?: { message?: string } } | null
-  if (!response.ok || !body?.user || typeof body.token !== 'string') throw new Error(body?.error?.message ?? '登录请求失败')
+  const body = await createApiClient(config).post<{ user?: Account; token?: string }>(`/auth/${action}`, { email, password })
+  if (!body?.user || typeof body.token !== 'string') throw new Error('登录请求失败')
   return { user: body.user, token: body.token }
 }
 
@@ -35,5 +32,5 @@ export const loginAccount = (config: Pick<SyncConfig, 'serverUrl'>, email: strin
 export const registerAccount = (config: Pick<SyncConfig, 'serverUrl'>, email: string, password: string) => authRequest(config, 'register', email, password)
 
 export async function revokeAccountSession(config: Pick<SyncConfig, 'serverUrl'>, token: string) {
-  await platformFetch(`${apiBaseUrl(config.serverUrl)}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+  await createApiClient({ serverUrl: config.serverUrl, token }).post('/auth/logout')
 }

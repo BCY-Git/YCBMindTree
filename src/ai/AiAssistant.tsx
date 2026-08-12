@@ -470,7 +470,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           <label>API Key<input type="password" value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="仅保存于此浏览器" autoComplete="off" /></label>
           <button className="ai-save-button" type="button" onClick={saveSettings}>保存连接配置</button>
           <label className="ai-ghost-toggle"><input type="checkbox" checked={ghostCompletionEnabled} onChange={(event) => toggleGhostCompletion(event.target.checked)} />启用备注幽灵续写（DeepSeek Beta）</label>
-          <p className="ai-assistant__privacy">兼容 OpenAI Chat Completions；本地开发会优先使用项目 .env 中的 Key，普通对话与启用后的幽灵续写都会经本机代理转发。</p>
+          <p className="ai-assistant__privacy">兼容 OpenAI Chat Completions；Web 端经 MindTree 服务器受限转发，桌面端直连 AI 服务。当前 Key 仅保存在此浏览器。</p>
         </div>
       )}
 

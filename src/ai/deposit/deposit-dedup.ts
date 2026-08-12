@@ -1,4 +1,4 @@
-import type { DepositCandidate, DepositCandidateType } from './deposit-types'
+import type { DepositCandidate, DepositCandidateType } from '@/ai/deposit/deposit-types'
 
 function normalized(value: string) {
   return value.trim().toLocaleLowerCase().replace(/\s+/g, ' ')

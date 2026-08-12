@@ -1,6 +1,6 @@
-import type { MindMapDocument, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
-import type { Tag } from '../domain/tag-library'
-import type { DepositProvenance } from '../ai/deposit/deposit-types'
+import type { MindMapDocument, MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
+import type { Tag } from '@/domain/tag-library'
+import type { DepositProvenance } from '@/ai/deposit/deposit-types'
 
 export type WorkspaceSearchMatch = 'topic' | 'note' | 'link' | 'tag'
 export type WorkspaceSearchProvenanceRole = 'source' | 'target'

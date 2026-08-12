@@ -1,4 +1,4 @@
-import type { MindMapDocument } from '../../domain/document.types'
+import type { MindMapDocument } from '@/domain/document.types'
 
 export const depositNudgeSnoozeMs = 24 * 60 * 60 * 1_000
 

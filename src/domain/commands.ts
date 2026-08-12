@@ -12,11 +12,11 @@
  * - AUTO_ARRANGE 先保存当前自由偏移快照，再清除所有 offset，以便自动布局
  *   接管；RESTORE_FREEFORM_LAYOUT 从快照恢复，实现"排列后可撤销"
  */
-import { createNode } from './document.factory'
-import { assertValidDocument } from './document.validator'
-import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from './document.types'
-import type { ThemeId } from './themes'
-import { randomUuid } from '../platform/random-uuid'
+import { createNode } from '@/domain/document.factory'
+import { assertValidDocument } from '@/domain/document.validator'
+import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
+import type { ThemeId } from '@/domain/themes'
+import { randomUuid } from '@/platform/random-uuid'
 
 /**
  * 所有可用命令的联合类型（判别联合）。
@@ -36,6 +36,7 @@ export type MindMapCommand =
   | { type: 'DELETE_NODE_LINK'; nodeId: string; linkId: string }
   | { type: 'ADD_NODE_ATTACHMENT'; nodeId: string; attachment: MindNodeAttachment }
   | { type: 'DELETE_NODE_ATTACHMENT'; nodeId: string; attachmentId: string }
+  | { type: 'SET_NODE_ATTACHMENT_IMAGE'; nodeId: string; attachmentId: string; image: NonNullable<MindNodeAttachment['image']> }
   | { type: 'SET_NODE_TASK_STATUS'; nodeId: string; taskStatus: MindNodeTaskStatus }
   | { type: 'SET_NODE_PRIORITY'; nodeId: string; priority: MindNodePriority }
   | { type: 'SET_NODE_DUE_DATE'; nodeId: string; dueDate: string | null }
@@ -83,6 +84,7 @@ export type MindMapCommand =
   | { type: 'APPLY_DEPOSIT_OPERATIONS'; batchId: string; operations: LocalDepositOperation[] }
   | { type: 'RENAME_DOCUMENT'; title: string }
   | { type: 'SET_CATEGORY'; categoryId: string }
+  | { type: 'SET_PROJECT'; projectId: string | null }
   | { type: 'SAVE_QUICK_NOTE'; title: string; categoryId: string }
   | { type: 'UPDATE_LAYOUT'; layout: Partial<LayoutConfig> }
   | { type: 'APPLY_THEME'; themeId: ThemeId }
@@ -497,6 +499,21 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       node.updatedAt = Date.now()
       break
     }
+    case 'SET_NODE_ATTACHMENT_IMAGE': {
+      const node = document.nodes[command.nodeId]
+      if (!node) throw new Error('节点不存在')
+      if (!Number.isFinite(command.image.width) || !Number.isFinite(command.image.height) || !Number.isFinite(command.image.displayWidth)
+        || command.image.width <= 0 || command.image.height <= 0 || command.image.displayWidth < 120 || command.image.displayWidth > 480) throw new Error('图片尺寸无效')
+      const attachment = node.attachments.find((item) => item.id === command.attachmentId)
+      if (!attachment || !attachment.type.startsWith('image/')) throw new Error('图片附件不存在')
+      attachment.image = {
+        width: Math.round(command.image.width),
+        height: Math.round(command.image.height),
+        displayWidth: Math.round(command.image.displayWidth),
+      }
+      node.updatedAt = Date.now()
+      break
+    }
     case 'SET_NODE_TASK_STATUS': {
       const node = document.nodes[command.nodeId]
       if (!node) throw new Error('节点不存在')
@@ -884,6 +901,9 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       break
     case 'SET_CATEGORY':
       document.categoryId = command.categoryId.trim() || 'uncategorized'
+      break
+    case 'SET_PROJECT':
+      document.projectId = command.projectId?.trim() || null
       break
     case 'SAVE_QUICK_NOTE':
       if (!document.isDraft) throw new Error('当前导图不是随手记草稿')

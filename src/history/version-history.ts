@@ -1,5 +1,5 @@
-import type { MindMapDocument } from '../domain/document.types'
-import { randomUuid } from '../platform/random-uuid'
+import type { MindMapDocument } from '@/domain/document.types'
+import { randomUuid } from '@/platform/random-uuid'
 
 export type DocumentVersionKind = 'auto' | 'manual' | 'restore-point' | 'sync-backup'
 

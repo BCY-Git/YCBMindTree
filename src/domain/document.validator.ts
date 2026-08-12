@@ -11,7 +11,7 @@
  * 此函数是领域的最后一道安全网，任何命令执行后调用，
  * 确保状态机不会落入非法状态。
  */
-import type { MindMapDocument } from './document.types'
+import type { MindMapDocument } from '@/domain/document.types'
 
 export function assertValidDocument(document: MindMapDocument): void {
   const root = document.nodes[document.rootId]

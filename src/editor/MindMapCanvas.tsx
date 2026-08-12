@@ -47,6 +47,7 @@ import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/database'
 import { findClipboardImageFile } from './clipboard-image'
+import { readImagePresentation } from '../attachments/image-presentation'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 import { projectFocusedDocument } from '../focus/focus-projection'
 import { RelationEdge, type RelationEdgeData } from './RelationEdge'
@@ -962,8 +963,9 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       const target = event.target
       if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
       const image = findClipboardImageFile(event.clipboardData)
-      const selected = useEditorStore.getState().selectedNodeId ?? document.rootId
+      const selected = useEditorStore.getState().selectedNodeId
       if (!image) {
+        if (!selected) return
         event.preventDefault()
         if (document.nodes[selected]?.isFreeTopic) {
           showInteractionStatus('自由主题请先附加到主节点，再粘贴子节点')
@@ -972,11 +974,13 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         pasteIntoNode(selected)
         return
       }
+      if (!selected) return
       event.preventDefault()
       if (image.size > 15 * 1024 * 1024) { setPasteAttachmentStatus('图片超过 15 MB，未添加。'); return }
       const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
-      void saveNodeAttachment(document.id, selected, file)
-        .then((attachment) => {
+      void Promise.all([saveNodeAttachment(document.id, selected, file), readImagePresentation(file)])
+        .then(([attachment, imagePresentation]) => {
+          if (imagePresentation) attachment.image = imagePresentation
           if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selected, attachment })) setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
         })
         .catch(() => setPasteAttachmentStatus('图片保存失败，请重试。'))

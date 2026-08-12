@@ -1,4 +1,4 @@
-import type { MindMapDocument } from '../domain/document.types'
+import type { MindMapDocument } from '@/domain/document.types'
 
 export type ReorganizationMove = { nodeId: string; newParentId: string; index: number }
 export type MapReorganization = { summary: string; moves: ReorganizationMove[] }

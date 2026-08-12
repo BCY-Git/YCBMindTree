@@ -1,4 +1,4 @@
-import type { MindMapDocument } from '../domain/document.types'
+import type { MindMapDocument } from '@/domain/document.types'
 
 export type PresentationStep = {
   nodeId: string

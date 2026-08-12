@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { workflowModes, workflowPhases } from './workflow-types'
+import { workflowModes, workflowPhases } from '@/ai/workflow/workflow-types'
 
 const shortList = z.array(z.string().trim().min(1).max(500)).max(20)
 

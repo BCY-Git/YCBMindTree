@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
 import { deleteLocalDocument, deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositBatches, listAllDepositProvenance, listAllDocumentVersions, listAllWorkflowSessions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, pruneStoredAttachmentsForDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata, setDepositBatchAppliedState } from '../persistence/database'
+import { readImagePresentation } from '../attachments/image-presentation'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
@@ -43,7 +44,6 @@ import { QuickAssistant } from '../ai/QuickAssistant'
 import { createTag, deleteTag, loadTags, recolorTag, renameTag, saveTags, type Tag } from '../domain/tag-library'
 import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
 import { emptyNodeFilter, hasActiveFilter, useNodeFilterStore } from '../editor/filter-store'
-import { PanelToggleButton } from './PanelToggleButton'
 import { OutlineView } from '../outline/OutlineView'
 import { buildFocusBreadcrumb } from '../focus/focus-projection'
 import { NodeSearchDialog } from '../editor/NodeSearchDialog'
@@ -52,9 +52,14 @@ import { PresentationMode } from '../presentation/PresentationMode'
 import { AttachmentImage } from '../attachments/AttachmentImage'
 import { exportFileStatus, revealExportFile, type ExportFileResult } from '../export/export-file'
 import { ProjectStatusPanel } from '../projects/ProjectStatusPanel'
+import { MobileMoreMenu } from './MobileMoreMenu'
+import { DesktopUtilityMenu } from './DesktopUtilityMenu'
 import { buildProjectStatus } from '../projects/project-status'
+import { PlanCenterDialog } from '../projects/PlanCenterDialog'
+import { createProject, loadProjects, saveProjects, type WorkspaceProject } from '../projects/project-library'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 import type { WorkflowSession } from '../ai/workflow/workflow-types'
+import { DashboardIcon, EnterIcon, FileTextIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -72,10 +77,9 @@ function BoundaryIcon() {
 type Category = { id: string; name: string }
 type PendingNavigation =
   | { kind: 'open'; document: MindMapDocument }
-  | { kind: 'new-map' }
+  | { kind: 'new-map'; projectId: string | null }
   | { kind: 'quick-note' }
 
-type SidebarPanel = 'projects' | 'maps' | 'tasks'
 type InspectorTab = 'content' | 'tasks' | 'resources' | 'project' | 'map'
 type UniversalImportCandidate = ImportedDocument & { format: 'OPML' | 'Markdown' }
 
@@ -127,6 +131,12 @@ export function App() {
   const [documents, setDocuments] = useState<MindMapDocument[]>([])
   const [categories, setCategories] = useState<Category[]>(loadCategories)
   const [activeCategoryId, setActiveCategoryId] = useState('all')
+  const [projects, setProjects] = useState<WorkspaceProject[]>(loadProjects)
+  const [activeProjectId, setActiveProjectId] = useState<'all' | 'unassigned' | string>('all')
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false)
+  const [projectNameDraft, setProjectNameDraft] = useState('')
+  const [projectDescriptionDraft, setProjectDescriptionDraft] = useState('')
+  const [planCenterOpen, setPlanCenterOpen] = useState(false)
   const [categoryDraft, setCategoryDraft] = useState('')
   const [showCategoryInput, setShowCategoryInput] = useState(false)
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
@@ -139,7 +149,6 @@ export function App() {
     const stored = localStorage.getItem('mindtree.inspector-collapsed')
     return stored === null ? true : stored === 'true'
   })
-  const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel | null>('projects')
   const [assistantOpen, setAssistantOpen] = useState(loadAssistantDockOpen)
   const [mobilePanel, setMobilePanel] = useState<'navigation' | 'inspector' | null>(null)
   const [assistantDockWidth, setAssistantDockWidth] = useState(loadAssistantDockWidth)
@@ -160,6 +169,7 @@ export function App() {
   const [linkUrl, setLinkUrl] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [internalLinkPickerOpen, setInternalLinkPickerOpen] = useState(false)
+  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false)
   const [linkStatus, setLinkStatus] = useState<string | null>(null)
   const [attachmentStatus, setAttachmentStatus] = useState<string | null>(null)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null)
@@ -211,9 +221,11 @@ export function App() {
   const libraryDocuments = useMemo(() => documents.filter((item) => !isBackgroundBackup(item)), [documents])
   const draftDocuments = useMemo(() => libraryDocuments.filter((item) => item.isDraft), [libraryDocuments])
   const savedDocuments = useMemo(() => libraryDocuments.filter((item) => !item.isDraft), [libraryDocuments])
-  const visibleDocuments = useMemo(() => activeCategoryId === 'all'
-    ? savedDocuments
-    : savedDocuments.filter((item) => item.categoryId === activeCategoryId), [activeCategoryId, savedDocuments])
+  const visibleDocuments = useMemo(() => savedDocuments.filter((item) => {
+    const categoryMatches = activeCategoryId === 'all' || item.categoryId === activeCategoryId
+    const projectMatches = activeProjectId === 'all' || (activeProjectId === 'unassigned' ? item.projectId === null : item.projectId === activeProjectId)
+    return categoryMatches && projectMatches
+  }), [activeCategoryId, activeProjectId, savedDocuments])
   const matchingDocuments = useMemo(() => {
     const query = documentQuery.trim().toLocaleLowerCase()
     return query ? visibleDocuments.filter((item) => item.title.toLocaleLowerCase().includes(query)) : visibleDocuments
@@ -226,11 +238,11 @@ export function App() {
     ? workspaceBackupCandidate.documents.filter((candidate) => documents.some((item) => item.id === candidate.id)).length
     : 0, [documents, workspaceBackupCandidate])
   const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
+  const projectName = (id: string | null) => id ? projects.find((project) => project.id === id)?.name ?? '项目已移除' : '未归属项目'
   const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
   const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
   const openTaskCount = useMemo(() => tasks.filter((task) => task.status !== 'done').length, [tasks])
   const tagReferenceCount = (tagId: string) => taskDocuments.reduce((count, item) => count + Object.values(item.nodes).filter((node) => node.tagIds.includes(tagId)).length, 0)
-  const toggleSidebarPanel = (panel: SidebarPanel) => setSidebarPanel((current) => current === panel ? null : panel)
   const toggleAssistantDock = () => setAssistantOpen((open) => {
     const next = !open
     saveAssistantDockOpen(next)
@@ -373,7 +385,8 @@ export function App() {
       return
     }
     try {
-      const attachment = await saveNodeAttachment(document.id, selectedNode.id, file)
+      const [attachment, imagePresentation] = await Promise.all([saveNodeAttachment(document.id, selectedNode.id, file), readImagePresentation(file)])
+      if (imagePresentation) attachment.image = imagePresentation
       if (!dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selectedNode.id, attachment })) throw new Error('附件没有写入节点')
       setAttachmentStatus(`已添加 ${attachment.name}`)
     } catch {
@@ -405,6 +418,19 @@ export function App() {
     setCategoryDraft('')
     setShowCategoryInput(false)
     setActiveCategoryId(category.id)
+  }
+
+  const addProject = () => {
+    const name = projectNameDraft.trim()
+    if (!name) return
+    const project = createProject(name, projectDescriptionDraft)
+    const next = [project, ...projects]
+    setProjects(next)
+    saveProjects(next)
+    setActiveProjectId(project.id)
+    setProjectNameDraft('')
+    setProjectDescriptionDraft('')
+    setProjectCreateOpen(false)
   }
 
   const beginCategoryEdit = (category: Category) => {
@@ -603,6 +629,7 @@ export function App() {
         versions,
         attachments: storedAttachments.filter((attachment) => referencedAttachmentIds.has(attachment.id)),
         categories,
+        projects,
         tags,
         depositBatches,
         depositProvenance,
@@ -613,7 +640,7 @@ export function App() {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setWorkspaceBackupStatus(error instanceof Error ? `备份失败：${error.message}` : '备份失败，请重试。')
     }
-  }, [categories, flushCurrentDocument, tags])
+  }, [categories, flushCurrentDocument, projects, tags])
 
   const selectWorkspaceBackupFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -638,12 +665,15 @@ export function App() {
         documents,
         attachmentIds: new Set(attachments.map((attachment) => attachment.id)),
         categories,
+        projects,
         tags,
       })
       await restoreWorkspaceData(plan)
       saveCategories(plan.categories)
+      saveProjects(plan.projects ?? [])
       saveTags(plan.tags)
       setCategories(plan.categories)
+      setProjects(plan.projects ?? [])
       setTags(plan.tags)
       const allDocuments = await listDocuments()
       setDocuments(allDocuments)
@@ -660,7 +690,7 @@ export function App() {
     } finally {
       setWorkspaceBackupBusy(false)
     }
-  }, [categories, documents, flushCurrentDocument, hydrate, tags, workspaceBackupCandidate])
+  }, [categories, documents, flushCurrentDocument, hydrate, projects, tags, workspaceBackupCandidate])
 
   const refreshVersions = useCallback(() => {
     void listDocumentVersions(useEditorStore.getState().document.id).then(setVersions).catch(console.warn)
@@ -714,12 +744,13 @@ export function App() {
     if (navigation.kind === 'new-map') {
       createDocument()
       setActiveCategoryId('uncategorized')
+      if (navigation.projectId) dispatch({ type: 'SET_PROJECT', projectId: navigation.projectId })
     }
     if (navigation.kind === 'quick-note') {
       createQuickNote()
       setActiveCategoryId('all')
     }
-  }, [createDocument, createQuickNote, flushCurrentDocument, hydrate])
+  }, [createDocument, createQuickNote, dispatch, flushCurrentDocument, hydrate])
 
   const requestNavigation = useCallback((navigation: PendingNavigation) => {
     if (!document.isDraft) {
@@ -736,7 +767,7 @@ export function App() {
     if (nextDocument.id !== document.id) requestNavigation({ kind: 'open', document: nextDocument })
   }, [document.id, requestNavigation])
 
-  const startNewDocument = useCallback(() => requestNavigation({ kind: 'new-map' }), [requestNavigation])
+  const startNewDocument = useCallback((projectId: string | null = activeProjectId === 'all' || activeProjectId === 'unassigned' ? null : activeProjectId) => requestNavigation({ kind: 'new-map', projectId }), [activeProjectId, requestNavigation])
   const startQuickNote = useCallback(() => requestNavigation({ kind: 'quick-note' }), [requestNavigation])
 
   const deleteQuickNote = useCallback(async (draft: MindMapDocument, navigationAfterDelete: PendingNavigation | null = null) => {
@@ -795,6 +826,11 @@ export function App() {
     pendingNodeFocusRef.current = { documentId, nodeId }
     openDocument(target)
   }, [dispatch, document.id, openDocument, requestNodeFocus, taskDocuments])
+
+  const revealWorkspaceSearchResult = useCallback((documentId: string, nodeId: string) => {
+    revealWorkspaceNode(documentId, nodeId)
+    setWorkspaceSearchOpen(false)
+  }, [revealWorkspaceNode])
 
   const updateTaskStatus = useCallback(async (task: MindTreeTask, taskStatus: 'todo' | 'doing' | 'done') => {
     const target = taskDocuments.find((item) => item.id === task.documentId)
@@ -1167,41 +1203,98 @@ export function App() {
         </div>
         <nav className="floating-toolbar" aria-label="导图编辑工具">
           <div className="floating-toolbar__cluster">
-            <button className="floating-toolbar__icon" onClick={undo} disabled={!past.length} title="撤销 (⌘Z)" aria-label="撤销"><Icon>↶</Icon></button>
-            <button className="floating-toolbar__icon" onClick={redo} disabled={!future.length} title="重做 (⇧⌘Z)" aria-label="重做"><Icon>↷</Icon></button>
+            <button className="floating-toolbar__icon" onClick={undo} disabled={!past.length} title="撤销 (⌘Z)" aria-label="撤销"><Icon><RotateCounterClockwiseIcon /></Icon></button>
+            <button className="floating-toolbar__icon floating-toolbar__icon--redo" onClick={redo} disabled={!future.length} title="重做 (⇧⌘Z)" aria-label="重做"><Icon><RotateCounterClockwiseIcon /></Icon></button>
           </div>
           <span className="floating-toolbar__divider" />
           <div className="floating-toolbar__cluster">
-            <button className="floating-toolbar__button" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题请先附加到主节点' : '新建子节点 (Tab)'}><Icon>＋</Icon><span>子节点</span></button>
-            <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNodeId === focusedNodeId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNodeId === focusedNodeId ? '聚焦根节点请创建子节点，避免新节点出现在聚焦范围外' : selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon>↳</Icon><span>同级</span></button>
+            <button className="floating-toolbar__button" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题请先附加到主节点' : '新建子节点 (Tab)'}><Icon><PlusIcon /></Icon><span>子节点</span></button>
+            <button className="floating-toolbar__button" disabled={(selectedNodeId ?? document.rootId) === document.rootId || selectedNodeId === focusedNodeId || selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })} title={selectedNodeId === focusedNodeId ? '聚焦根节点请创建子节点，避免新节点出现在聚焦范围外' : selectedNode?.isFreeTopic ? '自由主题不能创建同级节点' : '新建同级节点 (Enter)'}><Icon><EnterIcon /></Icon><span>同级</span></button>
             <button
               className="floating-toolbar__button"
               disabled={!selectedNodeIds.length}
               onClick={() => requestRelatedTopic(selectedNodeIds)}
               title={selectedNodeIds.length > 1 ? `${selectedNodeIds.length} 个节点的关系线将跟随鼠标` : selectedNode ? '关系线跟随鼠标；单击已有节点或双击空白处' : '先选中一个节点'}
-            ><Icon>⌁</Icon><span>{selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}</span></button>
+            ><Icon><Link2Icon /></Icon><span>{selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}</span></button>
             <button className="floating-toolbar__icon" disabled={!canGroupSelection} onClick={() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds })} title={canGroupSelection ? '为所选同级节点创建摘要' : '先选择两个或以上同级节点'} aria-label="创建摘要"><Icon><SummaryIcon /></Icon></button>
             <button className="floating-toolbar__icon" disabled={!canGroupSelection} onClick={() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds })} title={canGroupSelection ? '为所选同级节点创建边界' : '先选择两个或以上同级节点'} aria-label="创建边界"><Icon><BoundaryIcon /></Icon></button>
-            <button className="floating-toolbar__button" disabled={Boolean(focusedNodeId)} onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title={focusedNodeId ? '退出聚焦后再排列完整导图' : '自动排列并保留当前自由排布'}><Icon>↺</Icon><span>排列</span></button>
-            <button className={`floating-toolbar__button ${focusedNodeId ? 'is-active' : ''}`} disabled={!selectedNode || selectedNode.id === document.rootId || selectedNode.isFreeTopic} onClick={() => selectedNode && setFocusedNodeId((current) => current === selectedNode.id ? null : selectedNode.id)} title={focusedNodeId === selectedNode?.id ? '退出当前分支聚焦 (Esc)' : '只显示所选节点及其后代'}><Icon>◎</Icon><span>{focusedNodeId === selectedNode?.id ? '退出聚焦' : '聚焦'}</span></button>
+            <button className="floating-toolbar__button" disabled={Boolean(focusedNodeId)} onClick={() => dispatch({ type: 'AUTO_ARRANGE' })} title={focusedNodeId ? '退出聚焦后再排列完整导图' : '自动排列并保留当前自由排布'}><Icon><ReloadIcon /></Icon><span>排列</span></button>
+            <button className={`floating-toolbar__button ${focusedNodeId ? 'is-active' : ''}`} disabled={!selectedNode || selectedNode.id === document.rootId || selectedNode.isFreeTopic} onClick={() => selectedNode && setFocusedNodeId((current) => current === selectedNode.id ? null : selectedNode.id)} title={focusedNodeId === selectedNode?.id ? '退出当前分支聚焦 (Esc)' : '只显示所选节点及其后代'}><Icon><TargetIcon /></Icon><span>{focusedNodeId === selectedNode?.id ? '退出聚焦' : '聚焦'}</span></button>
           </div>
         </nav>
         <div className="topbar-utility">
-          <button className={`topbar-utility__button topbar-mobile-keep ${workspaceView === 'outline' ? 'is-active' : ''}`} onClick={toggleWorkspaceView} title={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-label={workspaceView === 'outline' ? '切换到导图视图' : '切换到大纲视图'} aria-pressed={workspaceView === 'outline'}><Icon>{workspaceView === 'outline' ? '◇' : '≡'}</Icon></button>
-          <button className="topbar-utility__button" onClick={() => { void saveCurrentToLocalFile() }} title="保存到本机文件 (⌘S / Ctrl+S)" aria-label="保存到本机文件"><Icon>▣</Icon></button>
-          <button className="topbar-utility__button" onClick={() => setHistoryOpen(true)} title="查看或恢复本地版本" aria-label="版本历史"><Icon>◷</Icon></button>
-          <button className="topbar-utility__button" onClick={() => setPresentationStartNodeId(selectedNodeId ?? focusedNodeId ?? document.rootId)} title={selectedNodeId && selectedNodeId !== document.rootId ? '从所选节点开始演示' : '演示当前导图'} aria-label="开始演示"><Icon>▷</Icon></button>
-          <span className="export-menu-wrap"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon>⌘</Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
-          <span className="export-menu-wrap"><button className="topbar-utility__button" onClick={() => setExportOpen((open) => !open)} title="导出与备份" aria-label="导出与备份"><Icon>⇩</Icon></button>{exportOpen && <span className="export-menu"><button onClick={() => exportCurrentSvg()}>导出完整导图 SVG</button><button onClick={() => exportCurrentSvg(true)}>导出透明背景 SVG</button><hr /><button onClick={() => exportCurrentOpml()}>导出 OPML 大纲</button><button onClick={() => exportCurrentDocument('outline')}>导出 Markdown 大纲</button><button onClick={() => exportCurrentDocument('minutes')}>导出会议纪要</button><button onClick={() => exportCurrentDocument('tasks')}>导出任务清单</button><button onClick={() => exportCurrentDocument('ai-context')}>导出 AI 上下文</button><hr /><button onClick={() => { setExportOpen(false); void exportWorkspaceBackup() }}>导出工作区备份</button></span>}</span>
-          <PanelToggleButton side="left" collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+          <button className="topbar-utility__button desktop-search-trigger" type="button" onClick={() => setWorkspaceSearchOpen(true)} title="搜索工作区节点" aria-label="搜索工作区节点"><Icon><MagnifyingGlassIcon /></Icon><span>搜索</span><kbd>⌘ K</kbd></button>
+          <span className="export-menu-wrap desktop-filter-control"><button className={`topbar-utility__button ${hasActiveFilter(nodeFilter) ? 'is-active' : ''}`} onClick={() => setFilterOpen((open) => !open)} title="按标签、标记与任务属性高亮" aria-label="筛选和高亮"><Icon><MixerHorizontalIcon /></Icon></button>{filterOpen && <span className="filter-menu"><header><strong>筛选高亮</strong>{hasActiveFilter(nodeFilter) && <button onClick={clearNodeFilter}>清除</button>}</header><p>匹配节点保持清晰，其余节点淡化，不改变布局。</p>{tags.length > 0 && <section><label>标签</label><div>{tags.map((tag) => <button key={tag.id} className={nodeFilter.tags.includes(tag.id) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, tags: toggleValue(nodeFilter.tags, tag.id) })}><i style={{ background: tag.color }} />{tag.name}</button>)}</div></section>}<section><label>标记</label><div>{nodeMarkOrder.map((mark) => <button key={mark} className={nodeFilter.marks.includes(mark) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, marks: toggleValue(nodeFilter.marks, mark) })}>{nodeMarkMeta[mark].icon} {nodeMarkMeta[mark].label}</button>)}</div></section><section><label>任务</label><div>{([['todo', '待办'], ['doing', '进行中'], ['done', '已完成']] as const).map(([status, label]) => <button key={status} className={nodeFilter.statuses.includes(status) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, statuses: toggleValue(nodeFilter.statuses, status) })}>{label}</button>)}</div></section><section><label>优先级</label><div>{([1, 2, 3] as const).map((priority) => <button key={priority} className={nodeFilter.priorities.includes(priority) ? 'is-selected' : ''} onClick={() => setNodeFilter({ ...nodeFilter, priorities: toggleValue(nodeFilter.priorities, priority) })}>P{priority}</button>)}</div></section></span>}</span>
           <AssistantDockToggleButton open={assistantOpen} hasNudge={hasDepositNudge} onToggle={toggleAssistantDock} />
-          <PanelToggleButton side="right" collapsed={inspectorCollapsed} onToggle={toggleInspector} />
-          <button className="topbar-utility__button topbar-mobile-action" onClick={toggleSidebar} title="打开导图与项目" aria-label="打开导图与项目" aria-expanded={mobilePanel === 'navigation'}><Icon>☰</Icon></button>
-          <button className="topbar-utility__button topbar-mobile-action" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题请先附加到主节点' : '新建子节点'} aria-label="新建子节点"><Icon>＋</Icon></button>
-          <button className="topbar-utility__button topbar-mobile-action" onClick={toggleInspector} title="打开节点属性" aria-label="打开节点属性" aria-expanded={mobilePanel === 'inspector'}><Icon>▤</Icon></button>
-          {!accountSession && <button className="topbar-utility__button topbar-mobile-account" onClick={() => setLoginOpen(true)} title="登录或注册账号" aria-label="登录或注册账号"><Icon>◉</Icon></button>}
-          <button className={`topbar-utility__button topbar-sync-button ${accountSession ? 'topbar-mobile-keep' : 'topbar-sync-button--guest'}`} onClick={() => setSyncOpen(true)} title="上传或拉取云端导图" aria-label="云端同步"><Icon>⇅</Icon></button>
-          {document.isDraft && <><button className="topbar-utility__discard" onClick={() => { void deleteQuickNote(document) }} title="永久删除这份随手记"><Icon>×</Icon><span>删除</span></button><button className="topbar-utility__save" onClick={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }} title="将随手记保存为正式导图"><Icon>✓</Icon><span>保存</span></button></>}
+          <DesktopUtilityMenu
+            viewIsOutline={workspaceView === 'outline'}
+            sidebarCollapsed={sidebarCollapsed}
+            inspectorCollapsed={inspectorCollapsed}
+            signedIn={Boolean(accountSession)}
+            isDraft={document.isDraft}
+            onToggleView={toggleWorkspaceView}
+            onSaveFile={() => { void saveCurrentToLocalFile() }}
+            onOpenHistory={() => setHistoryOpen(true)}
+            onStartPresentation={() => setPresentationStartNodeId(selectedNodeId ?? focusedNodeId ?? document.rootId)}
+            onExportSvg={exportCurrentSvg}
+            onExportOpml={exportCurrentOpml}
+            onExportMarkdown={exportCurrentDocument}
+            onExportWorkspaceBackup={() => { void exportWorkspaceBackup() }}
+            onToggleSidebar={toggleSidebar}
+            onToggleInspector={toggleInspector}
+            onLogin={() => setLoginOpen(true)}
+            onSync={() => setSyncOpen(true)}
+            onDeleteDraft={() => { void deleteQuickNote(document) }}
+            onSaveDraft={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }}
+          />
+          <button className="topbar-utility__button topbar-mobile-action" onClick={toggleSidebar} title="打开导图与项目" aria-label="打开导图与项目" aria-expanded={mobilePanel === 'navigation'}><Icon><HamburgerMenuIcon /></Icon></button>
+          <button className="topbar-utility__button topbar-mobile-action" disabled={selectedNode?.isFreeTopic} onClick={() => dispatch({ type: 'ADD_CHILD', parentId: selectedNodeId ?? document.rootId })} title={selectedNode?.isFreeTopic ? '自由主题请先附加到主节点' : '新建子节点'} aria-label="新建子节点"><Icon><PlusIcon /></Icon></button>
+          <button className="topbar-utility__button topbar-mobile-action" onClick={toggleInspector} title="打开节点属性" aria-label="打开节点属性" aria-expanded={mobilePanel === 'inspector'}><Icon><MixerVerticalIcon /></Icon></button>
+          <MobileMoreMenu
+            canUndo={Boolean(past.length)}
+            canRedo={Boolean(future.length)}
+            canAddSibling={(selectedNodeId ?? document.rootId) !== document.rootId && selectedNodeId !== focusedNodeId && !selectedNode?.isFreeTopic}
+            canCreateRelation={Boolean(selectedNodeIds.length)}
+            canGroupSelection={canGroupSelection}
+            canArrange={!focusedNodeId}
+            canFocus={Boolean(selectedNode && selectedNode.id !== document.rootId && !selectedNode.isFreeTopic)}
+            focusActive={Boolean(focusedNodeId)}
+            relationLabel={selectedNodeIds.length > 1 ? '共同联系' : '建立联系'}
+            viewIsOutline={workspaceView === 'outline'}
+            tags={tags}
+            filter={nodeFilter}
+            signedIn={Boolean(accountSession)}
+            isDraft={document.isDraft}
+            themeStyle={{
+              '--panel-bg': theme.surface,
+              '--app-text': theme.nodeText,
+              '--muted-text': theme.id === 'cyber' || theme.id === 'midnight' ? '#aab4c8' : '#898a80',
+              '--line': theme.nodeBorder,
+              '--accent': theme.selected,
+            } as CSSProperties}
+            onUndo={undo}
+            onRedo={redo}
+            onAddSibling={() => dispatch({ type: 'ADD_SIBLING', nodeId: selectedNodeId ?? document.rootId })}
+            onCreateRelation={() => requestRelatedTopic(selectedNodeIds)}
+            onCreateSummary={() => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds })}
+            onCreateBoundary={() => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds })}
+            onArrange={() => dispatch({ type: 'AUTO_ARRANGE' })}
+            onToggleFocus={() => selectedNode && setFocusedNodeId((current) => current === selectedNode.id ? null : selectedNode.id)}
+            onToggleView={toggleWorkspaceView}
+            onSaveFile={() => { void saveCurrentToLocalFile() }}
+            onOpenHistory={() => setHistoryOpen(true)}
+            onStartPresentation={() => setPresentationStartNodeId(selectedNodeId ?? focusedNodeId ?? document.rootId)}
+            onFilterChange={setNodeFilter}
+            onClearFilter={clearNodeFilter}
+            onExportSvg={exportCurrentSvg}
+            onExportOpml={exportCurrentOpml}
+            onExportMarkdown={exportCurrentDocument}
+            onExportWorkspaceBackup={() => { void exportWorkspaceBackup() }}
+            onLogin={() => setLoginOpen(true)}
+            onSync={() => setSyncOpen(true)}
+            onDeleteDraft={() => { void deleteQuickNote(document) }}
+            onSaveDraft={() => { setDraftTitle(document.title); setDraftCategoryId(document.categoryId); setPendingNavigation(null); setDraftSaveOpen(true) }}
+          />
         </div>
       </header>
 
@@ -1211,55 +1304,88 @@ export function App() {
         <aside className="left-rail">
           <div className="sidebar-scroll">
             <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong></div>
-            <div className="sidebar-quick-actions"><button onClick={() => { void startQuickNote() }} title="随手记 (⌘⇧N)"><span>✦</span>随手记</button><button onClick={() => { void startNewDocument() }} title="新建导图"><span>＋</span>新建导图</button></div>
-            <nav className="sidebar-panel-nav" aria-label="侧栏分类">
-              <button className={sidebarPanel === 'projects' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('projects')} aria-expanded={sidebarPanel === 'projects'}><span>◫</span><strong>项目</strong><small>{categories.length}</small><i>›</i></button>
-              <button className={sidebarPanel === 'maps' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('maps')} aria-expanded={sidebarPanel === 'maps'}><span>◇</span><strong>导图</strong><small>{savedDocuments.length + draftDocuments.length}</small><i>›</i></button>
-              <button className={sidebarPanel === 'tasks' ? 'is-active' : ''} onClick={() => toggleSidebarPanel('tasks')} aria-expanded={sidebarPanel === 'tasks'}><span>☑</span><strong>任务中心</strong><small>{openTaskCount}</small><i>›</i></button>
-            </nav>
+            <div className="sidebar-quick-actions"><button onClick={() => { void startQuickNote() }} title="随手记 (⌘⇧N)"><span><LightningBoltIcon /></span>随手记</button><button onClick={() => { void startNewDocument() }} title="新建导图"><span><PlusIcon /></span>新建导图</button></div>
+            <section className="sidebar-section sidebar-section--projects" aria-label="项目">
+              <div className="sidebar-section__heading">
+                <div><p className="sidebar-section__eyebrow">组织</p><strong>项目</strong></div>
+                <button className="sidebar-section__action" onClick={() => setProjectCreateOpen(true)} title="新建项目" aria-label="新建项目"><PlusIcon /></button>
+              </div>
+              <div className="sidebar-project-list">
+                <button className={`sidebar-library-item ${activeProjectId === 'all' ? 'is-active' : ''}`} onClick={() => { setActiveProjectId('all'); setActiveCategoryId('all') }}><span><TargetIcon /></span><strong>全部项目</strong><small>{projects.length}</small></button>
+                <button className={`sidebar-library-item ${activeProjectId === 'unassigned' ? 'is-active' : ''}`} onClick={() => { setActiveProjectId('unassigned'); setActiveCategoryId('all') }}><span>○</span><strong>未归属</strong><small>{savedDocuments.filter((item) => item.projectId === null).length}</small></button>
+                {projects.map((project) => <button key={project.id} className={`sidebar-library-item ${activeProjectId === project.id ? 'is-active' : ''}`} onClick={() => { setActiveProjectId(project.id); setActiveCategoryId('all') }} title={project.description || project.name}><span>◇</span><strong>{project.name}</strong><small>{savedDocuments.filter((item) => item.projectId === project.id).length}</small></button>)}
+                {!projects.length && <p className="sidebar-project-empty">新建项目后，可把多张导图集中到同一计划中。</p>}
+              </div>
+            </section>
+            <section className="sidebar-section sidebar-section--library" aria-label="导图空间">
+              <div className="sidebar-section__heading">
+                <div><p className="sidebar-section__eyebrow">资料库</p><strong>导图空间</strong></div>
+                <button className="sidebar-section__action" onClick={() => setShowCategoryInput(true)} title="新建分类" aria-label="新建分类"><PlusIcon /></button>
+              </div>
+              <button className={`sidebar-library-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span><FileTextIcon /></span><strong>全部导图</strong><small>{savedDocuments.length}</small></button>
+              <div className="sidebar-category-list">
+                <p>分类</p>
+                {categories.map((category) => {
+                  const count = savedDocuments.filter((item) => item.categoryId === category.id).length
+                  return editingCategoryId === category.id ? <form key={category.id} className="sidebar-category-form sidebar-category-form--editing" onSubmit={renameCategory}>
+                    <input autoFocus value={editingCategoryName} onChange={(event) => setEditingCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingCategoryId(null) } }} aria-label="分类名称" />
+                    <button type="submit">保存</button>{category.id !== 'uncategorized' && <button type="button" className="sidebar-category-delete" onClick={() => { void deleteCategory(category.id) }}>删除</button>}
+                  </form> : <div className="sidebar-category-row" key={category.id}>
+                    <button className={`sidebar-library-item ${activeCategoryId === category.id ? 'is-active' : ''}`} onClick={() => setActiveCategoryId(category.id)}><span><DashboardIcon /></span><strong>{category.name}</strong><small>{count}</small></button>
+                    <button className="sidebar-category-edit" type="button" onClick={() => beginCategoryEdit(category)} title={`编辑分类 ${category.name}`} aria-label={`编辑分类 ${category.name}`}>编辑</button>
+                  </div>
+                })}
+                {showCategoryInput ? (
+                  <form className="sidebar-category-form" onSubmit={(event) => { event.preventDefault(); addCategory() }}>
+                    <input autoFocus value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} placeholder="分类名称" aria-label="新分类名称" />
+                    <button type="submit">添加</button>
+                  </form>
+                ) : <button className="sidebar-add-category" onClick={() => setShowCategoryInput(true)}>＋ 新建分类</button>}
+              </div>
+            </section>
 
-            {sidebarPanel === 'projects' && <section className="sidebar-panel" aria-label="项目分类">
-              <div className="sidebar-panel__heading"><span>项目分类</span><small>双击名称可编辑</small></div>
-              <button className={`sidebar-nav-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span>◫</span>全部导图 <small>{savedDocuments.length}</small></button>
-              {categories.map((category) => {
-                const count = savedDocuments.filter((item) => item.categoryId === category.id).length
-                return editingCategoryId === category.id ? <form key={category.id} className="sidebar-category-form sidebar-category-form--editing" onSubmit={renameCategory}>
-                  <input autoFocus value={editingCategoryName} onChange={(event) => setEditingCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingCategoryId(null) } }} aria-label="分类名称" />
-                  <button type="submit">保存</button>{category.id !== 'uncategorized' && <button type="button" className="sidebar-category-delete" onClick={() => { void deleteCategory(category.id) }}>删除</button>}
-                </form> : <button key={category.id} className={`sidebar-nav-item ${activeCategoryId === category.id ? 'is-active' : ''}`} onClick={() => setActiveCategoryId(category.id)} onDoubleClick={(event) => { event.preventDefault(); beginCategoryEdit(category) }} title="双击重命名"><span>⌁</span>{category.name}<small>{count}</small></button>
-              })}
-              {showCategoryInput ? (
-                <form className="sidebar-category-form" onSubmit={(event) => { event.preventDefault(); addCategory() }}>
-                  <input autoFocus value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} placeholder="分类名称" />
-                  <button type="submit">添加</button>
-                </form>
-              ) : <button className="sidebar-add-category" onClick={() => setShowCategoryInput(true)}>＋ 新建分类</button>}
-            </section>}
-
-            {sidebarPanel === 'maps' && <section className="sidebar-panel" aria-label="导图列表">
-              <div className="sidebar-panel__heading"><span>导图记录</span><span className="sidebar-import-actions"><button className="sidebar-import-button" onClick={() => importInputRef.current?.click()} title="导入 MindTree、OPML 或 Markdown 文件">⇧ 导入</button><button className="sidebar-import-button" onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">↥ 恢复</button></span></div>
-              <small className="sidebar-import-hint">导入 MindTree / OPML / Markdown，或恢复工作区备份。</small>
-              <input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" />
+            <section className="sidebar-section sidebar-section--maps" aria-label="导图列表">
+              <div className="sidebar-section__heading">
+                <div><p className="sidebar-section__eyebrow">浏览</p><strong>{activeProjectId === 'all' ? (activeCategoryId === 'all' ? '全部导图' : categoryName(activeCategoryId)) : activeProjectId === 'unassigned' ? '未归属导图' : projectName(activeProjectId)}</strong></div>
+                <span className="sidebar-section__tools"><button onClick={() => importInputRef.current?.click()} title="导入 MindTree、OPML 或 Markdown 文件">导入</button><button onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">恢复</button></span>
+              </div>
+              <label className="sidebar-document-search-wrap"><MagnifyingGlassIcon /><input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" /></label>
               {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <DraftDocumentItem key={item.id} title={item.title} active={item.id === document.id} onOpen={() => openDocument(item)} onDelete={() => { void deleteQuickNote(item) }} />)}</div>}
-              {matchingDocuments.map((item) => (
-                <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => { void openDocument(item) }}>
-                  <span className="sidebar-document__icon">◈</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>{categoryName(item.categoryId)}</small></span>
-                </button>
-              ))}
+              <div className="sidebar-document-list">
+                {matchingDocuments.map((item) => (
+                  <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => { void openDocument(item) }}>
+                    <span className="sidebar-document__icon">◈</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>{projectName(item.projectId)} · {categoryName(item.categoryId)}</small></span>
+                  </button>
+                ))}
+              </div>
               {!matchingDocuments.length && !matchingDrafts.length && <p className="sidebar-empty">没有匹配的导图或随手记</p>}
               <label className="sidebar-category-select">当前导图分类
                 <select value={document.categoryId} onChange={(event) => { dispatch({ type: 'SET_CATEGORY', categoryId: event.target.value }); setActiveCategoryId(event.target.value) }}>
                   {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
                 </select>
               </label>
-            </section>}
+              <label className="sidebar-category-select">归属项目
+                <select value={document.projectId ?? ''} onChange={(event) => dispatch({ type: 'SET_PROJECT', projectId: event.target.value || null })}>
+                  <option value="">未归属项目</option>
+                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                </select>
+              </label>
+            </section>
 
-            {sidebarPanel === 'tasks' && <section className="sidebar-panel sidebar-panel--tasks" aria-label="任务中心"><p>跨导图汇总待办，统一处理进度与截止日期。</p><button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>打开任务中心</strong><small>{openTaskCount ? `${openTaskCount} 项未完成` : '当前没有未完成任务'}</small></span><i>›</i></button></section>}
+            <section className="sidebar-section sidebar-section--plans" aria-label="计划">
+              <div className="sidebar-section__heading"><div><p className="sidebar-section__eyebrow">全局</p><strong>计划</strong></div><small>{projects.length} 个项目</small></div>
+              <button className="sidebar-plan-entry" onClick={() => setPlanCenterOpen(true)}><span>◎</span><span><strong>查看项目计划</strong><small>汇总思维树、待办与进度</small></span><i>›</i></button>
+            </section>
+
+            <section className="sidebar-section sidebar-section--tasks" aria-label="任务中心">
+              <div className="sidebar-section__heading"><div><p className="sidebar-section__eyebrow">跟进</p><strong>任务中心</strong></div><small>{openTaskCount} 项未完成</small></div>
+              <button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>查看全部任务</strong><small>{openTaskCount ? '跨导图集中处理待办' : '当前没有未完成任务'}</small></span><i>›</i></button>
+            </section>
 
           </div>
           <footer className="sidebar-footer">
-            <button className="sidebar-footer-action" type="button"><span>⚙</span>设置</button>
-            <button className="sidebar-footer-action" type="button"><span>?</span>帮助与反馈</button>
+            <button className="sidebar-footer-action" type="button"><span><GearIcon /></span>设置</button>
+            <button className="sidebar-footer-action" type="button"><span><QuestionMarkCircledIcon /></span>帮助与反馈</button>
             <div className="sidebar-account">
               <button className="sidebar-account__trigger" onClick={() => setAccountMenuOpen((open) => !open)}><span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span><span><strong>{accountSession?.user.email ?? '本地工作区'}</strong><small>{accountSession ? '已登录 · 可同步' : '未登录 · 本地保存'}</small></span><i>⋮</i></button>
               {accountMenuOpen && <div className="sidebar-account__menu"><strong>{accountSession ? '已登录账号' : '同步账号'}</strong><p>{accountSession ? '此账号的同步数据与其他账号隔离。' : '登录后可使用账号会话安全同步导图。'}</p>{accountSession ? <button onClick={() => { void logoutAccount() }}>退出登录</button> : <button onClick={() => { setLoginOpen(true); setAccountMenuOpen(false) }}>登录 / 注册</button>}</div>}
@@ -1367,9 +1493,21 @@ export function App() {
         onDuplicate={(version) => { void duplicateVersion(version) }}
       />
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSubmit={authenticateAccount} />
+      {projectCreateOpen && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProjectCreateOpen(false) }}>
+        <form className="project-create-dialog" role="dialog" aria-modal="true" aria-labelledby="project-create-title" onSubmit={(event) => { event.preventDefault(); addProject() }}>
+          <p className="eyebrow">新建项目</p>
+          <h2 id="project-create-title">建立一个工作项目</h2>
+          <p>项目用于归集多张导图。任务仍保留在各自节点中，由任务中心统一汇总。</p>
+          <label>项目名称<input autoFocus value={projectNameDraft} onChange={(event) => setProjectNameDraft(event.target.value)} placeholder="例如：算法刷题计划" /></label>
+          <label>项目说明（可选）<textarea value={projectDescriptionDraft} onChange={(event) => setProjectDescriptionDraft(event.target.value)} placeholder="例如：按专题整理题型、错题和复盘思路" rows={3} /></label>
+          <div className="document-import-dialog__actions"><button className="document-import-dialog__primary" type="submit" disabled={!projectNameDraft.trim()}>建立项目</button><button className="document-import-dialog__cancel" type="button" onClick={() => setProjectCreateOpen(false)}>取消</button></div>
+        </form>
+      </div>}
       {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} onSetPriority={(task, priority) => { void updateTaskPriority(task, priority) }} onSetDueDate={(task, dueDate) => { void updateTaskDueDate(task, dueDate) }} />}
-      <QuickAssistant document={document} workspaceDocuments={taskDocuments} />
+      {planCenterOpen && <PlanCenterDialog projects={projects} documents={savedDocuments} onClose={() => setPlanCenterOpen(false)} onOpenDocument={(item) => { setPlanCenterOpen(false); openDocument(item) }} onCreateDocument={(projectId) => { setPlanCenterOpen(false); void startNewDocument(projectId) }} />}
+      <QuickAssistant document={document} workspaceDocuments={taskDocuments} onOpenSettings={() => { setAssistantOpen(true); saveAssistantDockOpen(true) }} />
       {presentationStartNodeId && <PresentationMode document={document} startNodeId={presentationStartNodeId} onClose={() => { if (window.document.fullscreenElement) void window.document.exitFullscreen?.(); setPresentationStartNodeId(null) }} />}
+      {workspaceSearchOpen && <NodeSearchDialog currentDocumentId={document.id} documents={taskDocuments} tags={tags} provenance={[]} initialScope="workspace" allowCreate={false} ariaLabel="搜索工作区" onClose={() => setWorkspaceSearchOpen(false)} onSelect={revealWorkspaceSearchResult} />}
       {internalLinkPickerOpen && selectedNode && <NodeSearchDialog currentDocumentId={document.id} documents={taskDocuments} tags={tags} provenance={[]} initialScope="workspace" allowCreate={false} ariaLabel="选择要链接的工作区节点" onClose={() => setInternalLinkPickerOpen(false)} onSelect={addInternalNodeLink} />}
       {importCandidate && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !importBusy) setImportCandidate(null) }}>
         <section className="document-import-dialog" role="dialog" aria-modal="true" aria-labelledby="document-import-title">

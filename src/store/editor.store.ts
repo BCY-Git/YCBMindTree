@@ -14,9 +14,9 @@
  * 历史栈最多保留 50 条（past.length ≤ 50），超出时丢弃最旧条目。
  */
 import { create } from 'zustand'
-import { createInitialDocument, createQuickNoteDocument } from '../domain/document.factory'
-import { createNodeClipboard, executeCommand, type MindMapCommand, type MindNodeClipboard } from '../domain/commands'
-import type { MindMapDocument } from '../domain/document.types'
+import { createInitialDocument, createQuickNoteDocument } from '@/domain/document.factory'
+import { createNodeClipboard, executeCommand, type MindMapCommand, type MindNodeClipboard } from '@/domain/commands'
+import type { MindMapDocument } from '@/domain/document.types'
 
 type EditorState = {
   document: MindMapDocument

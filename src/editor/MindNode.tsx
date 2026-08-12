@@ -298,7 +298,12 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {node.tags.map((tag) => <i key={tag.id} className="node-tag-dot" title={tag.name} style={{ '--tag-color': tag.color } as CSSProperties} aria-hidden="true" />)}
         </span>}
         <span>{node.label}</span>
-        {showWorkspaceDetails && node.imageAttachment && <AttachmentImage attachment={node.imageAttachment} variant="node" />}
+        {showWorkspaceDetails && node.imageAttachment && <AttachmentImage
+          attachment={node.imageAttachment}
+          variant="node"
+          onImageMeasured={(image) => dispatch({ type: 'SET_NODE_ATTACHMENT_IMAGE', nodeId: id, attachmentId: node.imageAttachment!.id, image })}
+          onImageResize={(image) => dispatch({ type: 'SET_NODE_ATTACHMENT_IMAGE', nodeId: id, attachmentId: node.imageAttachment!.id, image })}
+        />}
       </div>}
       <Handle
         id="source-left"

@@ -2,7 +2,7 @@
  * 轻量、跨导图复用的本地标签库。节点只持有 tagId，避免改名或改色时重写每份导图。
  * 标签库暂不进云端：账号体系稳定后再单独迁移，不能让标签配置阻塞导图同步。
  */
-import { randomUuid } from '../platform/random-uuid'
+import { randomUuid } from '@/platform/random-uuid'
 
 export type Tag = { id: string; name: string; color: string }
 

@@ -1,4 +1,4 @@
-import { createDocumentFromOutline, fileStem, type ImportedDocument, type ImportedOutlineNode } from './import-document'
+import { createDocumentFromOutline, fileStem, type ImportedDocument, type ImportedOutlineNode } from '@/export/import-document'
 
 type StackEntry = { depth: number; node: ImportedOutlineNode }
 

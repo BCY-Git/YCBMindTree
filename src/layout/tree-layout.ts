@@ -12,7 +12,8 @@
  * 折叠节点不参与 measure/plac e，直接跳过其子树的布局。
  * 每个节点的位置最终叠加 node.offsetX/Y，以支持用户手动微调。
  */
-import type { MindMapDocument, MindNode } from '../domain/document.types'
+import type { MindMapDocument, MindNode } from '@/domain/document.types'
+import { imageDisplayHeight } from '@/attachments/image-presentation'
 
 export type PositionedNode = { id: string; x: number; y: number; width: number; height: number }
 
@@ -32,10 +33,14 @@ const HORIZONTAL_TEXT_PADDING = 44
 function nodeSize(node: MindNode, isRoot: boolean, transientHeight?: number) {
   const longestLine = Math.max(...node.topic.split('\n').map((line) => line.length), 1)
   const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * TEXT_CHARACTER_WIDTH + HORIZONTAL_TEXT_PADDING))
-  const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth)
+  const imageAttachment = node.attachments.find((attachment) => attachment.type.startsWith('image/'))
+  const imagePreviewWidth = imageAttachment?.image?.displayWidth ?? (imageAttachment ? 156 : 0)
+  const widthWithImage = imagePreviewWidth ? Math.min(560, imagePreviewWidth + 20) : 0
+  const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth, widthWithImage)
   const charactersPerLine = Math.max(8, Math.floor((width - HORIZONTAL_TEXT_PADDING) / TEXT_CHARACTER_WIDTH))
   const lines = Math.max(1, node.topic.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
-  const imagePreviewHeight = node.attachments.some((attachment) => attachment.type.startsWith('image/')) ? 96 : 0
+  // 旧附件没有展示元数据时沿用历史 96px 缩略图高度；首次载入后会自动写入真实宽高比。
+  const imagePreviewHeight = imageAttachment ? (imageAttachment.image ? imageDisplayHeight(imageAttachment.image) + 8 : 96) : 0
   const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20 + imagePreviewHeight
   return { width, height: Math.max(node.height ?? 0, automaticHeight, transientHeight ?? 0) }
 }

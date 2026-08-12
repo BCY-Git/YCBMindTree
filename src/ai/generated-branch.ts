@@ -1,5 +1,5 @@
-import type { MindNodeClipboard } from '../domain/commands'
-import type { MindNodePriority, MindNodeTaskStatus } from '../domain/document.types'
+import type { MindNodeClipboard } from '@/domain/commands'
+import type { MindNodePriority, MindNodeTaskStatus } from '@/domain/document.types'
 
 const maxGeneratedNodes = 60
 const maxTopicLength = 160

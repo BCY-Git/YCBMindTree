@@ -1,7 +1,7 @@
-import type { DepositProvenance } from './deposit/deposit-types'
-import type { MindMapDocument } from '../domain/document.types'
-import type { Tag } from '../domain/tag-library'
-import { searchWorkspaceNodes } from '../search/workspace-search'
+import type { DepositProvenance } from '@/ai/deposit/deposit-types'
+import type { MindMapDocument } from '@/domain/document.types'
+import type { Tag } from '@/domain/tag-library'
+import { searchWorkspaceNodes } from '@/search/workspace-search'
 
 export type RetrievedWorkspaceNode = {
   documentId: string

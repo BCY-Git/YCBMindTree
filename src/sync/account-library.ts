@@ -1,6 +1,6 @@
-import type { MindMapDocument } from '../domain/document.types'
-import type { SyncMetadata } from '../persistence/database'
-import type { PushResult, RemoteDocument, SyncConfig } from './sync-client'
+import type { MindMapDocument } from '@/domain/document.types'
+import type { SyncMetadata } from '@/persistence/database'
+import type { PushResult, RemoteDocument, SyncConfig } from '@/sync/sync-client'
 
 export type AccountLibrarySyncDependencies = {
   listLocalDocuments: () => Promise<MindMapDocument[]>

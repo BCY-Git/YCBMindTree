@@ -1,9 +1,9 @@
-import type { MindMapDocument } from '../domain/document.types'
-import { getTheme } from '../domain/themes'
-import { relationControlPoint, relationDashArray, relationPath } from '../editor/relation-geometry'
-import { layoutTree, type PositionedNode } from '../layout/tree-layout'
-import { getNodeAttachment } from '../persistence/database'
-import { saveExportFile } from './export-file'
+import type { MindMapDocument } from '@/domain/document.types'
+import { getTheme } from '@/domain/themes'
+import { relationControlPoint, relationDashArray, relationPath } from '@/editor/relation-geometry'
+import { layoutTree, type PositionedNode } from '@/layout/tree-layout'
+import { getNodeAttachment } from '@/persistence/database'
+import { saveExportFile } from '@/export/export-file'
 
 type SvgExportOptions = { transparent?: boolean; images?: Record<string, string> }
 

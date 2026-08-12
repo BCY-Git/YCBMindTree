@@ -1,5 +1,5 @@
-import type { MindMapDocument } from '../../domain/document.types'
-import type { DepositBatch, DepositCandidate, DepositPlan, LocalDepositOperation } from './deposit-types'
+import type { MindMapDocument } from '@/domain/document.types'
+import type { DepositBatch, DepositCandidate, DepositPlan, LocalDepositOperation } from '@/ai/deposit/deposit-types'
 
 function appendWithHeading(existing: string, content: string) {
   const value = content.trim()

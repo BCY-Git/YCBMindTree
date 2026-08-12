@@ -1,5 +1,5 @@
-import type { MindMapDocument } from '../../domain/document.types'
-import type { DepositAnalysisContext, DepositContextNode } from './deposit-types'
+import type { MindMapDocument } from '@/domain/document.types'
+import type { DepositAnalysisContext, DepositContextNode } from '@/ai/deposit/deposit-types'
 
 export const depositContextLimits = { sourceNodes: 160, destinationDocuments: 8, destinationNodes: 240, destinationNodesPerDocument: 60, topicCharacters: 500, noteCharacters: 2_000 } as const
 

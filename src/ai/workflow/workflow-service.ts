@@ -1,5 +1,5 @@
-import type { WorkflowMode, WorkflowSession } from './workflow-types'
-import { randomUuid } from '../../platform/random-uuid'
+import type { WorkflowMode, WorkflowSession } from '@/ai/workflow/workflow-types'
+import { randomUuid } from '@/platform/random-uuid'
 
 export function inferWorkflowMode(prompt: string): WorkflowMode {
   const value = prompt.toLocaleLowerCase()

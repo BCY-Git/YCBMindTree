@@ -1,4 +1,4 @@
-import type { MindMapDocument } from '../domain/document.types'
+import type { MindMapDocument } from '@/domain/document.types'
 
 export type FocusBreadcrumbItem = { nodeId: string; topic: string }
 

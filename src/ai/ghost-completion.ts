@@ -1,6 +1,6 @@
-import type { MindMapDocument, MindNode } from '../domain/document.types'
-import { completionUrl, type AiSettings } from './ai-settings'
-import { requestAiChat } from '../platform/tauri'
+import type { MindMapDocument, MindNode } from '@/domain/document.types'
+import { completionUrl, type AiSettings } from '@/ai/ai-settings'
+import { requestAiChat } from '@/platform/tauri'
 
 type CompletionResponse = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
 

@@ -1,6 +1,6 @@
-import type { DepositBatch, DepositCandidate, DepositProvenance } from '../ai/deposit/deposit-types'
-import type { WorkflowSession } from '../ai/workflow/workflow-types'
-import type { MindMapDocument, MindNode, MindNodePriority, MindNodeTaskStatus } from '../domain/document.types'
+import type { DepositBatch, DepositCandidate, DepositProvenance } from '@/ai/deposit/deposit-types'
+import type { WorkflowSession } from '@/ai/workflow/workflow-types'
+import type { MindMapDocument, MindNode, MindNodePriority, MindNodeTaskStatus } from '@/domain/document.types'
 
 export type ProjectStatusSource = {
   documentId: string

@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { Cross2Icon, MagicWandIcon } from '@radix-ui/react-icons'
 
 export const assistantDockLimits = { min: 300, max: 520, default: 360 } as const
 const assistantDockOpenKey = 'mindtree.assistant-dock-open.v1'
@@ -28,7 +29,7 @@ export function saveAssistantDockWidth(width: number) {
 export function AssistantDockToggleButton({ open, hasNudge = false, onToggle }: { open: boolean; hasNudge?: boolean; onToggle: () => void }) {
   const label = open ? '收起 AI 助手' : '显示 AI 助手'
   const accessibleLabel = !open && hasNudge ? `${label} · 有待整理记录` : label
-  return <button className={`topbar-utility__button assistant-dock-toggle ${open ? 'is-active' : ''} ${!open && hasNudge ? 'has-nudge' : ''}`} onClick={onToggle} title={accessibleLabel} aria-label={accessibleLabel} aria-pressed={open}><span className="toolbar-icon" aria-hidden="true">✦</span>{!open && hasNudge && <i className="assistant-dock-toggle__nudge" aria-hidden="true" />}</button>
+  return <button className={`topbar-utility__button topbar-mobile-keep assistant-dock-toggle ${open ? 'is-active' : ''} ${!open && hasNudge ? 'has-nudge' : ''}`} onClick={onToggle} title={`${accessibleLabel}与 API 配置`} aria-label={accessibleLabel} aria-pressed={open}><span className="toolbar-icon" aria-hidden="true"><MagicWandIcon /></span>{!open && hasNudge && <i className="assistant-dock-toggle__nudge" aria-hidden="true" />}</button>
 }
 
 type AssistantDockProps = {
@@ -72,7 +73,7 @@ export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, ch
 
   return <aside className="assistant-dock" aria-label="AI 助手面板">
     <div className="assistant-dock__resize" role="separator" aria-label="调整 AI 助手宽度" aria-orientation="vertical" aria-valuemin={assistantDockLimits.min} aria-valuemax={assistantDockLimits.max} aria-valuenow={width} tabIndex={0} onKeyDown={resizeByKeyboard} onPointerDown={beginResize} onPointerMove={continueResize} onPointerUp={finishResize} onPointerCancel={finishResize} />
-    <header className="assistant-dock__header"><span><i>✦</i><strong>AI 助手</strong><small>基于当前导图</small></span><button onClick={onClose} aria-label="收起 AI 助手">×</button></header>
+    <header className="assistant-dock__header"><span><i><MagicWandIcon /></i><strong>AI 助手</strong><small>协作与 API 配置</small></span><button onClick={onClose} aria-label="收起 AI 助手"><Cross2Icon /></button></header>
     <div className="assistant-dock__body">{children}</div>
   </aside>
 }

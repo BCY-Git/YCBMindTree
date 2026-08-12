@@ -51,4 +51,4 @@ export async function saveExportFile(request: ExportFileRequest): Promise<Export
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
   return { method: 'download', fileName: request.suggestedName }
 }
-import { isTauriRuntime } from '../platform/tauri'
+import { isTauriRuntime } from '@/platform/tauri'

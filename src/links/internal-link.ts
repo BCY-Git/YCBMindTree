@@ -1,4 +1,4 @@
-import type { MindMapDocument, MindNode } from '../domain/document.types'
+import type { MindMapDocument, MindNode } from '@/domain/document.types'
 
 export type InternalNodeLinkTarget = { documentId: string; nodeId: string }
 export type InternalNodeLinkResolution =

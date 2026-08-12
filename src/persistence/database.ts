@@ -13,16 +13,16 @@
  * 未来可扩展为按文档 id 索引列表。
  */
 import Dexie, { type EntityTable } from 'dexie'
-import { mindMapDocumentSchema } from '../domain/document.schema'
-import type { MindMapDocument, MindNodeAttachment } from '../domain/document.types'
-import { assertValidDocument } from '../domain/document.validator'
-import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
-import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
-import type { DepositPlan, DepositWorkspaceTransaction } from '../ai/deposit/deposit-types'
-import { executeCommand } from '../domain/commands'
-import type { WorkflowSession } from '../ai/workflow/workflow-types'
-import { workflowSessionSchema } from '../ai/workflow/workflow-schema'
-import { randomUuid } from '../platform/random-uuid'
+import { mindMapDocumentSchema } from '@/domain/document.schema'
+import type { MindMapDocument, MindNodeAttachment } from '@/domain/document.types'
+import { assertValidDocument } from '@/domain/document.validator'
+import type { DocumentVersion, DocumentVersionKind } from '@/history/version-history'
+import type { DepositBatch, DepositProvenance } from '@/ai/deposit/deposit-types'
+import type { DepositPlan, DepositWorkspaceTransaction } from '@/ai/deposit/deposit-types'
+import { executeCommand } from '@/domain/commands'
+import type { WorkflowSession } from '@/ai/workflow/workflow-types'
+import { workflowSessionSchema } from '@/ai/workflow/workflow-schema'
+import { randomUuid } from '@/platform/random-uuid'
 
 export type SyncMetadata = {
   documentId: string

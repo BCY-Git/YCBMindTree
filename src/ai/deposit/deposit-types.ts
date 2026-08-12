@@ -1,6 +1,6 @@
-import type { LocalDepositOperation } from '../../domain/commands'
-import type { MindNodePriority, MindNodeTaskStatus, NodeMark } from '../../domain/document.types'
-import type { MindMapDocument } from '../../domain/document.types'
+import type { LocalDepositOperation } from '@/domain/commands'
+import type { MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
+import type { MindMapDocument } from '@/domain/document.types'
 
 export const depositCandidateTypes = ['fact', 'result', 'task', 'problem', 'decision', 'knowledge', 'idea'] as const
 export type DepositCandidateType = typeof depositCandidateTypes[number]

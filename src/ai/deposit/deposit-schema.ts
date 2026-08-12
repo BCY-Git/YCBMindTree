@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { depositActions, depositCandidateTypes } from './deposit-types'
+import { depositActions, depositCandidateTypes } from '@/ai/deposit/deposit-types'
 
 const nullableId = z.string().min(1).nullable().optional().default(null)
 

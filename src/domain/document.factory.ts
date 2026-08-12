@@ -7,8 +7,8 @@
  * `createInitialDocument()`：构建演示文档（包含根节点、一级提示节点），
  * 用于首次启动时给用户展示基本操作方式。
  */
-import type { MindMapDocument, MindNode } from './document.types'
-import { randomUuid } from '../platform/random-uuid'
+import type { MindMapDocument, MindNode } from '@/domain/document.types'
+import { randomUuid } from '@/platform/random-uuid'
 
 export function createNode(topic: string, parentId: string | null): MindNode {
   const now = Date.now()
@@ -50,6 +50,7 @@ export function createInitialDocument(): MindMapDocument {
     schemaVersion: 1,
     title: '未命名导图',
     categoryId: 'uncategorized',
+    projectId: null,
     isDraft: false,
     origin: 'standard',
     rootId: root.id,
@@ -57,7 +58,7 @@ export function createInitialDocument(): MindMapDocument {
     relations: [],
     boundaries: [],
     summaries: [],
-    layout: { levelGap: 96, siblingGap: 22, freeformOffsets: null },
+    layout: { levelGap: 80, siblingGap: 16, freeformOffsets: null },
     theme: { id: 'calm' },
     createdAt: now,
     updatedAt: now,
@@ -74,6 +75,7 @@ export function createQuickNoteDocument(): MindMapDocument {
     schemaVersion: 1,
     title: `随手记 · ${stamp}`,
     categoryId: 'uncategorized',
+    projectId: null,
     isDraft: true,
     origin: 'quick-note',
     rootId: root.id,
@@ -81,7 +83,7 @@ export function createQuickNoteDocument(): MindMapDocument {
     relations: [],
     boundaries: [],
     summaries: [],
-    layout: { levelGap: 96, siblingGap: 22, freeformOffsets: null },
+    layout: { levelGap: 80, siblingGap: 16, freeformOffsets: null },
     theme: { id: 'calm' },
     createdAt: now,
     updatedAt: now,

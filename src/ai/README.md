@@ -29,6 +29,8 @@
 | 智能沉淀 | `deposit/` | 来源、去重、候选、规划、确认写入、指标 |
 | 智能协作 | `workflow/` | 模式、阶段、检查点与长期资产 |
 | 模型配置 | `ai-settings.ts` | 端点、模型与本地密钥设置 |
+| Agent 运行时 | `../agent/`（顶层目录） | ReAct 循环、工具注册与审批、轨迹；不含业务提示词，设计见 `docs/ai-harness/agent-harness-plan.md` |
+| 材料整理（规划中） | `ingest/` | 网页/文件夹 → 思维树候选；提示词、校验、任务组装与面板 |
 
 ## 目录职责
 
@@ -57,6 +59,7 @@
 - `src/platform/tauri.ts`：统一的桌面运行时和网络能力边界。
 - `src/domain/commands.ts`：所有导图修改的可撤销命令边界。
 - `src/persistence/database.ts`：会话、候选、来源与指标的持久化边界。
+- `src/agent/`：Agent 运行时（ReAct 循环、工具、审批、轨迹）。AI 功能可以组装和调用它，但循环机制本身不在 AI 目录内维护。
 
 AI 模块可以调用这些边界，但不应在组件内复制网络、命令或数据库实现。
 

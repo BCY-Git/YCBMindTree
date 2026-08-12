@@ -1,4 +1,4 @@
-import type { NodeMark } from './document.types'
+import type { NodeMark } from '@/domain/document.types'
 
 export const nodeMarkOrder: NodeMark[] = ['flag', 'star', 'risk', 'idea']
 

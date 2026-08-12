@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
+import type { MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
 
 export type NodeFilter = {
   tags: string[]

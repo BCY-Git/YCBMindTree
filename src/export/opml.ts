@@ -1,6 +1,6 @@
-import type { MindMapDocument } from '../domain/document.types'
-import { saveExportFile } from './export-file'
-import { createDocumentFromOutline, fileStem, type ImportedDocument, type ImportedOutlineNode } from './import-document'
+import type { MindMapDocument } from '@/domain/document.types'
+import { saveExportFile } from '@/export/export-file'
+import { createDocumentFromOutline, fileStem, type ImportedDocument, type ImportedOutlineNode } from '@/export/import-document'
 
 function outlineFromElement(element: Element): ImportedOutlineNode {
   const topic = element.getAttribute('text') ?? element.getAttribute('title') ?? ''

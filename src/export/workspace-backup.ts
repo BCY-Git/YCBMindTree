@@ -1,15 +1,16 @@
 import JSZip from 'jszip'
-import { mindMapDocumentSchema } from '../domain/document.schema'
-import type { MindMapDocument } from '../domain/document.types'
-import { assertValidDocument } from '../domain/document.validator'
-import type { DocumentVersion, DocumentVersionKind } from '../history/version-history'
-import type { StoredAttachment } from '../persistence/database'
-import { isTauriRuntime } from '../platform/tauri'
-import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
-import { depositBatchSchema, depositProvenanceSchema } from '../ai/deposit/deposit-persistence-schema'
-import type { WorkflowSession } from '../ai/workflow/workflow-types'
-import { workflowSessionSchema } from '../ai/workflow/workflow-schema'
-import { randomUuid } from '../platform/random-uuid'
+import { mindMapDocumentSchema } from '@/domain/document.schema'
+import type { MindMapDocument } from '@/domain/document.types'
+import { assertValidDocument } from '@/domain/document.validator'
+import type { DocumentVersion, DocumentVersionKind } from '@/history/version-history'
+import type { StoredAttachment } from '@/persistence/database'
+import { isTauriRuntime } from '@/platform/tauri'
+import type { DepositBatch, DepositProvenance } from '@/ai/deposit/deposit-types'
+import { depositBatchSchema, depositProvenanceSchema } from '@/ai/deposit/deposit-persistence-schema'
+import type { WorkflowSession } from '@/ai/workflow/workflow-types'
+import { workflowSessionSchema } from '@/ai/workflow/workflow-schema'
+import { randomUuid } from '@/platform/random-uuid'
+import type { WorkspaceProject } from '@/projects/project-library'
 
 export type WorkspaceCategory = { id: string; name: string }
 export type WorkspaceTag = { id: string; name: string; color: string }
@@ -22,6 +23,8 @@ export type WorkspaceBackup = {
   depositProvenance: DepositProvenance[]
   workflowSessions: WorkflowSession[]
   categories: WorkspaceCategory[]
+  /** v4 起包含项目库；旧备份或旧调用方可省略。 */
+  projects?: WorkspaceProject[]
   tags: WorkspaceTag[]
 }
 
@@ -29,6 +32,7 @@ export type WorkspaceRestoreTarget = {
   documents: MindMapDocument[]
   attachmentIds: ReadonlySet<string>
   categories: WorkspaceCategory[]
+  projects?: WorkspaceProject[]
   tags: WorkspaceTag[]
 }
 
@@ -39,12 +43,13 @@ export type WorkspaceRestorePlan = WorkspaceBackup & {
 type AttachmentManifest = Omit<StoredAttachment, 'blob'> & { path: string }
 type BackupManifest = {
   format: 'mindtree-workspace-backup'
-  version: 1 | 2 | 3
+  version: 1 | 2 | 3 | 4
   exportedAt: string
   documents: MindMapDocument[]
   versions: DocumentVersion[]
   attachments: AttachmentManifest[]
   categories: WorkspaceCategory[]
+  projects?: WorkspaceProject[]
   tags: WorkspaceTag[]
   depositBatches?: DepositBatch[]
   depositProvenance?: DepositProvenance[]
@@ -72,6 +77,13 @@ function assertTags(value: unknown): WorkspaceTag[] {
     throw new Error('备份中的标签数据无效')
   }
   return value.map((item) => ({ id: item.id, name: item.name, color: item.color }))
+}
+
+function assertProjects(value: unknown): WorkspaceProject[] {
+  if (!Array.isArray(value) || value.some((item) => !item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string' || !item.name.trim() || typeof item.description !== 'string' || typeof item.createdAt !== 'number' || typeof item.updatedAt !== 'number')) {
+    throw new Error('备份中的项目数据无效')
+  }
+  return value.map((item) => ({ id: item.id, name: item.name.trim(), description: item.description, createdAt: item.createdAt, updatedAt: item.updatedAt }))
 }
 
 function parseDocument(value: unknown): MindMapDocument {
@@ -157,12 +169,13 @@ export async function createWorkspaceBackup(input: WorkspaceBackup): Promise<Blo
   assertAttachmentCoverage(input.documents, new Set(attachments.map((attachment) => attachment.id)))
   const manifest: BackupManifest = {
     format: backupFormat,
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     documents: input.documents,
     versions: input.versions,
     attachments,
     categories: input.categories,
+    projects: input.projects ?? [],
     tags: input.tags,
     depositBatches: input.depositBatches,
     depositProvenance: input.depositProvenance,
@@ -192,7 +205,7 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
     throw new Error('不是受支持的 MindTree 工作区备份')
   }
   const manifest = raw as Partial<BackupManifest>
-  if (manifest.format !== backupFormat || ![1, 2, 3].includes(manifest.version ?? 0) || !Array.isArray(manifest.documents)) {
+  if (manifest.format !== backupFormat || ![1, 2, 3, 4].includes(manifest.version ?? 0) || !Array.isArray(manifest.documents)) {
     throw new Error('不是受支持的 MindTree 工作区备份')
   }
   const documents = manifest.documents.map(parseDocument)
@@ -200,6 +213,7 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
   if (documentIds.size !== documents.length) throw new Error('备份中含有重复导图 ID')
   const versions = parseVersions(manifest.versions, documentIds)
   const categories = assertCategories(manifest.categories)
+  const projects = manifest.projects === undefined ? [] : assertProjects(manifest.projects)
   const tags = assertTags(manifest.tags)
   const manifests = parseAttachmentManifest(manifest.attachments, documents)
   assertAttachmentCoverage(documents, new Set(manifests.map((attachment) => attachment.id)))
@@ -209,7 +223,7 @@ export async function parseWorkspaceBackup(file: Blob): Promise<WorkspaceBackup>
     return { ...attachment, blob: await binary.async('blob') }
   }))
   const deposit = parseDepositData(manifest, documents)
-  return { documents, versions, attachments, categories, tags, ...deposit, workflowSessions: parseWorkflowSessions(manifest, documents) }
+  return { documents, versions, attachments, categories, projects, tags, ...deposit, workflowSessions: parseWorkflowSessions(manifest, documents) }
 }
 
 function backupFileName() {
@@ -289,6 +303,25 @@ function mapTags(imported: WorkspaceTag[], existing: WorkspaceTag[]) {
   return { tags: result, mapping }
 }
 
+function mapProjects(imported: WorkspaceProject[], existing: WorkspaceProject[]) {
+  const result = structuredClone(existing)
+  const ids = new Set(result.map((item) => item.id))
+  const mapping = new Map<string, string>()
+  for (const item of imported) {
+    const sameId = result.find((current) => current.id === item.id)
+    const sameName = result.find((current) => current.name === item.name)
+    if (sameId && sameId.name === item.name) mapping.set(item.id, sameId.id)
+    else if (sameName) mapping.set(item.id, sameName.id)
+    else {
+      const id = ids.has(item.id) ? `project-${randomUuid()}` : item.id
+      result.push({ ...item, id })
+      ids.add(id)
+      mapping.set(item.id, id)
+    }
+  }
+  return { projects: result, mapping }
+}
+
 /**
  * 将外部工作区变成可安全合并的恢复计划。
  * 已存在的导图变成“恢复副本”；所有附件和版本都分配新 ID，避免跨工作区串联。
@@ -304,6 +337,7 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
   }
   const attachmentIdMap = new Map(backup.attachments.map((attachment) => [attachment.id, randomUuid()]))
   const { categories, mapping: categoryIds } = mapCategories(backup.categories, target.categories)
+  const { projects, mapping: projectIds } = mapProjects(backup.projects ?? [], target.projects ?? [])
   const { tags, mapping: tagIds } = mapTags(backup.tags, target.tags)
 
   const rewriteDocument = (source: MindMapDocument, updateTimestamp: boolean) => {
@@ -311,6 +345,8 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
     const isCopy = copiedIds.has(source.id)
     document.id = documentIdMap.get(source.id) ?? source.id
     document.categoryId = categoryIds.get(source.categoryId) ?? source.categoryId
+    // 项目库缺失时宁可回退为未归属，避免恢复后出现无法管理的悬空项目。
+    document.projectId = source.projectId ? projectIds.get(source.projectId) ?? null : null
     if (isCopy) document.title = `${document.title}（恢复副本）`
     if (updateTimestamp) document.updatedAt = now
     for (const node of Object.values(document.nodes)) {
@@ -358,5 +394,5 @@ export function prepareWorkspaceRestore(backup: WorkspaceBackup, target: Workspa
     targetDocumentId: source.targetDocumentId ? documentIdMap.get(source.targetDocumentId) ?? source.targetDocumentId : null,
   }))
   const workflowSessions = backup.workflowSessions.map((source) => ({ ...structuredClone(source), id: randomUuid(), documentId: documentIdMap.get(source.documentId) ?? source.documentId }))
-  return { documents, versions, attachments, categories, tags, depositBatches, depositProvenance, workflowSessions, copiedDocumentCount: copiedIds.size }
+  return { documents, versions, attachments, categories, projects, tags, depositBatches, depositProvenance, workflowSessions, copiedDocumentCount: copiedIds.size }
 }

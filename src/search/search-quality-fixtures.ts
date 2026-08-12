@@ -1,7 +1,7 @@
-import { retrieveWorkspaceContext } from '../ai/workspace-retrieval'
-import { createInitialDocument, createNode } from '../domain/document.factory'
-import type { MindMapDocument } from '../domain/document.types'
-import { evaluateSearchSuite, type SearchQualityCase, type SearchQualityCategory, type SearchQualityReport } from './search-quality'
+import { retrieveWorkspaceContext } from '@/ai/workspace-retrieval'
+import { createInitialDocument, createNode } from '@/domain/document.factory'
+import type { MindMapDocument } from '@/domain/document.types'
+import { evaluateSearchSuite, type SearchQualityCase, type SearchQualityCategory, type SearchQualityReport } from '@/search/search-quality'
 
 type FixtureNode = { id: string; topic: string; note?: string }
 

@@ -1,5 +1,5 @@
-import type { MindMapDocument, MindNode } from '../domain/document.types'
-import type { MindMapCommand } from '../domain/commands'
+import type { MindMapDocument, MindNode } from '@/domain/document.types'
+import type { MindMapCommand } from '@/domain/commands'
 
 export type OutlineRow = {
   nodeId: string

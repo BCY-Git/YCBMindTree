@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import type { MindNodeClipboard } from '../../domain/commands'
-import { parseGeneratedBranch } from '../generated-branch'
+import type { MindNodeClipboard } from '@/domain/commands'
+import { parseGeneratedBranch } from '@/ai/generated-branch'
 
 export const workflowAssetKinds = ['decision-record', 'knowledge-card'] as const
 export type WorkflowAssetKind = typeof workflowAssetKinds[number]

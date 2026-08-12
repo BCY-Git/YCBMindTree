@@ -1,4 +1,4 @@
-import type { MindMapDocument, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
+import type { MindMapDocument, MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
 
 export type MindTreeTask = {
   documentId: string

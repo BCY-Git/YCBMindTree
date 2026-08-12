@@ -1,7 +1,7 @@
-import { mindMapDocumentSchema } from '../domain/document.schema'
-import { assertValidDocument } from '../domain/document.validator'
-import type { MindMapDocument } from '../domain/document.types'
-import { platformFetch } from '../platform/tauri'
+import { mindMapDocumentSchema } from '@/domain/document.schema'
+import { assertValidDocument } from '@/domain/document.validator'
+import type { MindMapDocument } from '@/domain/document.types'
+import { ApiHttpError, apiBaseUrl, createApiClient } from '@/api/http-client'
 
 const configStorageKey = 'mindtree.sync-config.v1'
 
@@ -63,69 +63,48 @@ export function saveSyncConfig(config: SyncConfig): void {
   localStorage.setItem(configStorageKey, JSON.stringify(config))
 }
 
-export function apiBaseUrl(serverUrl: string): string {
-  const base = serverUrl.trim().replace(/\/+$/, '')
-  if (!base) throw new Error('请填写同步服务地址')
-  return base.endsWith('/api/v1') ? base : `${base}/api/v1`
-}
+export { apiBaseUrl } from '@/api/http-client'
 
-async function request(config: SyncConfig, path: string, init: RequestInit): Promise<Response> {
+function request(config: SyncConfig) {
   if (!config.token.trim()) throw new Error('请填写同步 Token')
-  return platformFetch(`${apiBaseUrl(config.serverUrl)}${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${config.token.trim()}`, 'content-type': 'application/json', ...init.headers },
-  })
-}
-
-async function responseError(response: Response): Promise<Error> {
-  const body = await response.json().catch(() => null) as { error?: { message?: string } } | null
-  return new Error(body?.error?.message ?? `同步请求失败（HTTP ${response.status}）`)
+  return createApiClient(config)
 }
 
 export async function fetchRemoteDocument(config: SyncConfig, documentId: string): Promise<RemoteDocument | null> {
-  const response = await request(config, `/documents/${encodeURIComponent(documentId)}`, { method: 'GET' })
-  if (response.status === 404) return null
-  if (!response.ok) throw await responseError(response)
-  return parseRemoteRecord(await response.json())
+  try {
+    return parseRemoteRecord(await request(config).get(`/documents/${encodeURIComponent(documentId)}`))
+  } catch (error) {
+    if (error instanceof ApiHttpError && error.status === 404) return null
+    throw error
+  }
 }
 
 export async function fetchRemoteDocuments(config: SyncConfig): Promise<RemoteDocument[]> {
-  const response = await request(config, '/documents', { method: 'GET' })
-  const body = await response.json().catch(() => null) as { documents?: unknown } | null
-  if (!response.ok) throw await responseError(response)
+  const body = await request(config).get<{ documents?: unknown }>('/documents')
   if (!body || !Array.isArray(body.documents)) throw new Error('服务端返回的导图库格式无效')
   return body.documents.map(parseRemoteRecord)
 }
 
 export async function pushDocument(config: SyncConfig, document: MindMapDocument, baseVersion: number): Promise<PushResult> {
-  const response = await request(config, `/documents/${encodeURIComponent(document.id)}`, {
-    method: 'PUT',
-    body: JSON.stringify({ title: document.title, categoryId: document.categoryId, payload: document, baseVersion }),
-  })
-  const body = await response.json().catch(() => null) as { document?: unknown } | RemoteRecord | null
-  if (response.status === 409 && body && 'document' in body) return { type: 'conflict', remote: parseRemoteRecord(body.document) }
-  if (!response.ok || !body) throw await responseError(response)
-  return { type: 'saved', remote: parseRemoteRecord(body) }
+  try {
+    const body = await request(config).put<RemoteRecord>(`/documents/${encodeURIComponent(document.id)}`, { title: document.title, categoryId: document.categoryId, payload: document, baseVersion })
+    return { type: 'saved', remote: parseRemoteRecord(body) }
+  } catch (error) {
+    if (error instanceof ApiHttpError && error.status === 409 && error.body && typeof error.body === 'object' && 'document' in error.body) {
+      return { type: 'conflict', remote: parseRemoteRecord((error.body as { document: unknown }).document) }
+    }
+    throw error
+  }
 }
 
 export async function createPairingInvite(config: SyncConfig): Promise<PairingInvite> {
-  const response = await request(config, '/pairings', { method: 'POST', body: '{}' })
-  const body = await response.json().catch(() => null) as { pairingId?: unknown; secret?: unknown; expiresAt?: unknown } | null
-  if (!response.ok || !body || typeof body.pairingId !== 'string' || typeof body.secret !== 'string' || typeof body.expiresAt !== 'number') {
-    throw !response.ok ? await responseError(response) : new Error('服务端返回的配对凭据无效')
-  }
+  const body = await request(config).post<{ pairingId?: unknown; secret?: unknown; expiresAt?: unknown }>('/pairings', {})
+  if (!body || typeof body.pairingId !== 'string' || typeof body.secret !== 'string' || typeof body.expiresAt !== 'number') throw new Error('服务端返回的配对凭据无效')
   return { type: 'mindtree-pairing-v1', serverUrl: config.serverUrl.trim(), pairingId: body.pairingId, secret: body.secret, expiresAt: body.expiresAt }
 }
 
 export async function redeemPairingInvite(invite: PairingInvite): Promise<string> {
-  const response = await platformFetch(`${apiBaseUrl(invite.serverUrl)}/pairings/${encodeURIComponent(invite.pairingId)}/exchange`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ secret: invite.secret }),
-  })
-  const body = await response.json().catch(() => null) as { token?: unknown } | null
-  if (!response.ok || !body || typeof body.token !== 'string' || !body.token.trim()) {
-    throw !response.ok ? await responseError(response) : new Error('服务端未返回同步 Token')
-  }
+  const body = await createApiClient({ serverUrl: invite.serverUrl }).post<{ token?: unknown }>(`/pairings/${encodeURIComponent(invite.pairingId)}/exchange`, { secret: invite.secret })
+  if (!body || typeof body.token !== 'string' || !body.token.trim()) throw new Error('服务端未返回同步 Token')
   return body.token
 }

@@ -1,5 +1,5 @@
-import { depositAnalysisSchema } from './deposit-schema'
-import type { DepositAnalysisProposal } from './deposit-types'
+import { depositAnalysisSchema } from '@/ai/deposit/deposit-schema'
+import type { DepositAnalysisProposal } from '@/ai/deposit/deposit-types'
 
 function extractJson(content: string) {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')

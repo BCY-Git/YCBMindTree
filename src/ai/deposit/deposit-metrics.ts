@@ -1,4 +1,4 @@
-import type { DepositCandidate } from './deposit-types'
+import type { DepositCandidate } from '@/ai/deposit/deposit-types'
 
 
 export type CandidateMetricType = 'accepted' | 'ignored' | 'target-reselected' | 'modified'

@@ -10,7 +10,7 @@
  * - 子节点 x > 父节点中心 x：子节点在右侧 → source-right → target-left（默认右向）
  * - 子节点 x < 父节点中心 x：子节点在左侧 → source-left → target-right（翻转）
  */
-import type { PositionedNode } from '../layout/tree-layout'
+import type { PositionedNode } from '@/layout/tree-layout'
 
 export type TreeEdgeAnchors = {
   sourceHandle: 'source-left' | 'source-right'
