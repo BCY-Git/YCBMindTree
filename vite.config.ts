@@ -8,7 +8,7 @@
  *    - 验证上游必须是公开 HTTPS 端点（禁止 localhost/private IP / .local 域名）
  *    - 将请求转发给真实 AI 服务（携带用户的 Authorization: Bearer ... 头）
  *
- * 生产部署时需要自行配置反向代理（如 nginx）或使用云函数处理 AI 请求。
+ * 生产 Web 由 mindtree-server 的同名受限路由处理；桌面端仍使用 Tauri 原生 HTTP。
  */
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
@@ -103,6 +103,11 @@ const aiDevProxy: Plugin = {
 
 export default defineConfig({
   plugins: [react(), aiDevProxy],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
