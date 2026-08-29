@@ -32,6 +32,7 @@ export type MindNodeData = {
   hiddenDescendantCount: number
   accentColor: string
   isRelationSource: boolean
+  relationTargetState?: 'available' | 'blocked' | null
   imageAttachment?: MindNodeAttachment | null
   /** 当前画布的信息密度；只影响内容显隐，不改变布局尺寸。 */
   semanticZoomLevel: SemanticZoomLevel
@@ -200,7 +201,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
 
   return (
     <div
-      className={`mind-node mind-node--detail-${effectiveDetailLevel} mind-node--emphasis-${semanticEmphasis} mind-node--depth-${Math.min(node.depth, 4)} ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''}`}
+      className={`mind-node mind-node--detail-${effectiveDetailLevel} mind-node--emphasis-${semanticEmphasis} mind-node--depth-${Math.min(node.depth, 4)} ${node.isRoot ? 'mind-node--root' : ''} ${node.isFreeTopic ? 'mind-node--free-topic' : ''} ${node.isDropTarget ? 'is-drop-target' : ''} ${selected ? 'is-selected' : ''} ${node.isRelationSource ? 'is-relation-source' : ''} ${node.relationTargetState ? `is-relation-target-${node.relationTargetState}` : ''}`}
       style={{ '--node-accent': node.accentColor } as CSSProperties}
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
@@ -216,14 +217,13 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         autoScale
         onResizeEnd={(_, size) => dispatch({ type: 'SET_NODE_SIZE', nodeId: id, width: size.width, height: size.height })}
       />}
-      <Handle id="target-left" type="target" position={Position.Left} className="node-handle node-handle--target" style={{ top: '50%' }} isConnectable={false} />
-      <Handle id="target-right" type="target" position={Position.Right} className="node-handle node-handle--target" style={{ top: '50%' }} isConnectable={false} />
-      <Handle id="relation-target-left" type="target" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable />
-      <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable />
+      <Handle id="target-left" type="target" position={Position.Left} className="node-handle node-handle--target" style={{ top: '50%', left: 0, transform: 'translate(-50%, -50%)' }} isConnectable={false} />
+      <Handle id="target-right" type="target" position={Position.Right} className="node-handle node-handle--target" style={{ top: '50%', right: 0, transform: 'translate(50%, -50%)' }} isConnectable={false} />
+      <Handle id="relation-target-left" type="target" position={Position.Left} className="node-handle node-handle--relation node-handle--relation-target" style={{ top: '72%' }} isConnectable aria-label="关系目标" />
+      <Handle id="relation-target-right" type="target" position={Position.Right} className="node-handle node-handle--relation node-handle--relation-target" style={{ top: '72%' }} isConnectable aria-label="关系目标" />
       {node.hasChildren && (
         <button
           className={`collapse-toggle ${node.collapsed ? 'is-collapsed' : ''}`}
-          style={node.collapsed ? undefined : { right: '-13px' }}
           onClick={(event) => { event.stopPropagation(); dispatch({ type: 'TOGGLE_COLLAPSE', nodeId: id }) }}
           aria-label={node.collapsed ? `展开节点，包含 ${node.hiddenDescendantCount} 个隐藏分支` : '折叠节点'}
         >
@@ -310,8 +310,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         type="source"
         position={Position.Left}
         className="node-handle node-handle--source"
-        // 自定义的缩放动画不能覆盖 React Flow 的锚点位移，否则连线会缩进卡片内部。
-        style={{ top: '50%', transform: 'translate(-50%, -50%)' }}
+        // 树枝从节点边框的几何中点出发，不使用 React Flow 默认的 4px 外偏。
+        style={{ top: '50%', left: 0, transform: 'translate(-50%, -50%)' }}
         isConnectable={false}
       />
       <Handle
@@ -319,12 +319,12 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         type="source"
         position={Position.Right}
         className="node-handle node-handle--source"
-        // 原生贝塞尔树枝的起点外移 4px；展开按钮覆盖该交汇锚点，但不改变曲线路径。
-        style={{ top: '50%', right: node.hasChildren ? '-4px' : undefined, transform: 'translate(50%, -50%)' }}
+        // 折叠圆钮以同一锚点为圆心覆盖在树枝上，连线会从圆钮下方连续穿出。
+        style={{ top: '50%', right: 0, transform: 'translate(50%, -50%)' }}
         isConnectable={false}
       />
-      <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
-      <Handle id="relation-source-right" type="source" position={Position.Right} className="node-handle node-handle--relation" style={{ top: '28%' }} isConnectable={false} />
+      <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation node-handle--relation-source" style={{ top: '28%', opacity: selected || isHovering ? 1 : undefined }} isConnectable aria-label="拖动建立关系" title="拖动到另一个节点建立关系" />
+      <Handle id="relation-source-right" type="source" position={Position.Right} className="node-handle node-handle--relation node-handle--relation-source" style={{ top: '28%', opacity: selected || isHovering ? 1 : undefined }} isConnectable aria-label="拖动建立关系" title="拖动到另一个节点建立关系" />
     </div>
   )
 })

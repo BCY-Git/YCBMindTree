@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@ts-piagent/agent": ["./packages/piagent-agent/src/index.ts"],
+      "@ts-piagent/openai-provider": ["./packages/piagent-openai-provider/src/index.ts"],
+      "@ts-piagent/session": ["./packages/piagent-session/src/index.ts"],
+      "@ts-piagent/protocol": ["./packages/piagent-protocol/src/index.ts"]
+    }
+  }
+}

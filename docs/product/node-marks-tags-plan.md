@@ -66,7 +66,7 @@ marks: z.array(z.enum(['flag','star','risk','idea'])).default([]),
 tagIds: z.array(z.string()).default([]),
 ```
 
-服务端 `server/src/mindmap-document.ts` 的 `nodeSchema` 同步加这两个字段（同样 default），保持前后端校验一致。
+服务端 `apps/mindtree-server/src/mindmap-document.ts` 的 `nodeSchema` 同步加这两个字段（同样 default），保持前后端校验一致。
 
 ## 4. 实施阶段
 
@@ -76,7 +76,7 @@ tagIds: z.array(z.string()).default([]),
 ### 阶段 0：数据模型与 schema
 
 - `document.types.ts` 加 `NodeMark`、`marks`、`tagIds`。
-- `document.schema.ts` + `server/src/mindmap-document.ts` 加字段（default）。
+- `document.schema.ts` + `apps/mindtree-server/src/mindmap-document.ts` 加字段（default）。
 - `document.factory.ts` 的 `createNode` 初始化 `marks: []`、`tagIds: []`。
 - **验收**：`tsc` 过；旧文档（无新字段）经 Zod 解析后自动补 `[]`；`assertValidDocument` 不受影响。
 
@@ -135,7 +135,7 @@ tagIds: z.array(z.string()).default([]),
 | 层 | 文件 | 改动 |
 |---|---|---|
 | 类型 | `src/domain/document.types.ts` | `NodeMark`、`marks`、`tagIds` |
-| 校验 | `src/domain/document.schema.ts`、`server/src/mindmap-document.ts` | 新字段 default |
+| 校验 | `src/domain/document.schema.ts`、`apps/mindtree-server/src/mindmap-document.ts` | 新字段 default |
 | 工厂 | `src/domain/document.factory.ts` | 初始化新字段 |
 | 命令 | `src/domain/commands.ts` | `TOGGLE_NODE_MARK`、`SET_NODE_TAGS`（+ 测试） |
 | 标签库 | `src/domain/tag-library.ts`（新） | 全局标签 CRUD |

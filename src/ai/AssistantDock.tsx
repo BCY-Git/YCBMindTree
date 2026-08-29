@@ -1,6 +1,9 @@
 import { useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { Cross2Icon, MagicWandIcon } from '@radix-ui/react-icons'
 
+export type AssistantTab = 'chat' | 'deposit' | 'history'
+export type AssistantContextScope = 'selection' | 'document' | 'project' | 'workspace'
+
 export const assistantDockLimits = { min: 300, max: 520, default: 360 } as const
 const assistantDockOpenKey = 'mindtree.assistant-dock-open.v1'
 const assistantDockWidthKey = 'mindtree.assistant-dock-width.v1'
@@ -37,10 +40,19 @@ type AssistantDockProps = {
   onWidthChange: (width: number) => void
   onWidthCommit: (width: number) => void
   onClose: () => void
+  title?: string
+  subtitle?: string
+  activeTab?: AssistantTab
+  onTabChange?: (tab: AssistantTab) => void
+  contextScope?: AssistantContextScope
+  onContextScopeChange?: (scope: AssistantContextScope) => void
+  hasSelection?: boolean
+  hasProject?: boolean
+  pendingCount?: number
   children: ReactNode
 }
 
-export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, children }: AssistantDockProps) {
+export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, title = 'AI 助手', subtitle = '当前导图', activeTab = 'chat', onTabChange, contextScope = 'selection', onContextScopeChange, hasSelection = false, hasProject = false, pendingCount = 0, children }: AssistantDockProps) {
   const dragRef = useRef<{ startX: number; startWidth: number; currentWidth: number } | null>(null)
 
   const resizeByKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -73,7 +85,9 @@ export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, ch
 
   return <aside className="assistant-dock" aria-label="AI 助手面板">
     <div className="assistant-dock__resize" role="separator" aria-label="调整 AI 助手宽度" aria-orientation="vertical" aria-valuemin={assistantDockLimits.min} aria-valuemax={assistantDockLimits.max} aria-valuenow={width} tabIndex={0} onKeyDown={resizeByKeyboard} onPointerDown={beginResize} onPointerMove={continueResize} onPointerUp={finishResize} onPointerCancel={finishResize} />
-    <header className="assistant-dock__header"><span><i><MagicWandIcon /></i><strong>AI 助手</strong><small>协作与 API 配置</small></span><button onClick={onClose} aria-label="收起 AI 助手"><Cross2Icon /></button></header>
+    <header className="assistant-dock__header"><span><i><MagicWandIcon /></i><strong>{title}</strong><small>{subtitle}</small></span><button onClick={onClose} aria-label="收起 AI 助手"><Cross2Icon /></button></header>
+    {onTabChange && <nav className="assistant-dock__tabs" aria-label="AI 助手功能"><button type="button" className={activeTab === 'chat' ? 'is-active' : ''} onClick={() => onTabChange('chat')}>对话</button><button type="button" className={activeTab === 'deposit' ? 'is-active' : ''} onClick={() => onTabChange('deposit')}>待沉淀{pendingCount > 0 && <small>{pendingCount}</small>}</button><button type="button" className={activeTab === 'history' ? 'is-active' : ''} onClick={() => onTabChange('history')}>历史</button></nav>}
+    {onContextScopeChange && activeTab === 'chat' && <div className="assistant-dock__context"><span>上下文</span><div>{hasSelection && <button type="button" className={contextScope === 'selection' ? 'is-active' : ''} onClick={() => onContextScopeChange('selection')}>当前节点</button>}<button type="button" className={contextScope === 'document' ? 'is-active' : ''} onClick={() => onContextScopeChange('document')}>当前导图</button>{hasProject && <button type="button" className={contextScope === 'project' ? 'is-active' : ''} onClick={() => onContextScopeChange('project')}>当前项目</button>}<button type="button" className={contextScope === 'workspace' ? 'is-active' : ''} onClick={() => onContextScopeChange('workspace')}>知识库</button></div></div>}
     <div className="assistant-dock__body">{children}</div>
   </aside>
 }

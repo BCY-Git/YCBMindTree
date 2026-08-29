@@ -12,15 +12,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { MindMapCanvas } from '../editor/MindMapCanvas'
-import { deleteLocalDocument, deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositBatches, listAllDepositProvenance, listAllDocumentVersions, listAllWorkflowSessions, listDocumentVersions, listDocuments, listStoredAttachments, loadLatestDocument, pruneStoredAttachmentsForDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata, setDepositBatchAppliedState } from '../persistence/database'
+import { deleteLocalDocument, deleteSyncMetadata, getNodeAttachment, getSyncMetadata, listAllDepositBatches, listAllDepositProvenance, listAllDocumentVersions, listAllWorkflowSessions, listDocumentVersions, listDocuments, listStoredAttachments, loadDocument, loadLatestDocument, pruneStoredAttachmentsForDocument, restoreWorkspaceData, saveDocument, saveDocumentVersion, saveNodeAttachment, saveSyncMetadata, setDepositBatchAppliedState } from '../persistence/database'
 import { readImagePresentation } from '../attachments/image-presentation'
 import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
-import { AssistantDock, AssistantDockToggleButton, loadAssistantDockOpen, loadAssistantDockWidth, saveAssistantDockOpen, saveAssistantDockWidth } from '../ai/AssistantDock'
+import { AssistantDock, AssistantDockToggleButton, loadAssistantDockOpen, loadAssistantDockWidth, saveAssistantDockOpen, saveAssistantDockWidth, type AssistantContextScope, type AssistantTab } from '../ai/AssistantDock'
 import { depositNudgeReason, shouldShowDepositNudge } from '../ai/deposit/deposit-nudge'
-import { DraftDocumentItem } from './DraftDocumentItem'
-import type { MindMapDocument, NodeMark } from '../domain/document.types'
+import { WorkspaceNavigator } from './WorkspaceNavigator'
+import { documentKindLabels, documentKinds, type DocumentKind, type MindMapDocument, type NodeMark } from '../domain/document.types'
 import { SyncDialog } from '../sync/SyncDialog'
 import { createPairingInvite, fetchRemoteDocument, fetchRemoteDocuments, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
 import { isUntouchedStarterDocument, synchronizeAccountLibrary } from '../sync/account-library'
@@ -57,9 +57,10 @@ import { DesktopUtilityMenu } from './DesktopUtilityMenu'
 import { buildProjectStatus } from '../projects/project-status'
 import { PlanCenterDialog } from '../projects/PlanCenterDialog'
 import { createProject, loadProjects, saveProjects, type WorkspaceProject } from '../projects/project-library'
+import { ProjectOverviewDialog } from '../projects/ProjectOverviewDialog'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 import type { WorkflowSession } from '../ai/workflow/workflow-types'
-import { DashboardIcon, EnterIcon, FileTextIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
+import { EnterIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -77,11 +78,14 @@ function BoundaryIcon() {
 type Category = { id: string; name: string }
 type PendingNavigation =
   | { kind: 'open'; document: MindMapDocument }
-  | { kind: 'new-map'; projectId: string | null }
+  | { kind: 'new-map'; projectId: string | null; documentKind: DocumentKind }
   | { kind: 'quick-note' }
 
 type InspectorTab = 'content' | 'tasks' | 'resources' | 'project' | 'map'
 type UniversalImportCandidate = ImportedDocument & { format: 'OPML' | 'Markdown' }
+type ExternalDocumentChange = { documentId: string; title: string; updatedAt: number }
+
+const documentBroadcastChannelName = 'mindtree.document-saves.v1'
 
 function toggleValue<T>(values: T[], value: T) {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value]
@@ -130,17 +134,16 @@ export function App() {
   const clipboard = useEditorStore((state) => state.clipboard)
   const [documents, setDocuments] = useState<MindMapDocument[]>([])
   const [categories, setCategories] = useState<Category[]>(loadCategories)
-  const [activeCategoryId, setActiveCategoryId] = useState('all')
   const [projects, setProjects] = useState<WorkspaceProject[]>(loadProjects)
-  const [activeProjectId, setActiveProjectId] = useState<'all' | 'unassigned' | string>('all')
   const [projectCreateOpen, setProjectCreateOpen] = useState(false)
   const [projectNameDraft, setProjectNameDraft] = useState('')
   const [projectDescriptionDraft, setProjectDescriptionDraft] = useState('')
+  const [projectRenameTarget, setProjectRenameTarget] = useState<WorkspaceProject | null>(null)
+  const [projectRenameDraft, setProjectRenameDraft] = useState('')
+  const [documentRenameTarget, setDocumentRenameTarget] = useState<MindMapDocument | null>(null)
+  const [documentRenameDraft, setDocumentRenameDraft] = useState('')
   const [planCenterOpen, setPlanCenterOpen] = useState(false)
-  const [categoryDraft, setCategoryDraft] = useState('')
-  const [showCategoryInput, setShowCategoryInput] = useState(false)
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
-  const [editingCategoryName, setEditingCategoryName] = useState('')
+  const [projectOverviewId, setProjectOverviewId] = useState<string | null>(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [accountSession, setAccountSession] = useState<AuthSession | null>(loadAccountSession)
@@ -150,6 +153,8 @@ export function App() {
     return stored === null ? true : stored === 'true'
   })
   const [assistantOpen, setAssistantOpen] = useState(loadAssistantDockOpen)
+  const [assistantTab, setAssistantTab] = useState<AssistantTab>('chat')
+  const [assistantContextScope, setAssistantContextScope] = useState<AssistantContextScope>('selection')
   const [mobilePanel, setMobilePanel] = useState<'navigation' | 'inspector' | null>(null)
   const [assistantDockWidth, setAssistantDockWidth] = useState(loadAssistantDockWidth)
   const [assistantDepositRequestId, setAssistantDepositRequestId] = useState(0)
@@ -184,6 +189,8 @@ export function App() {
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
   const [presentationStartNodeId, setPresentationStartNodeId] = useState<string | null>(null)
   const [localSaveStatus, setLocalSaveStatus] = useState<string | null>(null)
+  const [persistenceError, setPersistenceError] = useState<string | null>(null)
+  const [externalDocumentChange, setExternalDocumentChange] = useState<ExternalDocumentChange | null>(null)
   const [importCandidate, setImportCandidate] = useState<MindMapDocument | null>(null)
   const [universalImportCandidate, setUniversalImportCandidate] = useState<UniversalImportCandidate | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
@@ -203,6 +210,8 @@ export function App() {
   const importInputRef = useRef<HTMLInputElement>(null)
   const workspaceBackupInputRef = useRef<HTMLInputElement>(null)
   const pendingNodeFocusRef = useRef<{ documentId: string; nodeId: string } | null>(null)
+  const documentBroadcastRef = useRef<BroadcastChannel | null>(null)
+  const tabIdRef = useRef(randomUuid())
   const selectedNode = selectedNodeId ? document.nodes[selectedNodeId] : null
   const hasDepositNudge = useMemo(() => !assistantOpen && shouldShowDepositNudge(document.id) && Boolean(depositNudgeReason(document, selectedNodeId ?? document.rootId)), [assistantOpen, document, selectedNodeId])
   const projectStatus = useMemo(() => selectedNode ? buildProjectStatus({ document, rootNodeId: selectedNode.id, ...projectStatusData }) : null, [document, projectStatusData, selectedNode])
@@ -219,27 +228,15 @@ export function App() {
   const selectedRelation = selectedRelationId ? document.relations.find((relation) => relation.id === selectedRelationId) ?? null : null
   const theme = getTheme(document.theme.id)
   const libraryDocuments = useMemo(() => documents.filter((item) => !isBackgroundBackup(item)), [documents])
-  const draftDocuments = useMemo(() => libraryDocuments.filter((item) => item.isDraft), [libraryDocuments])
   const savedDocuments = useMemo(() => libraryDocuments.filter((item) => !item.isDraft), [libraryDocuments])
-  const visibleDocuments = useMemo(() => savedDocuments.filter((item) => {
-    const categoryMatches = activeCategoryId === 'all' || item.categoryId === activeCategoryId
-    const projectMatches = activeProjectId === 'all' || (activeProjectId === 'unassigned' ? item.projectId === null : item.projectId === activeProjectId)
-    return categoryMatches && projectMatches
-  }), [activeCategoryId, activeProjectId, savedDocuments])
-  const matchingDocuments = useMemo(() => {
-    const query = documentQuery.trim().toLocaleLowerCase()
-    return query ? visibleDocuments.filter((item) => item.title.toLocaleLowerCase().includes(query)) : visibleDocuments
-  }, [documentQuery, visibleDocuments])
-  const matchingDrafts = useMemo(() => {
-    const query = documentQuery.trim().toLocaleLowerCase()
-    return query ? draftDocuments.filter((item) => item.title.toLocaleLowerCase().includes(query)) : draftDocuments
-  }, [documentQuery, draftDocuments])
   const workspaceBackupCollisions = useMemo(() => workspaceBackupCandidate
     ? workspaceBackupCandidate.documents.filter((candidate) => documents.some((item) => item.id === candidate.id)).length
     : 0, [documents, workspaceBackupCandidate])
-  const categoryName = (id: string) => categories.find((category) => category.id === id)?.name ?? '未分类'
-  const projectName = (id: string | null) => id ? projects.find((project) => project.id === id)?.name ?? '项目已移除' : '未归属项目'
   const taskDocuments = useMemo(() => [document, ...libraryDocuments.filter((item) => item.id !== document.id)], [document, libraryDocuments])
+  const pendingDepositDocumentIds = useMemo(() => new Set(projectStatusData.batches.filter((batch) => batch.status === 'pending' && batch.candidates.some((candidate) => candidate.status === 'pending' || candidate.status === 'accepted')).map((batch) => batch.sourceDocumentId)), [projectStatusData.batches])
+  const currentPendingDepositCount = useMemo(() => projectStatusData.batches.filter((batch) => batch.sourceDocumentId === document.id && batch.status === 'pending').reduce((count, batch) => count + batch.candidates.filter((candidate) => candidate.status === 'pending' || candidate.status === 'accepted').length, 0), [document.id, projectStatusData.batches])
+  const currentProject = useMemo(() => projects.find((project) => project.id === document.projectId) ?? null, [document.projectId, projects])
+  const projectOverview = useMemo(() => projects.find((project) => project.id === projectOverviewId) ?? null, [projectOverviewId, projects])
   const tasks = useMemo(() => collectTasks(taskDocuments), [taskDocuments])
   const openTaskCount = useMemo(() => tasks.filter((task) => task.status !== 'done').length, [tasks])
   const tagReferenceCount = (tagId: string) => taskDocuments.reduce((count, item) => count + Object.values(item.nodes).filter((node) => node.tagIds.includes(tagId)).length, 0)
@@ -252,6 +249,7 @@ export function App() {
   /** 这是用户从项目状态页发起的明确动作：打开 AI 并分析当前选中分支。 */
   const startDepositForSelectedBranch = () => {
     setAssistantOpen(true)
+    setAssistantTab('deposit')
     saveAssistantDockOpen(true)
     setAssistantDepositRequestId((current) => current + 1)
   }
@@ -263,6 +261,10 @@ export function App() {
   }, [])
 
   useEffect(() => { setFocusedNodeId(null) }, [document.id])
+  useEffect(() => {
+    if (!selectedNodeId && assistantContextScope === 'selection') setAssistantContextScope('document')
+    if (!document.projectId && assistantContextScope === 'project') setAssistantContextScope(selectedNodeId ? 'selection' : 'document')
+  }, [assistantContextScope, document.projectId, selectedNodeId])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -408,18 +410,6 @@ export function App() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
-  const addCategory = () => {
-    const name = categoryDraft.trim()
-    if (!name) return
-    const category = { id: `category-${randomUuid()}`, name }
-    const next = [...categories, category]
-    setCategories(next)
-    saveCategories(next)
-    setCategoryDraft('')
-    setShowCategoryInput(false)
-    setActiveCategoryId(category.id)
-  }
-
   const addProject = () => {
     const name = projectNameDraft.trim()
     if (!name) return
@@ -427,44 +417,9 @@ export function App() {
     const next = [project, ...projects]
     setProjects(next)
     saveProjects(next)
-    setActiveProjectId(project.id)
     setProjectNameDraft('')
     setProjectDescriptionDraft('')
     setProjectCreateOpen(false)
-  }
-
-  const beginCategoryEdit = (category: Category) => {
-    setEditingCategoryId(category.id)
-    setEditingCategoryName(category.name)
-  }
-
-  const renameCategory = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const name = editingCategoryName.trim()
-    if (!editingCategoryId || !name) return
-    const next = categories.map((category) => category.id === editingCategoryId ? { ...category, name } : category)
-    setCategories(next)
-    saveCategories(next)
-    setEditingCategoryId(null)
-  }
-
-  const deleteCategory = async (categoryId: string) => {
-    if (categoryId === 'uncategorized') return
-    const affected = documents.filter((item) => item.categoryId === categoryId)
-    const now = Date.now()
-    const reassigned = affected.map((item) => ({ ...item, categoryId: 'uncategorized', updatedAt: now }))
-    try {
-      await Promise.all(reassigned.map((item) => saveDocument(item)))
-      setDocuments((current) => current.map((item) => reassigned.find((next) => next.id === item.id) ?? item))
-      if (document.categoryId === categoryId) dispatch({ type: 'SET_CATEGORY', categoryId: 'uncategorized' })
-      const next = categories.filter((category) => category.id !== categoryId)
-      setCategories(next)
-      saveCategories(next)
-      setActiveCategoryId((current) => current === categoryId ? 'uncategorized' : current)
-      setEditingCategoryId(null)
-    } catch {
-      // IndexedDB 写入失败时保留当前分类，避免导图与分类列表脱节。
-    }
   }
 
   const toggleSidebar = () => {
@@ -514,11 +469,162 @@ export function App() {
 
   const persistDocument = useCallback(async (documentToSave: MindMapDocument) => {
     if (deletedDocumentIdsRef.current.has(documentToSave.id)) return
-    await saveDocument(documentToSave)
-    await pruneStoredAttachmentsForDocument(documentToSave)
-    setDocuments((current) => [documentToSave, ...current.filter((item) => item.id !== documentToSave.id)]
-      .sort((left, right) => right.updatedAt - left.updatedAt))
+    try {
+      await saveDocument(documentToSave)
+      await pruneStoredAttachmentsForDocument(documentToSave)
+      setDocuments((current) => [documentToSave, ...current.filter((item) => item.id !== documentToSave.id)]
+        .sort((left, right) => right.updatedAt - left.updatedAt))
+      setPersistenceError(null)
+      documentBroadcastRef.current?.postMessage({
+        type: 'document-saved',
+        senderId: tabIdRef.current,
+        documentId: documentToSave.id,
+        title: documentToSave.title,
+        updatedAt: documentToSave.updatedAt,
+      })
+    } catch (error) {
+      console.error('MindTree 本地保存失败', error)
+      setPersistenceError('本地自动保存失败：请先导出导图或工作区备份；浏览器存储可能不可用或已满。')
+      throw error
+    }
   }, [])
+
+  // IndexedDB 的写入不会触发 localStorage 的 storage 事件，因此跨窗口编辑使用
+  // BroadcastChannel 显式通知。只提示同一份、且确实更新的导图，不自动覆盖当前编辑。
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return
+    const channel = new BroadcastChannel(documentBroadcastChannelName)
+    documentBroadcastRef.current = channel
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      const message = event.data
+      if (!message || typeof message !== 'object') return
+      const data = message as Partial<ExternalDocumentChange & { type: string; senderId: string }>
+      if (data.type !== 'document-saved' || data.senderId === tabIdRef.current
+        || typeof data.documentId !== 'string' || typeof data.title !== 'string' || typeof data.updatedAt !== 'number') return
+      const active = useEditorStore.getState().document
+      if (active.id !== data.documentId || data.updatedAt <= active.updatedAt) return
+      setExternalDocumentChange({ documentId: data.documentId, title: data.title, updatedAt: data.updatedAt })
+    }
+    return () => {
+      documentBroadcastRef.current = null
+      channel.close()
+    }
+  }, [])
+
+  const togglePinnedDocument = useCallback((target: MindMapDocument) => {
+    if (target.isDraft) return
+    if (target.id === useEditorStore.getState().document.id) {
+      dispatch({ type: 'SET_PINNED', pinned: !target.pinned })
+      return
+    }
+    void persistDocument({ ...target, pinned: !target.pinned, updatedAt: Date.now() }).catch(() => {
+      window.alert('无法更新导图置顶状态，请重试。')
+    })
+  }, [dispatch, persistDocument])
+
+  const assignDocumentToProject = useCallback((target: MindMapDocument, projectId: string | null) => {
+    if (target.id === useEditorStore.getState().document.id) {
+      dispatch({ type: 'SET_PROJECT', projectId })
+      return
+    }
+    void persistDocument({ ...target, projectId, updatedAt: Date.now() }).catch(() => {
+      window.alert('无法更新导图归属项目，请重试。')
+    })
+  }, [dispatch, persistDocument])
+
+  const setDocumentKind = useCallback((target: MindMapDocument, kind: DocumentKind) => {
+    if (target.id === useEditorStore.getState().document.id) {
+      dispatch({ type: 'SET_DOCUMENT_KIND', kind })
+      return
+    }
+    void persistDocument({ ...target, kind, updatedAt: Date.now() }).catch(() => window.alert('无法更新内容类型，请重试。'))
+  }, [dispatch, persistDocument])
+
+  const openDocumentRename = useCallback((target: MindMapDocument) => {
+    if (target.isDraft) return
+    setDocumentRenameTarget(target)
+    setDocumentRenameDraft(target.title)
+  }, [])
+
+  const saveDocumentRename = useCallback(() => {
+    const target = documentRenameTarget
+    const title = documentRenameDraft.trim()
+    if (!target || !title) return
+    if (target.id === useEditorStore.getState().document.id) {
+      dispatch({ type: 'RENAME_DOCUMENT', title })
+    } else {
+      void persistDocument({ ...target, title, updatedAt: Date.now() }).catch(() => window.alert('无法重命名导图，请重试。'))
+    }
+    setDocumentRenameTarget(null)
+    setDocumentRenameDraft('')
+  }, [dispatch, documentRenameDraft, documentRenameTarget, persistDocument])
+
+  const deleteSavedDocument = useCallback(async (target: MindMapDocument) => {
+    if (target.isDraft || !window.confirm(`删除导图“${target.title}”？\n\n导图、附件和历史版本将从本机永久删除。`)) return
+    const deletingCurrent = target.id === useEditorStore.getState().document.id
+    deletedDocumentIdsRef.current.add(target.id)
+    if (deletingCurrent) {
+      if (pendingSaveRef.current !== null) window.clearTimeout(pendingSaveRef.current)
+      if (pendingSnapshotRef.current !== null) window.clearTimeout(pendingSnapshotRef.current)
+      pendingSaveRef.current = null
+      pendingSnapshotRef.current = null
+    }
+    try {
+      await deleteLocalDocument(target.id)
+    } catch (error) {
+      deletedDocumentIdsRef.current.delete(target.id)
+      if (deletingCurrent) await persistDocument(useEditorStore.getState().document).catch(console.warn)
+      window.alert(error instanceof Error ? `删除失败：${error.message}` : '删除失败，请重试。')
+      return
+    }
+    const remaining = documents.filter((item) => item.id !== target.id)
+    setDocuments(remaining)
+    if (!deletingCurrent) return
+    observedVersionRef.current = null
+    const next = remaining.find((item) => !isBackgroundBackup(item))
+    if (next) hydrate(next)
+    else createDocument()
+  }, [createDocument, documents, hydrate, persistDocument])
+
+  const openProjectRename = useCallback((project: WorkspaceProject) => {
+    setProjectRenameTarget(project)
+    setProjectRenameDraft(project.name)
+  }, [])
+
+  const saveProjectRename = useCallback(() => {
+    const target = projectRenameTarget
+    const name = projectRenameDraft.trim()
+    if (!target || !name) return
+    const next = projects.map((project) => project.id === target.id ? { ...project, name, updatedAt: Date.now() } : project)
+    setProjects(next)
+    saveProjects(next)
+    setProjectRenameTarget(null)
+    setProjectRenameDraft('')
+  }, [projectRenameDraft, projectRenameTarget, projects])
+
+  const updateProject = useCallback((target: WorkspaceProject, patch: Partial<WorkspaceProject>) => {
+    const next = projects.map((project) => project.id === target.id ? { ...project, ...patch, id: project.id, updatedAt: Date.now() } : project)
+    setProjects(next)
+    saveProjects(next)
+  }, [projects])
+
+  const deleteProject = useCallback(async (target: WorkspaceProject) => {
+    const count = documents.filter((item) => item.projectId === target.id).length
+    if (!window.confirm(`删除项目“${target.name}”？\n\n其中 ${count} 张导图与记录会保留，并自动回到“未归属导图”。`)) return
+    try {
+      await persistDocument(useEditorStore.getState().document)
+      const stored = await listDocuments()
+      const migrated = stored.filter((item) => item.projectId === target.id).map((item) => ({ ...item, projectId: null, updatedAt: Date.now() }))
+      await Promise.all(migrated.map((item) => saveDocument(item)))
+      const nextProjects = projects.filter((project) => project.id !== target.id)
+      setProjects(nextProjects)
+      saveProjects(nextProjects)
+      setDocuments((current) => current.map((item) => item.projectId === target.id ? { ...item, projectId: null, updatedAt: Date.now() } : item))
+      if (useEditorStore.getState().document.projectId === target.id) dispatch({ type: 'SET_PROJECT', projectId: null })
+    } catch (error) {
+      window.alert(error instanceof Error ? `删除项目失败：${error.message}` : '删除项目失败，请重试。')
+    }
+  }, [dispatch, documents, persistDocument, projects])
 
   const adoptWorkspaceDocuments = useCallback((updatedDocuments: MindMapDocument[]) => {
     setDocuments((current) => [...updatedDocuments, ...current.filter((item) => !updatedDocuments.some((updated) => updated.id === item.id))]
@@ -538,6 +644,32 @@ export function App() {
     }
     await persistDocument(useEditorStore.getState().document)
   }, [hydrated, persistDocument])
+
+  const loadExternalDocumentChange = useCallback(async () => {
+    const change = externalDocumentChange
+    if (!change) return
+    const current = useEditorStore.getState().document
+    if (current.id !== change.documentId) {
+      setExternalDocumentChange(null)
+      return
+    }
+    try {
+      // 绝不先把当前内存内容写回 documents 表：那会覆盖另一个窗口的更新。
+      // 先作为独立版本保存，成功后才载入对方已落盘的版本。
+      await saveDocumentVersion(createDocumentVersion(current, 'restore-point', '跨窗口更新前备份'))
+      const latest = await loadDocument(change.documentId)
+      if (!latest || latest.updatedAt < change.updatedAt) throw new Error('另一窗口的新版本尚未完成写入，请稍后重试。')
+      observedVersionRef.current = { documentId: latest.id, updatedAt: latest.updatedAt }
+      hydrate(latest)
+      setDocuments((items) => [latest, ...items.filter((item) => item.id !== latest.id)]
+        .sort((left, right) => right.updatedAt - left.updatedAt))
+      setExternalDocumentChange(null)
+      setLocalSaveStatus('已载入另一窗口的最新版本；原内容已保存到版本历史。')
+    } catch (error) {
+      console.error('载入另一窗口的导图失败', error)
+      setPersistenceError(error instanceof Error ? `无法安全载入另一窗口版本：${error.message}` : '无法安全载入另一窗口版本，请稍后重试。')
+    }
+  }, [externalDocumentChange, hydrate])
 
   const saveCurrentToLocalFile = useCallback(async () => {
     // 必须在快捷键/点击的同步用户手势中立即打开选择框；若先 await IndexedDB，
@@ -743,12 +875,11 @@ export function App() {
     if (navigation.kind === 'open') hydrate(navigation.document)
     if (navigation.kind === 'new-map') {
       createDocument()
-      setActiveCategoryId('uncategorized')
       if (navigation.projectId) dispatch({ type: 'SET_PROJECT', projectId: navigation.projectId })
+      dispatch({ type: 'SET_DOCUMENT_KIND', kind: navigation.documentKind })
     }
     if (navigation.kind === 'quick-note') {
       createQuickNote()
-      setActiveCategoryId('all')
     }
   }, [createDocument, createQuickNote, dispatch, flushCurrentDocument, hydrate])
 
@@ -767,7 +898,7 @@ export function App() {
     if (nextDocument.id !== document.id) requestNavigation({ kind: 'open', document: nextDocument })
   }, [document.id, requestNavigation])
 
-  const startNewDocument = useCallback((projectId: string | null = activeProjectId === 'all' || activeProjectId === 'unassigned' ? null : activeProjectId) => requestNavigation({ kind: 'new-map', projectId }), [activeProjectId, requestNavigation])
+  const startNewDocument = useCallback((projectId: string | null = null, documentKind: DocumentKind = 'map') => requestNavigation({ kind: 'new-map', projectId, documentKind }), [requestNavigation])
   const startQuickNote = useCallback(() => requestNavigation({ kind: 'quick-note' }), [requestNavigation])
 
   const deleteQuickNote = useCallback(async (draft: MindMapDocument, navigationAfterDelete: PendingNavigation | null = null) => {
@@ -910,6 +1041,8 @@ export function App() {
   }, [])
 
   const syncAccountLibrary = useCallback(async (config: SyncConfig) => {
+    const accountId = accountSession?.user.id
+    if (!accountId) return
     setSyncStatus('正在同步账号导图库…')
     const activeDocument = useEditorStore.getState().document
     const result = await synchronizeAccountLibrary(config, {
@@ -919,18 +1052,19 @@ export function App() {
       saveLocalDocument: saveDocument,
       saveMetadata: saveSyncMetadata,
       pushLocalDocument: pushDocument,
-    })
+    }, accountId)
     setDocuments(result.documents)
     if (result.preferredDocument && isUntouchedStarterDocument(activeDocument)) hydrate(result.preferredDocument)
     const completed = [
       result.imported ? `拉取 ${result.imported} 份` : '',
       result.updated ? `更新 ${result.updated} 份` : '',
       result.uploaded ? `上传 ${result.uploaded} 份` : '',
+      result.protected ? `隔离保护 ${result.protected} 份其他账号资料` : '',
     ].filter(Boolean).join('，')
     setSyncStatus(result.conflicts
       ? `${completed || '导图库已检查'}；${result.conflicts} 份存在两端修改，已保留本地版本。`
       : completed ? `账号导图库同步完成：${completed}。` : '账号导图库已是最新状态。')
-  }, [hydrate])
+  }, [accountSession?.user.id, hydrate])
 
   const authenticateAccount = useCallback(async (mode: 'login' | 'register', email: string, password: string) => {
     const session = mode === 'login'
@@ -963,13 +1097,17 @@ export function App() {
       saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
       await flushCurrentDocument()
       const metadata = await getSyncMetadata(document.id)
+      if (accountSession && metadata && metadata.accountId !== accountSession.user.id) {
+        setSyncStatus('这份导图属于其他账号或旧版归属不明，已阻止上传。请先导出副本，再决定是否导入当前账号。')
+        return
+      }
       const result = await pushDocument(config, document, metadata?.remoteVersion ?? 0)
       if (result.type === 'conflict') {
         setSyncConflict(result.remote)
         setSyncStatus('云端已有较新的版本，本地内容未被上传。')
         return
       }
-      await saveSyncMetadata({ documentId: document.id, remoteVersion: result.remote.version, syncedAt: Date.now() })
+      await saveSyncMetadata({ documentId: document.id, remoteVersion: result.remote.version, syncedAt: Date.now(), accountId: accountSession?.user.id })
       setSyncRemoteVersion(result.remote.version)
       setSyncStatus(`已上传到云端 · v${result.remote.version}`)
     } catch (error) {
@@ -977,7 +1115,7 @@ export function App() {
     } finally {
       setSyncBusy(false)
     }
-  }, [document, flushCurrentDocument, saveSyncSettings])
+  }, [accountSession, document, flushCurrentDocument, saveSyncSettings])
 
   const checkCloudVersion = useCallback(async (config: SyncConfig) => {
     if (document.isDraft) {
@@ -1025,12 +1163,12 @@ export function App() {
     const now = Date.now()
     await saveDocumentVersion(createDocumentVersion(currentDoc, 'sync-backup', '同步前备份'))
     await saveDocument(remote.payload)
-    await saveSyncMetadata({ documentId: remote.payload.id, remoteVersion: remote.version, syncedAt: now })
+    await saveSyncMetadata({ documentId: remote.payload.id, remoteVersion: remote.version, syncedAt: now, accountId: accountSession?.user.id })
     setDocuments((current) => [remote.payload, ...current.filter((item) => item.id !== remote.payload.id)]
       .sort((left, right) => right.updatedAt - left.updatedAt))
     hydrate(remote.payload)
     setSyncRemoteVersion(remote.version)
-  }, [hydrate])
+  }, [accountSession?.user.id, hydrate])
 
   const autoSyncRef = useRef(false)
   // 自动同步：打开应用或切换文档时静默检查云端。本地无未上传修改时直接拉取较新版本；
@@ -1042,6 +1180,7 @@ export function App() {
       const currentDoc = useEditorStore.getState().document
       if (currentDoc.isDraft) return
       const metadata = await getSyncMetadata(currentDoc.id)
+      if (accountSession && metadata && metadata.accountId !== accountSession.user.id) return
       const remote = await fetchRemoteDocument(config, currentDoc.id)
       if (!remote) return
       if (metadata && remote.version <= metadata.remoteVersion) return
@@ -1061,7 +1200,7 @@ export function App() {
     } finally {
       autoSyncRef.current = false
     }
-  }, [pullRemoteDocument])
+  }, [accountSession, pullRemoteDocument])
 
   const confirmCloudPull = useCallback(async () => {
     const remote = syncConflict ?? syncPreview
@@ -1305,83 +1444,38 @@ export function App() {
           <div className="sidebar-scroll">
             <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong></div>
             <div className="sidebar-quick-actions"><button onClick={() => { void startQuickNote() }} title="随手记 (⌘⇧N)"><span><LightningBoltIcon /></span>随手记</button><button onClick={() => { void startNewDocument() }} title="新建导图"><span><PlusIcon /></span>新建导图</button></div>
-            <section className="sidebar-section sidebar-section--projects" aria-label="项目">
-              <div className="sidebar-section__heading">
-                <div><p className="sidebar-section__eyebrow">组织</p><strong>项目</strong></div>
-                <button className="sidebar-section__action" onClick={() => setProjectCreateOpen(true)} title="新建项目" aria-label="新建项目"><PlusIcon /></button>
-              </div>
-              <div className="sidebar-project-list">
-                <button className={`sidebar-library-item ${activeProjectId === 'all' ? 'is-active' : ''}`} onClick={() => { setActiveProjectId('all'); setActiveCategoryId('all') }}><span><TargetIcon /></span><strong>全部项目</strong><small>{projects.length}</small></button>
-                <button className={`sidebar-library-item ${activeProjectId === 'unassigned' ? 'is-active' : ''}`} onClick={() => { setActiveProjectId('unassigned'); setActiveCategoryId('all') }}><span>○</span><strong>未归属</strong><small>{savedDocuments.filter((item) => item.projectId === null).length}</small></button>
-                {projects.map((project) => <button key={project.id} className={`sidebar-library-item ${activeProjectId === project.id ? 'is-active' : ''}`} onClick={() => { setActiveProjectId(project.id); setActiveCategoryId('all') }} title={project.description || project.name}><span>◇</span><strong>{project.name}</strong><small>{savedDocuments.filter((item) => item.projectId === project.id).length}</small></button>)}
-                {!projects.length && <p className="sidebar-project-empty">新建项目后，可把多张导图集中到同一计划中。</p>}
-              </div>
-            </section>
-            <section className="sidebar-section sidebar-section--library" aria-label="导图空间">
-              <div className="sidebar-section__heading">
-                <div><p className="sidebar-section__eyebrow">资料库</p><strong>导图空间</strong></div>
-                <button className="sidebar-section__action" onClick={() => setShowCategoryInput(true)} title="新建分类" aria-label="新建分类"><PlusIcon /></button>
-              </div>
-              <button className={`sidebar-library-item ${activeCategoryId === 'all' ? 'is-active' : ''}`} onClick={() => setActiveCategoryId('all')}><span><FileTextIcon /></span><strong>全部导图</strong><small>{savedDocuments.length}</small></button>
-              <div className="sidebar-category-list">
-                <p>分类</p>
-                {categories.map((category) => {
-                  const count = savedDocuments.filter((item) => item.categoryId === category.id).length
-                  return editingCategoryId === category.id ? <form key={category.id} className="sidebar-category-form sidebar-category-form--editing" onSubmit={renameCategory}>
-                    <input autoFocus value={editingCategoryName} onChange={(event) => setEditingCategoryName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setEditingCategoryId(null) } }} aria-label="分类名称" />
-                    <button type="submit">保存</button>{category.id !== 'uncategorized' && <button type="button" className="sidebar-category-delete" onClick={() => { void deleteCategory(category.id) }}>删除</button>}
-                  </form> : <div className="sidebar-category-row" key={category.id}>
-                    <button className={`sidebar-library-item ${activeCategoryId === category.id ? 'is-active' : ''}`} onClick={() => setActiveCategoryId(category.id)}><span><DashboardIcon /></span><strong>{category.name}</strong><small>{count}</small></button>
-                    <button className="sidebar-category-edit" type="button" onClick={() => beginCategoryEdit(category)} title={`编辑分类 ${category.name}`} aria-label={`编辑分类 ${category.name}`}>编辑</button>
-                  </div>
-                })}
-                {showCategoryInput ? (
-                  <form className="sidebar-category-form" onSubmit={(event) => { event.preventDefault(); addCategory() }}>
-                    <input autoFocus value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} placeholder="分类名称" aria-label="新分类名称" />
-                    <button type="submit">添加</button>
-                  </form>
-                ) : <button className="sidebar-add-category" onClick={() => setShowCategoryInput(true)}>＋ 新建分类</button>}
-              </div>
-            </section>
+            <WorkspaceNavigator
+              projects={projects}
+              documents={taskDocuments}
+              activeDocumentId={document.id}
+              pendingDepositDocumentIds={pendingDepositDocumentIds}
+              query={documentQuery}
+              onQueryChange={setDocumentQuery}
+              onOpenDocument={openDocument}
+              onOpenProjectOverview={(project) => setProjectOverviewId(project.id)}
+              onAssignProject={assignDocumentToProject}
+              onSetDocumentKind={setDocumentKind}
+              onTogglePinned={togglePinnedDocument}
+              onRenameDocument={openDocumentRename}
+              onDeleteDocument={(item) => { void deleteSavedDocument(item) }}
+              onDeleteDraft={(item) => { void deleteQuickNote(item) }}
+              onCreateProject={() => setProjectCreateOpen(true)}
+              openTaskCount={openTaskCount}
+              onOpenTaskCenter={() => setTaskCenterOpen(true)}
+              onRenameProject={openProjectRename}
+              onUpdateProject={updateProject}
+              onDeleteProject={(project) => { void deleteProject(project) }}
+              onCreateDocument={(projectId, kind) => { void startNewDocument(projectId, kind) }}
+              onImport={() => importInputRef.current?.click()}
+              onRestore={() => workspaceBackupInputRef.current?.click()}
+            />
 
-            <section className="sidebar-section sidebar-section--maps" aria-label="导图列表">
-              <div className="sidebar-section__heading">
-                <div><p className="sidebar-section__eyebrow">浏览</p><strong>{activeProjectId === 'all' ? (activeCategoryId === 'all' ? '全部导图' : categoryName(activeCategoryId)) : activeProjectId === 'unassigned' ? '未归属导图' : projectName(activeProjectId)}</strong></div>
-                <span className="sidebar-section__tools"><button onClick={() => importInputRef.current?.click()} title="导入 MindTree、OPML 或 Markdown 文件">导入</button><button onClick={() => workspaceBackupInputRef.current?.click()} title="恢复工作区备份">恢复</button></span>
-              </div>
-              <label className="sidebar-document-search-wrap"><MagnifyingGlassIcon /><input className="sidebar-document-search" value={documentQuery} onChange={(event) => setDocumentQuery(event.target.value)} placeholder="搜索导图或随手记…" aria-label="搜索导图" /></label>
-              {matchingDrafts.length > 0 && <div className="sidebar-panel__subgroup"><p>随手记草稿</p>{matchingDrafts.map((item) => <DraftDocumentItem key={item.id} title={item.title} active={item.id === document.id} onOpen={() => openDocument(item)} onDelete={() => { void deleteQuickNote(item) }} />)}</div>}
-              <div className="sidebar-document-list">
-                {matchingDocuments.map((item) => (
-                  <button key={item.id} className={`sidebar-document ${item.id === document.id ? 'is-active' : ''}`} onClick={() => { void openDocument(item) }}>
-                    <span className="sidebar-document__icon">◈</span><span className="sidebar-document__copy"><strong>{item.title}</strong><small>{projectName(item.projectId)} · {categoryName(item.categoryId)}</small></span>
-                  </button>
-                ))}
-              </div>
-              {!matchingDocuments.length && !matchingDrafts.length && <p className="sidebar-empty">没有匹配的导图或随手记</p>}
-              <label className="sidebar-category-select">当前导图分类
-                <select value={document.categoryId} onChange={(event) => { dispatch({ type: 'SET_CATEGORY', categoryId: event.target.value }); setActiveCategoryId(event.target.value) }}>
-                  {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                </select>
-              </label>
-              <label className="sidebar-category-select">归属项目
-                <select value={document.projectId ?? ''} onChange={(event) => dispatch({ type: 'SET_PROJECT', projectId: event.target.value || null })}>
-                  <option value="">未归属项目</option>
-                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                </select>
-              </label>
-            </section>
-
-            <section className="sidebar-section sidebar-section--plans" aria-label="计划">
-              <div className="sidebar-section__heading"><div><p className="sidebar-section__eyebrow">全局</p><strong>计划</strong></div><small>{projects.length} 个项目</small></div>
-              <button className="sidebar-plan-entry" onClick={() => setPlanCenterOpen(true)}><span>◎</span><span><strong>查看项目计划</strong><small>汇总思维树、待办与进度</small></span><i>›</i></button>
-            </section>
-
-            <section className="sidebar-section sidebar-section--tasks" aria-label="任务中心">
-              <div className="sidebar-section__heading"><div><p className="sidebar-section__eyebrow">跟进</p><strong>任务中心</strong></div><small>{openTaskCount} 项未完成</small></div>
-              <button className="sidebar-task-entry" onClick={() => setTaskCenterOpen(true)}><span>☑</span><span><strong>查看全部任务</strong><small>{openTaskCount ? '跨导图集中处理待办' : '当前没有未完成任务'}</small></span><i>›</i></button>
-            </section>
-
+            <details className="sidebar-current-organize">
+              <summary>整理当前{document.isDraft ? '记录' : '导图'}</summary>
+              <label>归属项目<select value={document.projectId ?? ''} onChange={(event) => dispatch({ type: 'SET_PROJECT', projectId: event.target.value || null })}><option value="">未归属</option>{projects.filter((project) => project.status === 'active' || project.status === 'paused').map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+              <label>内容类型<select value={document.kind} onChange={(event) => dispatch({ type: 'SET_DOCUMENT_KIND', kind: event.target.value as DocumentKind })}>{documentKinds.map((kind) => <option key={kind} value={kind}>{documentKindLabels[kind]}</option>)}</select></label>
+              <label>分类<select value={document.categoryId} onChange={(event) => dispatch({ type: 'SET_CATEGORY', categoryId: event.target.value })}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            </details>
           </div>
           <footer className="sidebar-footer">
             <button className="sidebar-footer-action" type="button"><span><GearIcon /></span>设置</button>
@@ -1406,8 +1500,8 @@ export function App() {
           </div>
         </section>
 
-        {assistantOpen && <AssistantDock width={assistantDockWidth} onWidthChange={setAssistantDockWidth} onWidthCommit={saveAssistantDockWidth} onClose={toggleAssistantDock}>
-          <AiAssistant heading="当前协作" document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} depositRequestId={assistantDepositRequestId} />
+        {assistantOpen && <AssistantDock width={assistantDockWidth} onWidthChange={setAssistantDockWidth} onWidthCommit={saveAssistantDockWidth} onClose={toggleAssistantDock} title="MindTree Agent" subtitle={currentProject ? `${currentProject.name} · ${document.title}` : document.title} activeTab={assistantTab} onTabChange={setAssistantTab} contextScope={assistantContextScope} onContextScopeChange={setAssistantContextScope} hasSelection={Boolean(selectedNodeId)} hasProject={Boolean(currentProject)} pendingCount={currentPendingDepositCount}>
+          <AiAssistant heading={assistantTab === 'chat' ? '当前协作' : assistantTab === 'deposit' ? '待沉淀' : '历史记录'} document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} onOpenDeposit={() => setAssistantTab('deposit')} depositRequestId={assistantDepositRequestId} activeTab={assistantTab} contextScope={assistantContextScope} />
         </AssistantDock>}
 
         <aside className="inspector">
@@ -1462,6 +1556,8 @@ export function App() {
         <span>{syncRemoteVersion === null ? '仅本地' : `云端 v${syncRemoteVersion}`}</span>
         {syncStatus && <span>{syncStatus}</span>}
         {localSaveStatus && <span>{localSaveStatus}</span>}
+        {persistenceError && <span className="statusbar-error" role="alert">⚠ {persistenceError}</span>}
+        {externalDocumentChange && <span className="statusbar-conflict" role="alert">另一窗口已更新「{externalDocumentChange.title}」<button onClick={() => { void loadExternalDocumentChange() }}>载入并保留当前版本</button><button onClick={() => setExternalDocumentChange(null)}>暂不处理</button></span>}
         {clipboard && <span>已复制「{clipboard.topic}」</span>}
         <span className="status-hint">建立联系后移动鼠标 · 单击已有节点或双击空白处 · 拖动关系箭头可换目标 · ⌘K 命令</span>
       </footer>
@@ -1503,9 +1599,33 @@ export function App() {
           <div className="document-import-dialog__actions"><button className="document-import-dialog__primary" type="submit" disabled={!projectNameDraft.trim()}>建立项目</button><button className="document-import-dialog__cancel" type="button" onClick={() => setProjectCreateOpen(false)}>取消</button></div>
         </form>
       </div>}
+      {projectRenameTarget && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProjectRenameTarget(null) }}>
+        <form className="project-create-dialog" role="dialog" aria-modal="true" aria-labelledby="project-rename-title" onSubmit={(event) => { event.preventDefault(); saveProjectRename() }}>
+          <p className="eyebrow">项目操作</p>
+          <h2 id="project-rename-title">重命名项目</h2>
+          <p>项目内的导图、记录及任务不会改变。</p>
+          <label>项目名称<input autoFocus value={projectRenameDraft} onChange={(event) => setProjectRenameDraft(event.target.value)} /></label>
+          <div className="document-import-dialog__actions"><button className="document-import-dialog__primary" type="submit" disabled={!projectRenameDraft.trim()}>保存名称</button><button className="document-import-dialog__cancel" type="button" onClick={() => setProjectRenameTarget(null)}>取消</button></div>
+        </form>
+      </div>}
+      {documentRenameTarget && <div className="document-import-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDocumentRenameTarget(null) }}>
+        <form className="project-create-dialog" role="dialog" aria-modal="true" aria-labelledby="document-rename-title" onSubmit={(event) => { event.preventDefault(); saveDocumentRename() }}>
+          <p className="eyebrow">导图操作</p>
+          <h2 id="document-rename-title">重命名导图</h2>
+          <p>链接、节点内容与历史版本均会保留。</p>
+          <label>导图名称<input autoFocus value={documentRenameDraft} onChange={(event) => setDocumentRenameDraft(event.target.value)} /></label>
+          <div className="document-import-dialog__actions"><button className="document-import-dialog__primary" type="submit" disabled={!documentRenameDraft.trim()}>保存名称</button><button className="document-import-dialog__cancel" type="button" onClick={() => setDocumentRenameTarget(null)}>取消</button></div>
+        </form>
+      </div>}
       {taskCenterOpen && <TaskCenterDialog tasks={tasks} tags={tags} onClose={() => setTaskCenterOpen(false)} onOpenTask={openTask} onSetStatus={(task, status) => { void updateTaskStatus(task, status) }} onSetPriority={(task, priority) => { void updateTaskPriority(task, priority) }} onSetDueDate={(task, dueDate) => { void updateTaskDueDate(task, dueDate) }} />}
-      {planCenterOpen && <PlanCenterDialog projects={projects} documents={savedDocuments} onClose={() => setPlanCenterOpen(false)} onOpenDocument={(item) => { setPlanCenterOpen(false); openDocument(item) }} onCreateDocument={(projectId) => { setPlanCenterOpen(false); void startNewDocument(projectId) }} />}
-      <QuickAssistant document={document} workspaceDocuments={taskDocuments} onOpenSettings={() => { setAssistantOpen(true); saveAssistantDockOpen(true) }} />
+      {planCenterOpen && <PlanCenterDialog projects={projects.filter((project) => project.status !== 'archived')} documents={savedDocuments} onClose={() => setPlanCenterOpen(false)} onOpenDocument={(item) => { setPlanCenterOpen(false); openDocument(item) }} onCreateDocument={(projectId) => { setPlanCenterOpen(false); void startNewDocument(projectId) }} />}
+      {projectOverview && <ProjectOverviewDialog project={projectOverview} documents={taskDocuments} pendingDepositDocumentIds={pendingDepositDocumentIds} onClose={() => setProjectOverviewId(null)} onUpdateProject={updateProject} onOpenDocument={(item) => { setProjectOverviewId(null); openDocument(item) }} onCreateDocument={(projectId, kind) => { setProjectOverviewId(null); void startNewDocument(projectId, kind) }} onOpenAgent={(project) => {
+        const projectDocument = taskDocuments.filter((item) => item.projectId === project.id).sort((left, right) => right.updatedAt - left.updatedAt)[0]
+        setProjectOverviewId(null)
+        if (projectDocument && projectDocument.id !== document.id) openDocument(projectDocument)
+        setAssistantTab('chat'); setAssistantContextScope('project'); setAssistantOpen(true); saveAssistantDockOpen(true)
+      }} />}
+      {!assistantOpen && <QuickAssistant document={document} workspaceDocuments={taskDocuments} onOpenSettings={() => { setAssistantTab('chat'); setAssistantOpen(true); saveAssistantDockOpen(true) }} />}
       {presentationStartNodeId && <PresentationMode document={document} startNodeId={presentationStartNodeId} onClose={() => { if (window.document.fullscreenElement) void window.document.exitFullscreen?.(); setPresentationStartNodeId(null) }} />}
       {workspaceSearchOpen && <NodeSearchDialog currentDocumentId={document.id} documents={taskDocuments} tags={tags} provenance={[]} initialScope="workspace" allowCreate={false} ariaLabel="搜索工作区" onClose={() => setWorkspaceSearchOpen(false)} onSelect={revealWorkspaceSearchResult} />}
       {internalLinkPickerOpen && selectedNode && <NodeSearchDialog currentDocumentId={document.id} documents={taskDocuments} tags={tags} provenance={[]} initialScope="workspace" allowCreate={false} ariaLabel="选择要链接的工作区节点" onClose={() => setInternalLinkPickerOpen(false)} onSelect={addInternalNodeLink} />}

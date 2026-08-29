@@ -15,4 +15,10 @@ describe('project library', () => {
     localStorage.setItem('mindtree.projects.v1', JSON.stringify([{ id: 'broken', name: '' }]))
     expect(loadProjects()).toEqual([])
   })
+
+  it('migrates legacy archived projects into the lifecycle model', () => {
+    localStorage.setItem('mindtree.projects.v1', JSON.stringify([{ id: 'legacy', name: '旧项目', description: '历史资料', archived: true, createdAt: 1, updatedAt: 2 }]))
+
+    expect(loadProjects()).toEqual([{ id: 'legacy', name: '旧项目', description: '历史资料', objective: '历史资料', status: 'archived', pinned: false, createdAt: 1, updatedAt: 2 }])
+  })
 })

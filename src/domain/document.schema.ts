@@ -72,6 +72,8 @@ export const mindMapDocumentSchema = z.object({
   title: z.string().min(1),
   categoryId: z.string().min(1).default('uncategorized'),
   projectId: z.string().min(1).nullable().default(null),
+  pinned: z.boolean().default(false),
+  kind: z.enum(['map', 'record', 'source', 'output', 'knowledge']).default('map'),
   isDraft: z.boolean().default(false),
   origin: z.enum(['standard', 'quick-note']).default('standard'),
   rootId: z.string().min(1),

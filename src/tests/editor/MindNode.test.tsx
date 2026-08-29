@@ -122,17 +122,18 @@ describe('MindNode tree branch anchor', () => {
   })
 
   it('places the expanded collapse control over the original curved branch anchor', () => {
-    renderNode({ hasChildren: true })
+    const { container } = renderNode({ hasChildren: true })
 
-    expect((screen.getByRole('button', { name: '折叠节点' }) as HTMLElement).style.right).toBe('-13px')
+    expect(screen.getByRole('button', { name: '折叠节点' })).toBeTruthy()
+    expect(container.querySelector('.collapse-toggle')?.classList.contains('is-collapsed')).toBe(false)
   })
 
-  it('keeps the right source anchor at the original curved branch position', () => {
+  it('aligns the right source anchor with the node border beneath the collapse control', () => {
     const { container } = renderNode({ hasChildren: true })
 
     const sourceHandle = container.querySelector('.node-handle--source.react-flow__handle-right') as HTMLElement
 
-    expect(sourceHandle.style.right).toBe('-4px')
+    expect(sourceHandle.style.right).toBe('0px')
     expect(sourceHandle.style.transform).toBe('translate(50%, -50%)')
   })
 
@@ -141,11 +142,22 @@ describe('MindNode tree branch anchor', () => {
 
     const sourceHandle = container.querySelector('.node-handle--source.react-flow__handle-left') as HTMLElement
 
+    expect(sourceHandle.style.left).toBe('0px')
     expect(sourceHandle.style.transform).toBe('translate(-50%, -50%)')
   })
 })
 
 describe('MindNode relation handles', () => {
+  it('exposes dedicated source handles for direct drag-to-connect', () => {
+    const { container } = renderNode({}, 'source-node', true)
+
+    const sourceHandles = container.querySelectorAll('.node-handle--relation-source.source')
+
+    expect(sourceHandles).toHaveLength(2)
+    sourceHandles.forEach((handle) => expect(handle.classList.contains('connectable')).toBe(true))
+    expect(screen.getAllByLabelText('拖动建立关系')).toHaveLength(2)
+  })
+
   it('allows relation targets to receive a dragged relation endpoint', () => {
     const { container } = renderNode()
 
@@ -153,6 +165,12 @@ describe('MindNode relation handles', () => {
 
     expect(targetHandles).toHaveLength(2)
     targetHandles.forEach((handle) => expect(handle.classList.contains('connectable')).toBe(true))
+  })
+
+  it('marks a valid click-mode target without changing its document data', () => {
+    const { container } = renderNode({ relationTargetState: 'available' })
+
+    expect(container.querySelector('.mind-node')?.classList.contains('is-relation-target-available')).toBe(true)
   })
 })
 

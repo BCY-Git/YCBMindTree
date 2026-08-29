@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createInitialDocument } from '@/domain/document.factory'
-import { deleteLocalDocument, getDepositMetricSummary, markDepositTargetRevisited, MindTreeDatabase, pruneStoredAttachmentsForDocument } from '@/persistence/database'
+import { deleteLocalDocument, getDepositMetricSummary, loadDocument, markDepositTargetRevisited, MindTreeDatabase, pruneStoredAttachmentsForDocument } from '@/persistence/database'
 
 const names: string[] = []
 
@@ -11,6 +11,19 @@ afterEach(async () => {
 })
 
 describe('MindTree IndexedDB migrations', () => {
+  it('loads one validated document by id for a cross-window update handoff', async () => {
+    const name = `mindtree-load-document-${crypto.randomUUID()}`
+    names.push(name)
+    const current = new MindTreeDatabase(name)
+    await current.open()
+    const document = createInitialDocument()
+    await current.documents.put(document)
+
+    expect(await loadDocument(document.id, current)).toEqual(document)
+    expect(await loadDocument('missing-document', current)).toBeUndefined()
+    current.close()
+  })
+
   it('upgrades a version-4 workspace without losing documents and creates deposit/workflow tables', async () => {
     const name = `mindtree-migration-${crypto.randomUUID()}`
     names.push(name)

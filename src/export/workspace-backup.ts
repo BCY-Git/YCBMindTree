@@ -10,7 +10,7 @@ import { depositBatchSchema, depositProvenanceSchema } from '@/ai/deposit/deposi
 import type { WorkflowSession } from '@/ai/workflow/workflow-types'
 import { workflowSessionSchema } from '@/ai/workflow/workflow-schema'
 import { randomUuid } from '@/platform/random-uuid'
-import type { WorkspaceProject } from '@/projects/project-library'
+import { normalizeProject, projectStatuses, type WorkspaceProject } from '@/projects/project-library'
 
 export type WorkspaceCategory = { id: string; name: string }
 export type WorkspaceTag = { id: string; name: string; color: string }
@@ -80,10 +80,15 @@ function assertTags(value: unknown): WorkspaceTag[] {
 }
 
 function assertProjects(value: unknown): WorkspaceProject[] {
-  if (!Array.isArray(value) || value.some((item) => !item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string' || !item.name.trim() || typeof item.description !== 'string' || typeof item.createdAt !== 'number' || typeof item.updatedAt !== 'number')) {
+  if (!Array.isArray(value) || value.some((item) => !item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string' || !item.name.trim() || typeof item.description !== 'string'
+    || ('objective' in item && typeof item.objective !== 'string')
+    || ('status' in item && !projectStatuses.includes(item.status as WorkspaceProject['status']))
+    || ('pinned' in item && typeof item.pinned !== 'boolean')
+    || ('archived' in item && typeof item.archived !== 'boolean')
+    || typeof item.createdAt !== 'number' || typeof item.updatedAt !== 'number')) {
     throw new Error('备份中的项目数据无效')
   }
-  return value.map((item) => ({ id: item.id, name: item.name.trim(), description: item.description, createdAt: item.createdAt, updatedAt: item.updatedAt }))
+  return value.map((item) => normalizeProject(item))
 }
 
 function parseDocument(value: unknown): MindMapDocument {

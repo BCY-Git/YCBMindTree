@@ -1,0 +1,28 @@
+{
+  "name": "@ts-piagent/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hono 后端：把 packages/* 纯逻辑包包装成 HTTP + SSE 接口",
+  "main": "./dist/main.mjs",
+  "scripts": {
+    "build": "tsdown src/main.ts --format esm --clean --out-dir dist",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "start": "node --env-file-if-exists=../../.env dist/main.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ts-piagent/agent": "workspace:*",
+    "@ts-piagent/openai-provider": "workspace:*",
+    "@ts-piagent/protocol": "workspace:*",
+    "@ts-piagent/session": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@types/node": "24",
+    "tsdown": "0.22.14",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3"
+  }
+}

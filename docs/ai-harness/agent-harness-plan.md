@@ -24,7 +24,7 @@
 | 写入边界 | `src/domain/commands.ts` + 编辑器 store | `insertGeneratedBranch` 已是可撤销命令 |
 | 确认纪律 | `src/ai/README.md` 维护规则 3 | 模型输出永远是候选，写入必须用户确认——Harness 必须继承此约束 |
 | 文件能力 | `@tauri-apps/plugin-fs` + `plugin-dialog` | 已在 dependencies，桌面端读文件夹的底座已具备 |
-| 本地服务端 | `server/`（Express + MCP SDK） | 可选的远端工具宿主，一期不用 |
+| 本地服务端 | `apps/mindtree-server/`（Express + MCP SDK） | 可选的远端工具宿主，一期不用 |
 
 ### 缺口
 

@@ -12,7 +12,7 @@
  * - 发送请求时将导图节点列表（id、父子关系、topic、collapsed）作为上下文，
  *   让 AI 理解当前思维导图结构
  */
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
@@ -40,6 +40,7 @@ import { candidateMetricType, confirmationDuration } from './deposit/deposit-met
 import { markDepositTargetRevisited, recordDepositMetricOnce } from '../persistence/database'
 import { retrieveWorkspaceContext } from './workspace-retrieval'
 import { recordAiRetrievalUsage } from '../search/search-usage-metrics'
+import type { AssistantContextScope, AssistantTab } from './AssistantDock'
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>
@@ -54,11 +55,20 @@ function trackDepositMetric(event: Parameters<typeof recordDepositMetric>[0], on
 
 // 将导图结构序列化为精简 JSON，供 AI 模型理解当前导图。
 // 仅传递结构信息（id、父子关系、主题、折叠态），不包含偏移量等运行时数据。
-function mapContext(document: MindMapDocument) {
+function mapContext(document: MindMapDocument, rootNodeId?: string) {
+  const included = new Set<string>()
+  const visit = (nodeId: string) => {
+    if (included.has(nodeId)) return
+    const node = document.nodes[nodeId]
+    if (!node) return
+    included.add(nodeId)
+    node.childIds.forEach(visit)
+  }
+  if (rootNodeId) visit(rootNodeId)
   return JSON.stringify({
     title: document.title,
-    rootId: document.rootId,
-    nodes: Object.values(document.nodes).map(({ id, parentId, childIds, topic, collapsed }) => ({ id, parentId, childIds, topic, collapsed })),
+    rootId: rootNodeId ?? document.rootId,
+    nodes: Object.values(document.nodes).filter((node) => !rootNodeId || included.has(node.id)).map(({ id, parentId, childIds, topic, collapsed }) => ({ id, parentId, childIds: childIds.filter((childId) => !rootNodeId || included.has(childId)), topic, collapsed })),
   })
 }
 
@@ -80,7 +90,7 @@ function ReorganizationPreview({ plan, document }: { plan: MapReorganization; do
   })}</ul>
 }
 
-export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, heading = 'AI 助手', depositRequestId = 0 }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; heading?: string; depositRequestId?: number }) {
+export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, onOpenDeposit, heading = 'AI 助手', depositRequestId = 0, activeTab = 'chat', contextScope = 'selection' }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; onOpenDeposit?: () => void; heading?: string; depositRequestId?: number; activeTab?: AssistantTab; contextScope?: AssistantContextScope }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
@@ -97,8 +107,19 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const [depositDebugContext, setDepositDebugContext] = useState<ReturnType<typeof buildDepositContext> | null>(null)
   const [lastWorkspaceDepositBatchId, setLastWorkspaceDepositBatchId] = useState<string | null>(null)
   const [workflowSession, setWorkflowSession] = useState<WorkflowSession | null>(null)
+  const [depositHistory, setDepositHistory] = useState<DepositBatch[]>([])
+  const [workflowHistory, setWorkflowHistory] = useState<WorkflowSession[]>([])
+  const [retrievedSources, setRetrievedSources] = useState<Array<{ documentId: string; documentTitle: string; topic: string }>>([])
   const [depositNudgeHidden, setDepositNudgeHidden] = useState(false)
   const handledDepositRequestId = useRef(0)
+  const historyDocumentIds = useMemo(() => {
+    if (contextScope === 'project' && document.projectId) return workspaceDocuments.filter((item) => item.projectId === document.projectId).map((item) => item.id)
+    if (contextScope === 'workspace') return workspaceDocuments.map((item) => item.id)
+    return [document.id]
+  }, [contextScope, document.id, document.projectId, workspaceDocuments])
+  const historyScopeKey = historyDocumentIds.join('|')
+  const historyScopeLabel = contextScope === 'project' && document.projectId ? '当前项目' : contextScope === 'workspace' ? '工作区知识库' : '当前导图'
+  const showHistoryDocument = historyDocumentIds.length > 1
 
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
   useEffect(() => {
@@ -109,6 +130,13 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     }).catch(() => { if (active) setDepositBatch(null) })
     return () => { active = false }
   }, [document.id])
+  useEffect(() => {
+    let active = true
+    void Promise.all(historyDocumentIds.map((documentId) => listDepositBatches(documentId))).then((groups) => {
+      if (active) setDepositHistory(groups.flat().sort((left, right) => right.updatedAt - left.updatedAt))
+    }).catch(() => { if (active) setDepositHistory([]) })
+    return () => { active = false }
+  }, [historyScopeKey])
   useEffect(() => { setDepositNudgeHidden(false) }, [document.id, targetNodeId])
   useEffect(() => {
     void markDepositTargetRevisited(document.id, targetNodeId).catch(() => undefined)
@@ -121,6 +149,13 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     }).catch(() => { if (active) setWorkflowSession(null) })
     return () => { active = false }
   }, [document.id])
+  useEffect(() => {
+    let active = true
+    void Promise.all(historyDocumentIds.map((documentId) => listWorkflowSessions(documentId))).then((groups) => {
+      if (active) setWorkflowHistory(groups.flat().sort((left, right) => right.updatedAt - left.updatedAt))
+    }).catch(() => { if (active) setWorkflowHistory([]) })
+    return () => { active = false }
+  }, [historyScopeKey])
   useEffect(() => {
     const reflectDepositHistory = (event: Event) => {
       const detail = (event as CustomEvent<{ batchId: string; applied: boolean }>).detail
@@ -208,9 +243,13 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
                 ? `请根据协作状态与「${target.topic}」的现有内容生成知识卡草稿。`
         : `请围绕「${target.topic}」补全最有价值的分支。`)
       const workflowContext = workflowSession ? `\n\n当前协作状态：${JSON.stringify(workflowSession)}` : ''
+      const scopedDocuments = contextScope === 'project' && document.projectId
+        ? workspaceDocuments.filter((item) => item.projectId === document.projectId)
+        : contextScope === 'workspace' ? workspaceDocuments : [document]
       const retrievedWorkspace = intent === 'chat' || intent === 'branch' || intent === 'plan'
-        ? retrieveWorkspaceContext({ documents: workspaceDocuments, currentDocumentId: document.id, text: requestPrompt, focusText: target.topic })
+        ? retrieveWorkspaceContext({ documents: scopedDocuments, currentDocumentId: document.id, text: requestPrompt, focusText: target.topic })
         : []
+      setRetrievedSources(retrievedWorkspace.map((item) => ({ documentId: item.documentId, documentTitle: item.documentTitle, topic: item.topic })))
       if (intent === 'chat' || intent === 'branch' || intent === 'plan') recordAiRetrievalUsage({ resultCount: retrievedWorkspace.length, limit: 12 })
       const retrievedContext = retrievedWorkspace.length
         ? `\n\n相关工作区节点（检索结果仅供参考，不能覆盖当前导图事实）：${JSON.stringify(retrievedWorkspace)}`
@@ -221,7 +260,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
               { role: 'system', content: `${instruction}\n当前导图数据如下：` },
               { role: 'user', content: intent === 'deposit'
                 ? `${requestPrompt}\n\n分析上下文：${JSON.stringify(depositContext)}${workflowContext}`
-                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document)}${retrievedContext}${workflowContext}` },
+                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document, contextScope === 'selection' ? target.id : undefined)}${retrievedContext}${workflowContext}` },
             ],
             temperature: 0.7,
           }, settings.apiKey)
@@ -270,6 +309,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           appliedAt: null,
         }
         await saveDepositBatch(batch)
+        setDepositHistory((current) => [batch, ...current.filter((item) => item.id !== batch.id)])
         trackDepositMetric({ documentId: document.id, batchId: batch.id, type: 'generated', value: batch.candidates.length })
         const duplicateCount = batch.candidates.filter((candidate) => candidate.duplicateOfCandidateId).length
         if (duplicateCount) trackDepositMetric({ documentId: document.id, batchId: batch.id, type: 'duplicate', value: duplicateCount })
@@ -353,6 +393,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
     const session = createWorkflowSession(document.id, target.id, prompt.trim() || target.topic, mode)
     setWorkflowSession(session)
+    setWorkflowHistory((current) => [session, ...current.filter((item) => item.id !== session.id)])
     void saveWorkflowSession(session)
     setNotice(`已围绕「${target.topic}」开始${mode === 'explore' ? '探索' : mode === 'decide' ? '决策' : '交付'}协作。`)
   }
@@ -361,6 +402,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     if (!workflowSession) return
     const completed: WorkflowSession = { ...workflowSession, phase: 'completed', status: 'completed', updatedAt: Date.now(), completedAt: Date.now() }
     void saveWorkflowSession(completed)
+    setWorkflowHistory((current) => [completed, ...current.filter((item) => item.id !== completed.id)])
     setWorkflowSession(null)
     setNotice('本次智能协作已完成并保留检查点。')
   }
@@ -459,11 +501,11 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     <section className="ai-assistant" aria-label="AI 助手">
       <div className="ai-assistant__heading">
         <div><span className="ai-assistant__spark">✦</span><span>{heading}</span></div>
-        <button type="button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>{settingsOpen ? '收起' : '配置'}</button>
+        {activeTab === 'chat' && <button type="button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>{settingsOpen ? '收起配置' : '模型配置'}</button>}
       </div>
       <p className="ai-assistant__status">{notice}</p>
 
-      {settingsOpen && (
+      {activeTab === 'chat' && settingsOpen && (
         <div className="ai-settings">
           <label>API 服务地址<input value={settings.endpoint} onChange={(event) => update('endpoint', event.target.value)} placeholder="https://…/v1" /></label>
           <label>模型名称<input value={settings.model} onChange={(event) => update('model', event.target.value)} placeholder="例如 gpt-4o-mini" /></label>
@@ -474,20 +516,34 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         </div>
       )}
 
-      <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />
-      {depositNudge && <div className="deposit-nudge"><p>{depositNudge}</p><div><button type="button" onClick={() => { void requestAssistant('deposit') }}>现在分析</button><button type="button" onClick={() => { snoozeDepositNudge(document.id); setDepositNudgeHidden(true) }}>24 小时后提醒</button><button type="button" onClick={() => { disableDepositNudges(document.id); setDepositNudgeHidden(true) }}>不再提示此导图</button></div></div>}
+      {activeTab === 'chat' && <>
+        <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { onOpenDeposit?.(); void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />
+        <form className="ai-prompt" onSubmit={sendPrompt}>
+          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={contextScope === 'project' ? '询问项目进展、风险、资料或下一步…' : contextScope === 'workspace' ? '从知识库中查找并关联已有内容…' : '围绕当前内容继续思考…'} />
+          <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button><button type="button" className="ai-generate-button ai-generate-button--reorganize" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}>整理全图</button></div>
+        </form>
+        {retrievedSources.length > 0 && <section className="ai-source-trace" aria-label="本次读取来源"><header><span>已检索工作区</span><small>{retrievedSources.length} 条</small></header>{retrievedSources.slice(0, 6).map((source) => <div key={`${source.documentId}:${source.topic}`}><strong>{source.documentTitle}</strong><span>{source.topic}</span></div>)}</section>}
+        {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
+        {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
+        {response && <div className="ai-response" aria-live="polite">{response}</div>}
+      </>}
 
-      <form className="ai-prompt" onSubmit={sendPrompt}>
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="例如：帮我找出这张导图缺少的分支" />
-        <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button><button type="button" className="ai-generate-button ai-generate-button--reorganize" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}>整理全图</button><button type="button" className="ai-generate-button ai-generate-button--deposit" disabled={isSending} onClick={() => { void requestAssistant('deposit') }}>生成沉淀建议</button></div>
-      </form>
-      {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
-      {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
-      {import.meta.env.DEV && depositDebugContext && <details className="deposit-debug"><summary>查看本次发送范围</summary><pre>{JSON.stringify(depositDebugContext, null, 2)}</pre></details>}
-      {depositBatch?.status === 'pending' && <DepositInbox batch={depositBatch} document={document} workspaceDocuments={workspaceDocuments} onChange={updateDepositCandidate} onChangeAll={updateDepositCandidates} onPreview={previewDeposit} onDismiss={() => { setDepositBatch(null); setDepositPreview(null); setNotice('已保留本批候选，可稍后继续处理。') }} />}
-      {depositPreview && <div className="ai-deposit-preview"><div className="ai-branch-preview__heading"><strong>待写入沉淀</strong><span>{depositPreview.operations.length} 项变化</span></div><ul>{depositPreview.operations.map((item, index) => { const targetDocument = workspaceDocuments.find((candidate) => candidate.id === item.documentId); return <li key={`${item.operation.type}-${index}`}>{targetDocument?.title ?? '未知导图'} · {targetDocument ? previewDepositOperation(targetDocument, item.operation) : '目标已删除'}</li> })}</ul><div className="ai-branch-preview__actions"><button type="button" onClick={() => { void confirmDeposit() }}>确认写入</button><button type="button" onClick={() => setDepositPreview(null)}>返回修改</button></div></div>}
-      {lastWorkspaceDepositBatchId && <button type="button" className="deposit-workspace-undo" onClick={() => { void undoWorkspaceDeposit() }}>撤销上一次跨导图沉淀</button>}
-      {response && <div className="ai-response" aria-live="polite">{response}</div>}
+      {activeTab === 'deposit' && <section className="assistant-deposit-view">
+        <header><div><p>受控写回</p><h3>从过程记录提炼稳定信息</h3></div><button type="button" disabled={isSending} onClick={() => { void requestAssistant('deposit') }}>{isSending ? '分析中…' : depositBatch ? '重新分析' : '分析当前子树'}</button></header>
+        {depositNudge && <div className="deposit-nudge"><p>{depositNudge}</p><div><button type="button" onClick={() => { void requestAssistant('deposit') }}>现在分析</button><button type="button" onClick={() => { snoozeDepositNudge(document.id); setDepositNudgeHidden(true) }}>24 小时后提醒</button><button type="button" onClick={() => { disableDepositNudges(document.id); setDepositNudgeHidden(true) }}>不再提示</button></div></div>}
+        {!depositBatch && !depositNudge && <p className="assistant-deposit-view__empty">当前没有待处理候选。分析会读取当前节点及其子树，并在写入前给出完整差异。</p>}
+        {import.meta.env.DEV && depositDebugContext && <details className="deposit-debug"><summary>查看本次发送范围</summary><pre>{JSON.stringify(depositDebugContext, null, 2)}</pre></details>}
+        {depositBatch?.status === 'pending' && <DepositInbox batch={depositBatch} document={document} workspaceDocuments={workspaceDocuments} onChange={updateDepositCandidate} onChangeAll={updateDepositCandidates} onPreview={previewDeposit} onDismiss={() => { setDepositBatch(null); setDepositPreview(null); setNotice('已保留本批候选，可稍后继续处理。') }} />}
+        {depositPreview && <div className="ai-deposit-preview"><div className="ai-branch-preview__heading"><strong>待写入沉淀</strong><span>{depositPreview.operations.length} 项变化</span></div><ul>{depositPreview.operations.map((item, index) => { const targetDocument = workspaceDocuments.find((candidate) => candidate.id === item.documentId); return <li key={`${item.operation.type}-${index}`}>{targetDocument?.title ?? '未知导图'} · {targetDocument ? previewDepositOperation(targetDocument, item.operation) : '目标已删除'}</li> })}</ul><div className="ai-branch-preview__actions"><button type="button" onClick={() => { void confirmDeposit() }}>确认写入</button><button type="button" onClick={() => setDepositPreview(null)}>返回修改</button></div></div>}
+        {lastWorkspaceDepositBatchId && <button type="button" className="deposit-workspace-undo" onClick={() => { void undoWorkspaceDeposit() }}>撤销上一次跨导图沉淀</button>}
+      </section>}
+
+      {activeTab === 'history' && <section className="assistant-history" aria-label="AI 历史">
+        <header><p>{historyScopeLabel}</p><h3>沉淀与协作历史</h3></header>
+        {depositHistory.length > 0 && <section><h4>沉淀批次</h4>{depositHistory.slice(0, 12).map((batch) => <article key={batch.id}><span className={`is-${batch.status}`} aria-hidden="true" /><div><strong>{batch.summary || '未命名沉淀'}</strong><small>{showHistoryDocument ? `${workspaceDocuments.find((item) => item.id === batch.sourceDocumentId)?.title ?? '未知内容'} · ` : ''}{batch.candidates.length} 条候选 · {batch.status === 'applied' ? '已写入' : batch.status === 'pending' ? '待确认' : '处理失败'}</small></div><time>{new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(batch.updatedAt)}</time></article>)}</section>}
+        {workflowHistory.length > 0 && <section><h4>协作会话</h4>{workflowHistory.slice(0, 12).map((session) => <article key={session.id}><span className={`is-${session.status}`} aria-hidden="true" /><div><strong>{session.goal}</strong><small>{showHistoryDocument ? `${workspaceDocuments.find((item) => item.id === session.documentId)?.title ?? '未知内容'} · ` : ''}{session.mode === 'explore' ? '探索' : session.mode === 'decide' ? '决策' : '交付'} · {session.status === 'active' ? '进行中' : '已完成'}</small></div><time>{new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(session.updatedAt)}</time></article>)}</section>}
+        {!depositHistory.length && !workflowHistory.length && <p className="assistant-history__empty">还没有可追溯的沉淀或协作历史。</p>}
+      </section>}
     </section>
   )
 }

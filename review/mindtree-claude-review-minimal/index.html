@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <link rel="icon" href="data:," />
+    <title>MindTree Minimal</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">DEPENDENCY-FREE REVIEW BUILD</p>
+          <h1>MindTree <span>Minimal</span></h1>
+        </div>
+        <div class="toolbar" aria-label="导图工具">
+          <button id="undo" title="撤销 (Ctrl/⌘+Z)" disabled>↶ 撤销</button>
+          <button id="redo" title="重做 (Ctrl/⌘+Shift+Z)" disabled>↷ 重做</button>
+          <span class="toolbar-divider"></span>
+          <button id="add-child" title="添加子节点 (Tab)">＋ 子节点</button>
+          <button id="add-sibling" title="添加同级节点 (Enter)">↳ 同级</button>
+          <button id="collapse" title="折叠或展开 (Space)">⌄ 折叠</button>
+          <button id="delete-node" class="danger" title="删除节点 (Delete)">删除</button>
+          <span class="toolbar-divider"></span>
+          <button id="zoom-out" title="缩小">−</button>
+          <button id="zoom-in" title="放大">＋</button>
+          <button id="fit-view" title="适应画布">适应视图</button>
+          <button id="reset-all-positions" title="清除全部手动偏移">自动排列</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <label for="map-title">导图名称</label>
+          <input id="map-title" maxlength="80" />
+          <p class="hint">点击节点选中；双击改名；拖动节点可微调位置。</p>
+          <label for="search-input">搜索节点</label>
+          <input id="search-input" type="search" placeholder="输入主题关键词" autocomplete="off" />
+          <div id="search-results" class="search-results" aria-live="polite"></div>
+          <div class="outline-heading">
+            <span>大纲</span><span id="node-count">0 个节点</span>
+          </div>
+          <nav id="outline" aria-label="思维导图大纲"></nav>
+          <div class="file-actions">
+            <button id="new-map">新建示例</button>
+            <button id="export-map">导出 JSON</button>
+            <button id="export-svg">导出 SVG</button>
+            <label class="button-like" for="import-map">导入 JSON</label>
+            <input id="import-map" type="file" accept="application/json,.json" hidden />
+          </div>
+        </aside>
+
+        <section id="canvas" class="canvas" aria-label="思维导图画布" tabindex="0">
+          <svg id="mindmap" role="img" aria-label="可编辑思维导图" xmlns="http://www.w3.org/2000/svg">
+            <g id="viewport">
+              <g id="edges"></g>
+              <g id="nodes"></g>
+            </g>
+          </svg>
+          <div class="canvas-tip">滚轮缩放 · 拖动画布平移 · 按 ? 查看快捷键</div>
+        </section>
+
+        <aside class="inspector" aria-label="节点属性">
+          <p class="eyebrow">NODE INSPECTOR</p>
+          <h2>节点详情</h2>
+          <div id="node-details" class="node-details">
+            <p>请选择一个节点。</p>
+          </div>
+          <div id="shortcuts" class="shortcuts" hidden>
+            <h3>快捷键</h3>
+            <p><kbd>Tab</kbd> 添加子节点</p>
+            <p><kbd>Enter</kbd> 添加同级节点</p>
+            <p><kbd>Space</kbd> 折叠/展开</p>
+            <p><kbd>Delete</kbd> 删除节点</p>
+            <p><kbd>?</kbd> 显示/隐藏此帮助</p>
+          </div>
+        </aside>
+      </section>
+
+      <div id="external-change" class="external-change" role="alert" hidden>
+        <span>另一个标签页已修改这份导图。当前标签页继续编辑可能覆盖对方的内容。</span>
+        <button id="reload-external">载入对方修改</button>
+        <button id="ignore-external">保留当前内容</button>
+      </div>
+      <footer id="status" class="statusbar" aria-live="polite">本地自动保存已启用</footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,47 @@
+:root {
+  --ink: #1c2937;
+  --muted: #748091;
+  --paper: #f9faf7;
+  --panel: #ffffff;
+  --line: #dde3e7;
+  --accent: #137b73;
+  --accent-dark: #075a55;
+  --danger: #b54b50;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: #edf1ee;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 960px; }
+button, input { font: inherit; }
+button, .button-like { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); cursor: pointer; padding: 8px 10px; font-size: 13px; }
+button:hover:not(:disabled), .button-like:hover { border-color: var(--accent); color: var(--accent-dark); }
+button:disabled { cursor: not-allowed; opacity: .42; }
+button:focus-visible, input:focus-visible { outline: 3px solid #9fd6d0; outline-offset: 2px; }
+.app-shell { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) 28px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.eyebrow { margin: 0 0 3px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .11em; }
+h1, h2, h3 { margin: 0; }
+h1 { font-size: 21px; letter-spacing: -.04em; } h1 span { font-weight: 450; color: var(--muted); }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; justify-content: end; gap: 7px; }
+.toolbar button { padding: 6px 9px; }
+.toolbar .danger { color: var(--danger); }.toolbar-divider { height: 24px; border-left: 1px solid var(--line); margin: 0 3px; }
+.workspace { min-height: 0; display: grid; grid-template-columns: 320px minmax(400px, 1fr) 230px; }
+.sidebar, .inspector { min-height: 0; padding: 20px 16px; overflow: auto; background: var(--panel); }
+.sidebar { padding-inline: 22px; }
+.sidebar { border-right: 1px solid var(--line); }.inspector { border-left: 1px solid var(--line); }
+.sidebar label { display: block; margin-bottom: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
+#map-title, #search-input { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 7px; }
+.hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.outline-heading { display: flex; justify-content: space-between; margin: 23px 0 9px; font-size: 12px; font-weight: 800; }.outline-heading span:last-child { color: var(--muted); font-weight: 500; }
+#outline { font-size: 13px; }.outline-item { width: 100%; display: flex; align-items: center; gap: 5px; padding: 5px; border: 0; border-radius: 5px; background: transparent; text-align: left; }.outline-item:hover { background: #eaf5f3; }.outline-item.selected { background: #d6efeb; color: var(--accent-dark); font-weight: 700; }.outline-item .triangle { width: 12px; color: var(--muted); }.outline-item .topic { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.search-results { display: grid; gap: 3px; max-height: 130px; margin-top: 6px; overflow: auto; color: var(--muted); font-size: 12px; }.search-results button { overflow: hidden; padding: 5px 7px; border: 0; background: #f4f8f7; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.file-actions { display: grid; gap: 8px; margin-top: 24px; }.file-actions button, .file-actions .button-like { width: 100%; text-align: center; }
+.canvas { position: relative; min-width: 0; overflow: hidden; background-color: var(--paper); background-image: radial-gradient(#cedad5 1px, transparent 1px); background-size: 20px 20px; cursor: grab; outline: none; }.canvas:focus-visible { box-shadow: inset 0 0 0 3px #9fd6d0; }.canvas.panning { cursor: grabbing; }.canvas svg { width: 100%; height: 100%; display: block; }.canvas-tip { position: absolute; bottom: 14px; left: 16px; padding: 6px 9px; border-radius: 6px; color: #60706e; background: #ffffffd9; font-size: 11px; pointer-events: none; }
+.inspector h2 { margin-bottom: 18px; font-size: 19px; letter-spacing: -.03em; }.node-details p { color: var(--muted); font-size: 13px; line-height: 1.5; }.detail-label { display: block; margin: 15px 0 6px; font-size: 11px; color: var(--muted); font-weight: 800; letter-spacing: .08em; }.detail-input { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; }.detail-meta { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.7; }.shortcuts { margin-top: 25px; padding-top: 16px; border-top: 1px solid var(--line); }.shortcuts h3 { font-size: 13px; }.shortcuts p { margin: 8px 0; color: var(--muted); font-size: 12px; }kbd { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; background: #f6f7f5; color: var(--ink); font-family: inherit; font-size: 11px; }
+.statusbar { padding: 6px 20px; background: #243331; color: #d8e7e3; font-size: 11px; }.statusbar.error { background: #7e3035; color: #fff4f1; }
+.external-change { position: fixed; right: 18px; bottom: 42px; z-index: 2; display: flex; align-items: center; gap: 8px; max-width: 560px; padding: 10px 12px; border: 1px solid #d7a4a7; border-radius: 8px; background: #fff7f5; box-shadow: 0 7px 24px #26333028; color: #6b282d; font-size: 12px; }.external-change button { padding: 5px 7px; border-color: #d7a4a7; background: white; color: #6b282d; white-space: nowrap; }
+
+.edge { fill: none; stroke: #aabbb7; stroke-width: 2; }.edge.selected { stroke: var(--accent); }
+.mind-node { cursor: pointer; }.mind-node rect { fill: white; stroke: #d3ddda; stroke-width: 1.5; filter: drop-shadow(0 2px 2px #16322a14); }.mind-node.root rect { fill: var(--accent); stroke: var(--accent); }.mind-node.selected rect { stroke: #e38e2d; stroke-width: 3; }.mind-node.drop-target rect { stroke: #3467bd; stroke-width: 3; stroke-dasharray: 5 3; }.mind-node text { fill: var(--ink); font-size: 14px; font-weight: 620; pointer-events: none; }.mind-node.root text { fill: white; font-size: 16px; }.collapse-dot { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }.collapse-mark { fill: var(--accent); font-size: 13px; pointer-events: none; }.inspector-action { width: 100%; margin-top: 10px; }

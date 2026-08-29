@@ -28,6 +28,8 @@ export type SyncMetadata = {
   documentId: string
   remoteVersion: number
   syncedAt: number
+  /** 远端版本所属账号；缺失表示旧版留下、归属尚未确认。 */
+  accountId?: string
 }
 
 export type StoredAttachment = MindNodeAttachment & {
@@ -118,6 +120,12 @@ function parseStoredDocument(value: unknown): MindMapDocument {
 export async function loadLatestDocument(): Promise<MindMapDocument | undefined> {
   const latest = await database.documents.orderBy('updatedAt').last()
   return latest ? parseStoredDocument(latest) : undefined
+}
+
+/** 按 ID 读取一份导图；用于跨窗口修改提示后的安全载入。 */
+export async function loadDocument(documentId: string, target = database): Promise<MindMapDocument | undefined> {
+  const stored = await target.documents.get(documentId)
+  return stored ? parseStoredDocument(stored) : undefined
 }
 
 export async function listDocuments(): Promise<MindMapDocument[]> {

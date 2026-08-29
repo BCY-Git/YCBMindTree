@@ -1,0 +1,26 @@
+{
+  "name": "@ts-piagent/demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --clean",
+    "dev": "tsx src/index.ts",
+    "demo:session": "tsx src/session-demo.ts",
+    "start": "pnpm build && node dist/index.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ts-piagent/agent": "workspace:*",
+    "@ts-piagent/openai-provider": "workspace:*",
+    "@ts-piagent/session": "workspace:*",
+    "dotenv": "17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "24",
+    "tsdown": "0.22.14",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3"
+  }
+}

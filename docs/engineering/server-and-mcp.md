@@ -30,11 +30,11 @@ MindTree Server (Node.js / Express)
    └── SQLite      文档、版本、变更记录
 ```
 
-服务只监听 `127.0.0.1`；Caddy 负责公网 TLS。单机 SQLite 足以支撑个人多设备同步，文档快照与变更记录应定期备份到对象存储或另一台机器。Windows 部署模板见 [Caddyfile](../../server/deploy/windows/Caddyfile)：域名 A 记录生效后，设置 `MINDTREE_DOMAIN`、`CADDY_EMAIL`，并让 Caddy 反代到本机 `127.0.0.1:18789`。公网只需开放 80/443，不应继续暴露 Node 端口。
+服务只监听 `127.0.0.1`；Caddy 负责公网 TLS。单机 SQLite 足以支撑个人多设备同步，文档快照与变更记录应定期备份到对象存储或另一台机器。Windows 部署模板见 [Caddyfile](../../apps/mindtree-server/deploy/windows/Caddyfile)：域名 A 记录生效后，设置 `MINDTREE_DOMAIN`、`CADDY_EMAIL`，并让 Caddy 反代到本机 `127.0.0.1:18789`。公网只需开放 80/443，不应继续暴露 Node 端口。
 
 浏览器直连 API 时，`ALLOWED_ORIGINS` 必须明确列出前端来源（开发环境为 `http://127.0.0.1:5174`）；服务端只对名单内来源返回 CORS 响应头，且仅允许 `GET`、`POST`、`PUT` 与 `OPTIONS`，防止任意网站借用本机 Token 调用同步 API。
 
-Windows 上暂时没有反向代理时，优先设置服务端 `MINDTREE_WEB_ROOT` 指向前端 `dist` 目录，使网页、`/api/v1` 与 `/mcp` 共用同步服务端口，避免新增安全组规则与跨端口 CORS。也可用 [web-server.mjs](../../server/deploy/windows/web-server.mjs) 将前端作为独立静态站点运行；默认监听 `81` 端口，此时必须同时放行 Windows 防火墙和云厂商安全组，并把完整网页来源加入 `ALLOWED_ORIGINS`。HTTP 形态只适合短期联调；账号密码与会话 Token 跨公网使用前应迁移到 HTTPS。
+Windows 上暂时没有反向代理时，优先设置服务端 `MINDTREE_WEB_ROOT` 指向前端 `dist` 目录，使网页、`/api/v1` 与 `/mcp` 共用同步服务端口，避免新增安全组规则与跨端口 CORS。也可用 [web-server.mjs](../../apps/mindtree-server/deploy/windows/web-server.mjs) 将前端作为独立静态站点运行；默认监听 `81` 端口，此时必须同时放行 Windows 防火墙和云厂商安全组，并把完整网页来源加入 `ALLOWED_ORIGINS`。HTTP 形态只适合短期联调；账号密码与会话 Token 跨公网使用前应迁移到 HTTPS。
 
 ## 同步数据模型
 

@@ -12,6 +12,17 @@
  */
 import type { ThemeId } from '@/domain/themes'
 
+export const documentKinds = ['map', 'record', 'source', 'output', 'knowledge'] as const
+export type DocumentKind = typeof documentKinds[number]
+
+export const documentKindLabels: Record<DocumentKind, string> = {
+  map: '导图',
+  record: '过程记录',
+  source: '资料',
+  output: '产出',
+  knowledge: '知识',
+}
+
 export type LayoutConfig = {
   levelGap: number
   siblingGap: number
@@ -119,6 +130,10 @@ export type MindMapDocument = {
   categoryId: string
   /** 所属工作区项目；null 表示尚未归属到项目。 */
   projectId: string | null
+  /** 是否在工作区导航顶部显示快捷入口。 */
+  pinned: boolean
+  /** 工作区中的内容角色；底层仍共享同一棵可编辑树。 */
+  kind: DocumentKind
   /** 随手记草稿在本机保留，转为正式导图前不会参与云端同步。 */
   isDraft: boolean
   origin: 'standard' | 'quick-note'

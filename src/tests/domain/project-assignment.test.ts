@@ -22,10 +22,40 @@ describe('document project assignment', () => {
     expect(mindMapDocumentSchema.parse(legacy).projectId).toBeNull()
   })
 
+  it('migrates old documents to unpinned by default', () => {
+    const legacy = structuredClone(createInitialDocument()) as Record<string, unknown>
+    delete legacy.pinned
+
+    expect(mindMapDocumentSchema.parse(legacy).pinned).toBe(false)
+  })
+
+  it('migrates old documents into the map content role', () => {
+    const legacy = structuredClone(createInitialDocument()) as Record<string, unknown>
+    delete legacy.kind
+
+    expect(mindMapDocumentSchema.parse(legacy).kind).toBe('map')
+  })
+
+  it('changes a document role through the reversible command layer', () => {
+    const document = createInitialDocument()
+    const source = executeCommand(document, { type: 'SET_DOCUMENT_KIND', kind: 'source' }).document
+
+    expect(source.kind).toBe('source')
+    expect(document.kind).toBe('map')
+  })
+
+  it('keeps pinning as a reversible document-level command', () => {
+    const document = createInitialDocument()
+    const pinned = executeCommand(document, { type: 'SET_PINNED', pinned: true }).document
+
+    expect(pinned.pinned).toBe(true)
+    expect(document.pinned).toBe(false)
+  })
+
   it('restores project ownership together with the project library', () => {
     const document = createInitialDocument()
     document.projectId = 'project-algorithm'
-    const project = { id: 'project-algorithm', name: '算法刷题计划', description: '', createdAt: 1, updatedAt: 1 }
+    const project = { id: 'project-algorithm', name: '算法刷题计划', description: '', objective: '', status: 'active' as const, pinned: false, createdAt: 1, updatedAt: 1 }
     const plan = prepareWorkspaceRestore({ documents: [document], versions: [], attachments: [], categories: [], projects: [project], tags: [], depositBatches: [], depositProvenance: [], workflowSessions: [] }, {
       documents: [], attachmentIds: new Set(), categories: [], projects: [], tags: [],
     })

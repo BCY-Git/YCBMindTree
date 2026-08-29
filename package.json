@@ -1,16 +1,27 @@
 {
-  "name": "mindtree",
+  "name": "@mindtree/web",
   "private": true,
-  "version": "1.21.0",
+  "version": "1.22.0",
   "type": "module",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "vite",
+    "dev:server": "pnpm --filter @mindtree/server dev",
+    "dev:piagent": "pnpm --filter @ts-piagent/demo dev",
     "build": "tsc -b && vite build",
+    "build:all": "pnpm --filter '!@mindtree/web' -r --if-present run build && pnpm run build",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:all": "pnpm --filter '!@mindtree/web' -r --if-present run test && pnpm run test",
+    "typecheck": "tsc -b",
+    "typecheck:all": "pnpm --filter '!@mindtree/web' -r --if-present run typecheck && pnpm run typecheck",
+    "check": "pnpm run typecheck:all && pnpm run test:all && pnpm run build:all"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",

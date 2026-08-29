@@ -39,18 +39,26 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu'
 import { CommandPalette } from './CommandPalette'
 import { NodeSearchDialog } from './NodeSearchDialog'
 import { getTheme } from '../domain/themes'
-import { getTreeEdgeAnchors } from './tree-edge'
+import { getTreeBranchColor, getTreeEdgeAnchors } from './tree-edge'
 import { retainDraggingNodePosition, translateDraggedSubtree } from './drag-state'
-import { resolveRegularTreeDragIntent, shouldDetachTreeBranch, type TreeDropIntent } from './drag-intent'
+import { resolveRegularTreeDragIntent, shouldDetachTreeBranch, stabilizeTreeDropIntent, type PendingTreeDropIntent, type TreeDropIntent } from './drag-intent'
+import { chooseBestAttachmentParent, chooseBestTreeDropCandidate, scoreChildDropCandidate, scoreSiblingDropCandidate, type ScoredTreeDropCandidate } from './drag-scoring'
 import type { MindMapDocument, MindNode as DomainMindNode } from '../domain/document.types'
 import { loadTags, type Tag } from '../domain/tag-library'
 import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/database'
-import { findClipboardImageFile } from './clipboard-image'
+import {
+  findClipboardImageFile,
+  hasClipboardImageHint,
+  readClipboardImageFile,
+  type ClipboardImageReader,
+} from './clipboard-image'
 import { readImagePresentation } from '../attachments/image-presentation'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
+import { planRelationTarget } from './relation-target'
 import { projectFocusedDocument } from '../focus/focus-projection'
 import { RelationEdge, type RelationEdgeData } from './RelationEdge'
+import { MindTreeEdge, type MindTreeEdgeData } from './MindTreeEdge'
 import {
   loadSemanticZoomEnabled,
   resolveSemanticZoomLevel,
@@ -61,11 +69,7 @@ import {
 } from './semantic-zoom'
 
 const nodeTypes = { mindNode: MindNode }
-const edgeTypes = { relation: RelationEdge }
-// 自由主题接近节点卡片或树枝时即可吸附；离开时使用更大阈值，避免临界位置来回闪烁。
-const FREE_TOPIC_ATTACH_ENTER_DISTANCE = 116
-const FREE_TOPIC_ATTACH_RETAIN_DISTANCE = 164
-
+const edgeTypes = { relation: RelationEdge, mindTree: MindTreeEdge }
 function fitViewPadding() {
   return window.matchMedia('(max-width: 620px)').matches ? .08 : .35
 }
@@ -99,21 +103,6 @@ function collectSubtreeNodeIds(document: MindMapDocument, nodeId: string) {
   }
   visit(nodeId)
   return result
-}
-
-function distanceToSegment(point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }) {
-  const dx = end.x - start.x
-  const dy = end.y - start.y
-  const lengthSquared = dx * dx + dy * dy
-  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y)
-  const ratio = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
-  return Math.hypot(point.x - (start.x + ratio * dx), point.y - (start.y + ratio * dy))
-}
-
-function distanceToRect(point: { x: number; y: number }, rect: { x: number; y: number; width: number; height: number }) {
-  const dx = Math.max(rect.x - point.x, 0, point.x - (rect.x + rect.width))
-  const dy = Math.max(rect.y - point.y, 0, point.y - (rect.y + rect.height))
-  return Math.hypot(dx, dy)
 }
 
 type DropIntent = TreeDropIntent
@@ -183,9 +172,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const rightPointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const suppressContextMenuRef = useRef(false)
   const dropIntentRef = useRef<DropIntent | null>(null)
-  const pendingDropIntentRef = useRef<{ intent: DropIntent | null; count: number } | null>(null)
+  const pendingDropIntentRef = useRef<PendingTreeDropIntent | null>(null)
   const activeDragNodeIdRef = useRef<string | null>(null)
   const interactionStatusTimerRef = useRef<number | null>(null)
+  const relationPaneCancelTimerRef = useRef<number | null>(null)
 
   const showInteractionStatus = useCallback((message: string) => {
     if (interactionStatusTimerRef.current !== null) window.clearTimeout(interactionStatusTimerRef.current)
@@ -195,6 +185,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
 
   useEffect(() => () => {
     if (interactionStatusTimerRef.current !== null) window.clearTimeout(interactionStatusTimerRef.current)
+    if (relationPaneCancelTimerRef.current !== null) window.clearTimeout(relationPaneCancelTimerRef.current)
   }, [])
 
   useEffect(() => {
@@ -297,8 +288,11 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           hasChildren: mindNode.childIds.length > 0,
           collapsed: mindNode.collapsed,
           hiddenDescendantCount: countDescendants(item.id),
-          accentColor: theme.palette[Math.max(0, depth - 1) % theme.palette.length],
+          accentColor: getTreeBranchColor(document, item.id, theme.palette, theme.branch),
           isRelationSource: relationSourceIds.includes(item.id),
+          relationTargetState: relationSourceIds.length
+            ? planRelationTarget(document, relationSourceIds, item.id).status === 'ready' ? 'available' : 'blocked'
+            : null,
           imageAttachment: mindNode.attachments.find((attachment) => attachment.type.startsWith('image/')) ?? null,
           // 语义层级在渲染前单独覆盖，不能成为 layoutTree 的输入或触发布局重算。
           semanticZoomLevel: 'workspace',
@@ -320,11 +314,14 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             target: item.id,
             sourceHandle: anchors?.sourceHandle,
             targetHandle: anchors?.targetHandle,
-            type: 'default',
+            type: 'mindTree',
             className: `mind-tree-edge mind-tree-edge--depth-${Math.min(depthOf(item.id), 4)}`,
             reconnectable: false,
+            selectable: false,
+            focusable: false,
+            data: { fromRoot: mindNode.parentId === document.rootId } satisfies MindTreeEdgeData,
             style: {
-              stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : (theme.palette[Math.max(0, depthOf(item.id) - 1) % theme.palette.length] ?? theme.branch),
+              stroke: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? '#38b7f0' : getTreeBranchColor(document, item.id, theme.palette, theme.branch),
               strokeWidth: mindNode.parentId === freeTopicAttachmentParentId || (dropIntent?.kind === 'sibling' && mindNode.parentId === dropIntent.parentId) ? 3.4 : 2,
               opacity: !hasActiveFilter(filter) || matchedById.get(mindNode.parentId) || matchedById.get(item.id) ? 1 : .14,
             },
@@ -501,9 +498,33 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   }, [baseNodes, flowInstance, searchFocusNodeId])
 
   const cancelRelationCreation = useCallback(() => {
+    if (relationPaneCancelTimerRef.current !== null) {
+      window.clearTimeout(relationPaneCancelTimerRef.current)
+      relationPaneCancelTimerRef.current = null
+    }
     setRelationSourceIds([])
     setRelationPointer(null)
   }, [])
+
+  const commitRelationTarget = useCallback((sourceIds: string[], targetId: string, ignoreRelationId?: string) => {
+    const plan = planRelationTarget(document, sourceIds, targetId, ignoreRelationId)
+    if (plan.status === 'blocked') {
+      showInteractionStatus(plan.reason)
+      return false
+    }
+    const created = ignoreRelationId
+      ? dispatch({ type: 'RETARGET_RELATION', relationId: ignoreRelationId, targetId })
+      : dispatch({ type: 'CREATE_RELATIONS', sourceIds: plan.sourceIds, targetId })
+    if (!created) {
+      showInteractionStatus('关系建立失败，请重试')
+      return false
+    }
+    const skipped = plan.skippedExisting + plan.skippedSelf
+    showInteractionStatus(ignoreRelationId
+      ? '关系目标已更新'
+      : `已建立 ${plan.sourceIds.length} 条关系${skipped ? `，跳过 ${skipped} 个无效来源` : ''}`)
+    return true
+  }, [dispatch, document, showInteractionStatus])
 
   // 顶部、右键菜单和命令面板只发出“开始关系”意图。
   // 此时不写入任何节点；等待用户单击已有节点或双击画布后再原子提交。
@@ -520,17 +541,21 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const onReconnect = useCallback((edge: Edge, connection: Connection) => {
     const relation = document.relations.find((item) => item.id === edge.id)
     if (!relation || !connection.target || connection.target === relation.sourceId) return
-    dispatch({ type: 'RETARGET_RELATION', relationId: relation.id, targetId: connection.target })
-  }, [dispatch, document.relations])
+    commitRelationTarget([relation.sourceId], connection.target, relation.id)
+  }, [commitRelationTarget, document.relations])
+
+  const onConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target) return
+    commitRelationTarget([connection.source], connection.target)
+  }, [commitRelationTarget])
 
   const onNodeClick: NodeMouseHandler = useCallback((event, node) => {
     if (relationSourceIds.length) {
-      const sourceIds = relationSourceIds.filter((sourceId) => sourceId !== node.id)
-      if (sourceIds.length && dispatch({ type: 'CREATE_RELATIONS', sourceIds, targetId: node.id })) cancelRelationCreation()
+      if (commitRelationTarget(relationSourceIds, node.id)) cancelRelationCreation()
       return
     }
     selectNode(node.id, event.metaKey || event.ctrlKey)
-  }, [cancelRelationCreation, dispatch, relationSourceIds, selectNode])
+  }, [cancelRelationCreation, commitRelationTarget, relationSourceIds, selectNode])
 
   const relationDraftPaths = useMemo(() => {
     if (!relationPointer) return []
@@ -551,39 +576,46 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     if (!original) return null
     return { x: node.position.x - original.x, y: node.position.y - original.y }
   }, [basePositionsById])
-  // 自由主题可直接落到任意母节点卡片或相邻树枝；采用进/出两档距离，避免边缘来回闪烁。
+  // 自由主题与普通树节点复用同一候选评分，按距离、重叠和方向选择最自然的附着点。
   const attachmentParentNearBranch = useCallback((dragged: Node<MindNodeData>, retainedParentId: string | null = null) => {
     const { width, height } = renderedSize(dragged)
-    const point = { x: dragged.position.x + width / 2, y: dragged.position.y + height / 2 }
-    const distances = new Map<string, number>()
-    const consider = (parentId: string, distance: number) => {
-      const current = distances.get(parentId)
-      if (current === undefined || distance < current) distances.set(parentId, distance)
-    }
+    const draggedRect = { x: dragged.position.x, y: dragged.position.y, width, height }
+    const motion = getDragOffset(dragged) ?? { x: 0, y: 0 }
+    const candidates: Array<ScoredTreeDropCandidate | null> = []
     Object.values(document.nodes).forEach((candidate) => {
       if (candidate.isFreeTopic) return
       const position = basePositionsById.get(candidate.id)
-      if (position) consider(candidate.id, distanceToRect(point, position))
+      if (position) candidates.push(scoreChildDropCandidate({
+        parentId: candidate.id,
+        index: candidate.childIds.length,
+        target: position,
+        dragged: draggedRect,
+        motion,
+        hotZoneMultiplier: retainedParentId === candidate.id ? 2.1 : 1.55,
+        retained: retainedParentId === candidate.id,
+      }))
     })
     Object.values(document.nodes).forEach((child) => {
       if (!child.parentId || child.isFreeTopic) return
       const parent = basePositionsById.get(child.parentId)
       const target = basePositionsById.get(child.id)
       if (!parent || !target) return
-      const distance = distanceToSegment(point, { x: parent.x + parent.width, y: parent.y + parent.height / 2 }, { x: target.x, y: target.y + target.height / 2 })
-      consider(child.parentId, distance)
+      candidates.push(scoreSiblingDropCandidate({
+        parentId: child.parentId,
+        index: document.nodes[child.parentId].childIds.indexOf(child.id),
+        branchStart: { x: parent.x + parent.width, y: parent.y + parent.height / 2 },
+        branchEnd: { x: target.x, y: target.y + target.height / 2 },
+        dragged: draggedRect,
+        hotZoneMultiplier: retainedParentId === child.parentId ? 2.1 : 1.55,
+        retained: retainedParentId === child.parentId,
+      }))
     })
-    if (retainedParentId && (distances.get(retainedParentId) ?? Number.POSITIVE_INFINITY) <= FREE_TOPIC_ATTACH_RETAIN_DISTANCE) return retainedParentId
-    let closestParentId: string | null = null
-    let closestDistance = Number.POSITIVE_INFINITY
-    distances.forEach((distance, parentId) => {
-      if (distance < closestDistance) { closestParentId = parentId; closestDistance = distance }
-    })
-    return closestDistance <= FREE_TOPIC_ATTACH_ENTER_DISTANCE ? closestParentId : null
-  }, [basePositionsById, document.nodes])
+    return chooseBestAttachmentParent(candidates, retainedParentId)
+  }, [basePositionsById, document.nodes, getDragOffset])
   const dropIntentNearTree = useCallback((dragged: Node<MindNodeData>): DropIntent | null => {
     const draggedSize = renderedSize(dragged)
-    const point = { x: dragged.position.x + draggedSize.width / 2, y: dragged.position.y + draggedSize.height / 2 }
+    const draggedRect = { x: dragged.position.x, y: dragged.position.y, ...draggedSize }
+    const motion = getDragOffset(dragged) ?? { x: 0, y: 0 }
     const wouldCreateCycle = (parentId: string) => {
       let current: DomainMindNode | undefined = document.nodes[parentId]
       while (current) {
@@ -592,36 +624,35 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       }
       return false
     }
-    const target = baseNodes.find((candidate) => {
-      if (candidate.id === dragged.id || wouldCreateCycle(candidate.id)) return false
+    const candidates: Array<ScoredTreeDropCandidate | null> = baseNodes.flatMap((candidate) => {
+      if (candidate.id === dragged.id || wouldCreateCycle(candidate.id)) return []
       const size = renderedSize(candidate)
-      // 卡片四周保留一圈吸附热区，不要求鼠标必须压到节点中心。
-      const horizontalPadding = 30
-      const verticalPadding = 20
-      return point.x >= candidate.position.x - horizontalPadding && point.x <= candidate.position.x + size.width + horizontalPadding
-        && point.y >= candidate.position.y - verticalPadding && point.y <= candidate.position.y + size.height + verticalPadding
+      const intent = scoreChildDropCandidate({
+        parentId: candidate.id,
+        index: document.nodes[candidate.id].childIds.length,
+        target: { x: candidate.position.x, y: candidate.position.y, ...size },
+        dragged: draggedRect,
+        motion,
+      })
+      return intent ? [intent] : []
     })
-    if (target) return { parentId: target.id, index: document.nodes[target.id].childIds.length, kind: 'child' }
-
-    let closestParentId: string | null = null
-    let closestIndex = 0
-    let closestKind: DropIntent['kind'] = 'sibling'
-    let closestDistance = Number.POSITIVE_INFINITY
     Object.values(document.nodes).forEach((child) => {
       if (!child.parentId || child.isFreeTopic || wouldCreateCycle(child.parentId)) return
       const parent = basePositionsById.get(child.parentId)
       const targetPosition = basePositionsById.get(child.id)
       if (!parent || !targetPosition) return
-      const distance = distanceToSegment(point, { x: parent.x + parent.width, y: parent.y + parent.height / 2 }, { x: targetPosition.x, y: targetPosition.y + targetPosition.height / 2 })
-      if (distance > 56 || distance >= closestDistance) return
       const childIndex = document.nodes[child.parentId].childIds.indexOf(child.id)
-      closestParentId = child.parentId
-      closestIndex = childIndex + (point.y > targetPosition.y + targetPosition.height / 2 ? 1 : 0)
-      closestKind = 'sibling'
-      closestDistance = distance
+      const insertAfter = dragged.position.y + draggedSize.height / 2 > targetPosition.y + targetPosition.height / 2
+      candidates.push(scoreSiblingDropCandidate({
+        parentId: child.parentId,
+        index: childIndex + (insertAfter ? 1 : 0),
+        branchStart: { x: parent.x + parent.width, y: parent.y + parent.height / 2 },
+        branchEnd: { x: targetPosition.x, y: targetPosition.y + targetPosition.height / 2 },
+        dragged: draggedRect,
+      }))
     })
-    return closestParentId ? { parentId: closestParentId, index: closestIndex, kind: closestKind } : null
-  }, [baseNodes, basePositionsById, document.nodes])
+    return chooseBestTreeDropCandidate(candidates, dropIntentRef.current)
+  }, [baseNodes, basePositionsById, document.nodes, getDragOffset])
   const siblingReorderIntent = useCallback((dragged: Node<MindNodeData>): DropIntent | null => {
     const current = document.nodes[dragged.id]
     if (!current?.parentId || current.isFreeTopic) return null
@@ -650,19 +681,20 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     setDragPreview(null)
   }, [])
 
-  // 指针在卡片边缘来回经过时，要求连续命中后才切换落点；离开也保留数帧，避免预览闪烁。
+  // 以时间而非 mousemove 次数稳定预览；不同输入设备下的吸附手感保持一致。
   const stabilizeDropIntent = useCallback((nodeId: string, next: DropIntent | null) => {
-    const pending = pendingDropIntentRef.current
-    const candidate = pending && sameDropIntent(pending.intent, next)
-      ? { intent: pending.intent, count: pending.count + 1 }
-      : { intent: next, count: 1 }
-    pendingDropIntentRef.current = candidate
-    const threshold = next ? 2 : 3
-    if (candidate.count < threshold || sameDropIntent(dropIntentRef.current, next)) return
-    dropIntentRef.current = next
-    setDropIntent(next)
+    const stabilized = stabilizeTreeDropIntent({
+      current: dropIntentRef.current,
+      pending: pendingDropIntentRef.current,
+      next,
+      now: Date.now(),
+    })
+    pendingDropIntentRef.current = stabilized.pending
+    if (sameDropIntent(dropIntentRef.current, stabilized.current)) return
+    dropIntentRef.current = stabilized.current
+    setDropIntent(stabilized.current)
     const currentParentId = document.nodes[nodeId]?.parentId
-    const preview = next?.kind === 'sibling' && next.parentId === currentParentId ? { nodeId, intent: next } : null
+    const preview = stabilized.current?.kind === 'sibling' && stabilized.current.parentId === currentParentId ? { nodeId, intent: stabilized.current } : null
     setDragPreview(preview)
   }, [document.nodes])
 
@@ -962,9 +994,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target
       if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
-      const image = findClipboardImageFile(event.clipboardData)
+      const directImage = findClipboardImageFile(event.clipboardData)
+      const hasImage = Boolean(directImage || event.clipboardData === null || hasClipboardImageHint(event.clipboardData))
       const selected = useEditorStore.getState().selectedNodeId
-      if (!image) {
+      if (!hasImage) {
         if (!selected) return
         event.preventDefault()
         if (document.nodes[selected]?.isFreeTopic) {
@@ -974,23 +1007,48 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         pasteIntoNode(selected)
         return
       }
-      if (!selected) return
       event.preventDefault()
-      if (image.size > 15 * 1024 * 1024) { setPasteAttachmentStatus('图片超过 15 MB，未添加。'); return }
-      const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
-      void Promise.all([saveNodeAttachment(document.id, selected, file), readImagePresentation(file)])
-        .then(([attachment, imagePresentation]) => {
+      if (!selected) {
+        setPasteAttachmentStatus('请先选中一个节点，再粘贴图片。')
+        return
+      }
+      const clipboardReader = typeof navigator.clipboard?.read === 'function'
+        ? navigator.clipboard as ClipboardImageReader
+        : null
+      void (async () => {
+        const image = directImage ?? await readClipboardImageFile(event.clipboardData, clipboardReader)
+        if (!image) {
+          setPasteAttachmentStatus('未能读取剪贴板图片，请允许剪贴板权限后重试。')
+          return
+        }
+        if (image.size > 15 * 1024 * 1024) {
+          setPasteAttachmentStatus('图片超过 15 MB，未添加。')
+          return
+        }
+        const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
+        try {
+          // 尺寸读取是增强信息；某些系统照片格式无法解码时，仍要保留已粘贴的文件。
+          const [attachment, imagePresentation] = await Promise.all([
+            saveNodeAttachment(document.id, selected, file),
+            readImagePresentation(file).catch(() => null),
+          ])
           if (imagePresentation) attachment.image = imagePresentation
-          if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selected, attachment })) setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
-        })
-        .catch(() => setPasteAttachmentStatus('图片保存失败，请重试。'))
+          if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selected, attachment })) {
+            setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
+          } else {
+            setPasteAttachmentStatus('目标节点已不存在，图片未添加。')
+          }
+        } catch {
+          setPasteAttachmentStatus('图片保存失败，请重试。')
+        }
+      })()
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
   }, [dispatch, document.id, document.nodes, document.rootId, pasteIntoNode, showInteractionStatus])
 
   return (
-    <div className={`canvas-shell canvas-shell--detail-${semanticZoomLevel}`} style={{
+    <div className={`canvas-shell canvas-shell--detail-${semanticZoomLevel} ${relationSourceIds.length ? 'is-creating-relation' : ''}`} style={{
       '--canvas': theme.canvas,
       '--grid': theme.grid,
       '--node-bg': theme.nodeBackground,
@@ -1018,6 +1076,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       // 只处理真正的画布空白区；节点、关系线、摘要等元素的双击仍交给它们自身。
       if (!flowInstance || !target.classList.contains('react-flow__pane')) return
       if (relationSourceIds.length) {
+        if (relationPaneCancelTimerRef.current !== null) {
+          window.clearTimeout(relationPaneCancelTimerRef.current)
+          relationPaneCancelTimerRef.current = null
+        }
         event.preventDefault()
         event.stopPropagation()
         const pointer = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
@@ -1041,6 +1103,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onNodeDrag={onNodeDrag}
+        onConnect={onConnect}
         // 仅在框选手势结束时读取内部选择，避免 React Flow 的 nodes 同步通知反向写回状态。
         onSelectionEnd={commitSelectionBox}
         onNodeContextMenu={(event, node) => openContextMenu(event.nativeEvent, node.id)}
@@ -1058,7 +1121,16 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           selectRelation(edge.id)
           setContextMenu({ position: { x: event.clientX, y: event.clientY }, nodeId: null, relationId: edge.id })
         }}
-        onPaneClick={() => { if (!relationSourceIds.length) selectNode(null); closeContextMenu() }}
+        onPaneClick={() => {
+          if (relationSourceIds.length) {
+            if (relationPaneCancelTimerRef.current !== null) window.clearTimeout(relationPaneCancelTimerRef.current)
+            relationPaneCancelTimerRef.current = window.setTimeout(() => {
+              cancelRelationCreation()
+              showInteractionStatus('已取消建立关系')
+            }, 240)
+          } else selectNode(null)
+          closeContextMenu()
+        }}
         selectionKeyCode="Shift"
         multiSelectionKeyCode={['Meta', 'Control']}
         selectionMode={SelectionMode.Partial}
@@ -1143,7 +1215,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           >层</ControlButton>
         </Controls>
       </ReactFlow>
-      {relationSourceIds.length > 0 && <div className="relation-creation-hint" role="status"><strong>正在创建关系</strong><span>单击已有节点，或双击空白处创建新主题 · Esc 取消</span></div>}
+      {relationSourceIds.length > 0 && <div className="relation-creation-hint" role="status"><strong>{relationSourceIds.length > 1 ? `从 ${relationSourceIds.length} 个节点建立联系` : `从「${document.nodes[relationSourceIds[0]]?.topic ?? '当前节点'}」建立联系`}</strong><span>选择高亮节点，或双击空白处创建新主题</span><button type="button" onClick={() => { cancelRelationCreation(); showInteractionStatus('已取消建立关系') }}>取消</button></div>}
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
       {detachingNodeId && <div className="tree-drop-hint" role="status">松开即可成为独立主题</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : `松开即可插入此分支的第 ${dropIntent.index + 1} 个位置`}</div>}

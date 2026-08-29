@@ -43,4 +43,18 @@ describe('AssistantDock resizing', () => {
     expect(onWidthChange).toHaveBeenLastCalledWith(440)
     expect(onWidthCommit).toHaveBeenCalledWith(440)
   })
+
+  it('exposes project-scoped tabs and explicit context controls', () => {
+    const onTabChange = vi.fn()
+    const onContextScopeChange = vi.fn()
+    render(<AssistantDock width={360} onWidthChange={vi.fn()} onWidthCommit={vi.fn()} onClose={vi.fn()} title="MindTree Agent" subtitle="重构项目 · 主导图" activeTab="chat" onTabChange={onTabChange} contextScope="project" onContextScopeChange={onContextScopeChange} hasSelection hasProject pendingCount={3}><p>AI 内容</p></AssistantDock>)
+
+    expect(screen.getByText('重构项目 · 主导图')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /待沉淀\s*3/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '当前项目' }).classList.contains('is-active')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '历史' }))
+    expect(onTabChange).toHaveBeenCalledWith('history')
+    fireEvent.click(screen.getByRole('button', { name: '知识库' }))
+    expect(onContextScopeChange).toHaveBeenCalledWith('workspace')
+  })
 })

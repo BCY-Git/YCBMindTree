@@ -12,7 +12,7 @@ function remote(document: MindMapDocument, version = 1): RemoteDocument {
 
 function dependencies(local: MindMapDocument[], cloud: RemoteDocument[]) {
   const documents = [...local]
-  const metadata = new Map<string, { documentId: string; remoteVersion: number; syncedAt: number }>()
+  const metadata = new Map<string, { documentId: string; remoteVersion: number; syncedAt: number; accountId?: string }>()
   const deps: AccountLibrarySyncDependencies = {
     listLocalDocuments: vi.fn(async () => [...documents]),
     listRemoteDocuments: vi.fn(async () => cloud),
@@ -34,7 +34,7 @@ describe('account library synchronization', () => {
     const cloudDocument = { ...createInitialDocument(), id: 'cloud-document', title: '客户端导图' }
     const { deps } = dependencies([starter], [remote(cloudDocument, 3)])
 
-    const result = await synchronizeAccountLibrary(config, deps)
+    const result = await synchronizeAccountLibrary(config, deps, 'account-a')
 
     expect(result.imported).toBe(1)
     expect(result.uploaded).toBe(0)
@@ -47,7 +47,7 @@ describe('account library synchronization', () => {
     const local = { ...createInitialDocument(), id: 'local-document', title: '项目规划', updatedAt: Date.now() + 1 }
     const { deps } = dependencies([local], [])
 
-    const result = await synchronizeAccountLibrary(config, deps)
+    const result = await synchronizeAccountLibrary(config, deps, 'account-a')
 
     expect(result.uploaded).toBe(1)
     expect(deps.pushLocalDocument).toHaveBeenCalledWith(config, local, 0)
@@ -60,10 +60,36 @@ describe('account library synchronization', () => {
     const { deps, metadata } = dependencies([local], [remote(cloud, 2)])
     metadata.set(local.id, { documentId: local.id, remoteVersion: 1, syncedAt: 10_000 })
 
-    const result = await synchronizeAccountLibrary(config, deps)
+    const result = await synchronizeAccountLibrary(config, deps, 'account-a')
 
     expect(result.conflicts).toBe(1)
     expect(result.documents.find((document) => document.id === local.id)?.title).toBe('本地版本')
+  })
+
+  it('does not upload a document imported from another account', async () => {
+    const local = { ...createInitialDocument(), id: 'account-a-document', title: '账号 A 的导图' }
+    const { deps, metadata } = dependencies([local], [])
+    metadata.set(local.id, {
+      documentId: local.id,
+      remoteVersion: 3,
+      syncedAt: Date.now(),
+      accountId: 'account-a',
+    })
+
+    const result = await synchronizeAccountLibrary(config, deps, 'account-b')
+
+    expect(result.protected).toBe(1)
+    expect(result.uploaded).toBe(0)
+    expect(deps.pushLocalDocument).not.toHaveBeenCalled()
+  })
+
+  it('tags imported cloud documents with their owning account', async () => {
+    const cloudDocument = { ...createInitialDocument(), id: 'cloud-document', title: '云端导图' }
+    const { deps, metadata } = dependencies([], [remote(cloudDocument, 4)])
+
+    await synchronizeAccountLibrary(config, deps, 'account-b')
+
+    expect(metadata.get(cloudDocument.id)).toMatchObject({ accountId: 'account-b', remoteVersion: 4 })
   })
 
   it('recognizes only the untouched built-in tutorial as a disposable starter', () => {

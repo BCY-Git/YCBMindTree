@@ -18,6 +18,8 @@ export type AccountLibrarySyncResult = {
   uploaded: number
   updated: number
   conflicts: number
+  /** 因属于其他账号或归属不明而跳过上传的本地文档数。 */
+  protected: number
 }
 
 export function isUntouchedStarterDocument(document: MindMapDocument): boolean {
@@ -40,7 +42,7 @@ function documentsMatch(left: MindMapDocument, right: MindMapDocument): boolean 
  * - 两端都存在：只有本地明确处于上次同步后的干净状态时才自动拉取；
  * - 无法确认基线或两端都改过：保留本地并报告冲突，不自动覆盖。
  */
-export async function synchronizeAccountLibrary(config: SyncConfig, dependencies: AccountLibrarySyncDependencies): Promise<AccountLibrarySyncResult> {
+export async function synchronizeAccountLibrary(config: SyncConfig, dependencies: AccountLibrarySyncDependencies, accountId: string): Promise<AccountLibrarySyncResult> {
   const [localDocuments, remoteDocuments] = await Promise.all([
     dependencies.listLocalDocuments(),
     dependencies.listRemoteDocuments(config),
@@ -52,20 +54,34 @@ export async function synchronizeAccountLibrary(config: SyncConfig, dependencies
   let uploaded = 0
   let updated = 0
   let conflicts = 0
+  let protectedDocuments = 0
 
   for (const remote of remoteDocuments) {
     const local = localById.get(remote.id)
     if (!local) {
       await dependencies.saveLocalDocument(remote.payload)
-      await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now() })
+      await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now(), accountId })
       imported += 1
       continue
     }
 
     const metadata = await dependencies.loadMetadata(remote.id)
+    if (metadata?.accountId && metadata.accountId !== accountId) {
+      conflicts += 1
+      continue
+    }
     if (!metadata) {
       if (documentsMatch(local, remote.payload)) {
-        await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now() })
+        await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now(), accountId })
+      } else {
+        conflicts += 1
+      }
+      continue
+    }
+    // 旧版元数据没有账号归属：只有内容完全一致时才认领，避免账号切换时误覆盖。
+    if (!metadata.accountId) {
+      if (documentsMatch(local, remote.payload)) {
+        await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now(), accountId })
       } else {
         conflicts += 1
       }
@@ -79,7 +95,7 @@ export async function synchronizeAccountLibrary(config: SyncConfig, dependencies
       continue
     }
     await dependencies.saveLocalDocument(remote.payload)
-    await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now() })
+    await dependencies.saveMetadata({ documentId: remote.id, remoteVersion: remote.version, syncedAt: Date.now(), accountId })
     updated += 1
   }
 
@@ -87,12 +103,17 @@ export async function synchronizeAccountLibrary(config: SyncConfig, dependencies
     if (local.isDraft || remoteById.has(local.id)) continue
     // 新网页端自带的教学导图不是用户数据；账号已有云端内容时不把它上传成一份多余导图。
     if (activeStarter && remoteDocuments.length > 0 && isUntouchedStarterDocument(local)) continue
+    const metadata = await dependencies.loadMetadata(local.id)
+    if (metadata && metadata.accountId !== accountId) {
+      protectedDocuments += 1
+      continue
+    }
     const result = await dependencies.pushLocalDocument(config, local, 0)
     if (result.type === 'conflict') {
       conflicts += 1
       continue
     }
-    await dependencies.saveMetadata({ documentId: local.id, remoteVersion: result.remote.version, syncedAt: Date.now() })
+    await dependencies.saveMetadata({ documentId: local.id, remoteVersion: result.remote.version, syncedAt: Date.now(), accountId })
     uploaded += 1
   }
 
@@ -103,5 +124,6 @@ export async function synchronizeAccountLibrary(config: SyncConfig, dependencies
     uploaded,
     updated,
     conflicts,
+    protected: protectedDocuments,
   }
 }

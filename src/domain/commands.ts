@@ -14,7 +14,7 @@
  */
 import { createNode } from '@/domain/document.factory'
 import { assertValidDocument } from '@/domain/document.validator'
-import type { LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
+import type { DocumentKind, LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
 import type { ThemeId } from '@/domain/themes'
 import { randomUuid } from '@/platform/random-uuid'
 
@@ -85,6 +85,8 @@ export type MindMapCommand =
   | { type: 'RENAME_DOCUMENT'; title: string }
   | { type: 'SET_CATEGORY'; categoryId: string }
   | { type: 'SET_PROJECT'; projectId: string | null }
+  | { type: 'SET_PINNED'; pinned: boolean }
+  | { type: 'SET_DOCUMENT_KIND'; kind: DocumentKind }
   | { type: 'SAVE_QUICK_NOTE'; title: string; categoryId: string }
   | { type: 'UPDATE_LAYOUT'; layout: Partial<LayoutConfig> }
   | { type: 'APPLY_THEME'; themeId: ThemeId }
@@ -904,6 +906,12 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       break
     case 'SET_PROJECT':
       document.projectId = command.projectId?.trim() || null
+      break
+    case 'SET_PINNED':
+      document.pinned = command.pinned
+      break
+    case 'SET_DOCUMENT_KIND':
+      document.kind = command.kind
       break
     case 'SAVE_QUICK_NOTE':
       if (!document.isDraft) throw new Error('当前导图不是随手记草稿')

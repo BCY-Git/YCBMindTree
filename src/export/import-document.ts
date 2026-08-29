@@ -39,6 +39,8 @@ export function createDocumentFromOutline(title: string, rootOutline: ImportedOu
       title: title.trim() || rootOutline.topic.trim() || '导入的大纲',
       categoryId: 'uncategorized',
       projectId: null,
+      pinned: false,
+      kind: 'map',
       isDraft: false,
       origin: 'standard',
       rootId,
