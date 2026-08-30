@@ -1,0 +1,122 @@
+name: 部署 MindTree 生产环境
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: '要部署的 Git ref（留空则部署手动触发时选择的 ref）'
+        required: false
+        type: string
+      confirm_production:
+        description: '确认部署到生产环境'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: mindtree-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 构建待发布版本
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+      - name: 打包前端与服务端
+        run: |
+          mkdir -p release/web release/server
+          cp -R dist/. release/web/
+          cp -R apps/mindtree-server/dist release/server/dist
+          cp apps/mindtree-server/package.json release/server/package.json
+          (cd release && zip -r ../mindtree-release.zip web server)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindtree-release
+          path: mindtree-release.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    name: 生产部署
+    needs: build
+    if: github.event_name == 'push' || inputs.confirm_production == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ vars.MINDTREE_PRODUCTION_URL }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mindtree-release
+          path: release-artifact
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
+          sparse-checkout: scripts/deploy-mindtree.ps1
+          sparse-checkout-cone-mode: false
+
+      - name: 配置受限部署密钥
+        env:
+          DEPLOY_KEY: ${{ secrets.MINDTREE_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.MINDTREE_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: 上传发布包与部署脚本
+        env:
+          SSH_HOST: ${{ secrets.MINDTREE_SSH_HOST }}
+          SSH_USER: ${{ secrets.MINDTREE_SSH_USER }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" 'powershell -NoProfile -Command "New-Item -ItemType Directory -Force C:\\MindTree\\incoming | Out-Null"'
+          scp -i ~/.ssh/id_ed25519 release-artifact/mindtree-release.zip "$SSH_USER@$SSH_HOST:C:/MindTree/incoming/mindtree-release-${GITHUB_SHA}.zip"
+          scp -i ~/.ssh/id_ed25519 scripts/deploy-mindtree.ps1 "$SSH_USER@$SSH_HOST:C:/MindTree/incoming/deploy-mindtree.ps1"
+
+      - name: 部署、健康检查与失败回滚
+        env:
+          SSH_HOST: ${{ secrets.MINDTREE_SSH_HOST }}
+          SSH_USER: ${{ secrets.MINDTREE_SSH_USER }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\MindTree\\incoming\\deploy-mindtree.ps1 -ReleaseId ${GITHUB_SHA} -ArchiveName mindtree-release-${GITHUB_SHA}.zip"
+
+      - name: 外网健康检查
+        env:
+          PRODUCTION_URL: ${{ vars.MINDTREE_PRODUCTION_URL }}
+        run: |
+          test -n "$PRODUCTION_URL"
+          for attempt in {1..10}; do
+            if curl --fail --silent --show-error --max-time 10 "$PRODUCTION_URL/healthz"; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
