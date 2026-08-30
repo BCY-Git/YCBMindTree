@@ -74,6 +74,11 @@ function mapContext(document: MindMapDocument, rootNodeId?: string) {
 
 type GeneratedBranch = { branch: MindNodeClipboard; targetId: string; targetTopic: string; mode: 'branch' | 'plan' | WorkflowAssetKind }
 type GeneratedReorganization = { plan: MapReorganization; sourceUpdatedAt: number }
+type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
+
+function formatChatTime(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(timestamp)
+}
 
 function BranchPreview({ branch, depth = 0 }: { branch: MindNodeClipboard; depth?: number }) {
   const taskMeta = [branch.taskStatus !== 'none' ? (branch.taskStatus === 'done' ? '已完成' : branch.taskStatus === 'doing' ? '进行中' : '待办') : '', branch.priority ? `P${branch.priority}` : '', branch.dueDate ?? ''].filter(Boolean).join(' · ')
@@ -96,7 +101,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
   const [settingsOpen, setSettingsOpen] = useState(true)
   const [prompt, setPrompt] = useState('')
-  const [response, setResponse] = useState('')
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [notice, setNotice] = useState('配置后即可让 AI 基于当前导图协助思考。')
   const [isSending, setIsSending] = useState(false)
   const [generatedBranch, setGeneratedBranch] = useState<GeneratedBranch | null>(null)
@@ -196,16 +201,20 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   }
 
   const requestAssistant = async (intent: 'chat' | 'branch' | 'plan' | 'reorganize' | 'deposit' | 'checkpoint' | WorkflowAssetKind) => {
+    const promptText = prompt.trim()
     if (!isConfigured) {
       setSettingsOpen(true)
       setNotice('请先完成并保存连接配置。')
       return
     }
-    if (!prompt.trim() && intent === 'chat') return
+    if (!promptText && intent === 'chat') return
 
     setIsSending(true)
     setNotice(intent === 'branch' ? '正在生成可插入的分支…' : intent === 'plan' ? '正在生成可确认的执行计划…' : intent === 'reorganize' ? '正在分析全图结构并生成预览…' : intent === 'deposit' ? '正在分析当前子树中可沉淀的内容…' : intent === 'checkpoint' ? '正在提取阶段检查点…' : intent === 'decision-record' ? '正在生成可确认的决策记录…' : intent === 'knowledge-card' ? '正在生成可确认的知识卡…' : '正在请求你的模型…')
-    setResponse('')
+    if (intent === 'chat') {
+      setChatMessages((current) => [...current, { id: randomUuid(), role: 'user', content: promptText, createdAt: Date.now() }])
+      setPrompt('')
+    }
     if (intent !== 'chat') setGeneratedBranch(null)
     if (intent !== 'reorganize') setReorganization(null)
     if (intent !== 'deposit') setDepositPreview(null)
@@ -231,7 +240,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
               : intent === 'checkpoint'
                 ? workflowCheckpointPrompt
         : '你是 MindTree 的思维导图助手。请用简洁中文协助用户梳理、扩展或优化导图。'
-      const requestPrompt = prompt.trim() || (intent === 'reorganize'
+      const requestPrompt = promptText || (intent === 'reorganize'
         ? '请分析整张导图的层级与归属，仅提出确有必要的结构调整。'
         : intent === 'deposit'
           ? `请分析当前子树「${target.topic}」中真正值得回流、推进或长期保留的信息。`
@@ -325,7 +334,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         setGeneratedBranch({ branch, targetId: target.id, targetTopic: target.topic, mode: intent })
         setNotice(intent === 'plan' ? `已生成 ${branchNodeCount(branch)} 个待插入计划节点，请先确认预览。` : isWorkflowAsset ? `已生成「${branch.topic}」草稿，请确认后写入协作焦点。` : `已生成 ${branchNodeCount(branch)} 个待插入节点，请先确认预览。`)
       } else {
-        setResponse(content)
+        setChatMessages((current) => [...current, { id: randomUuid(), role: 'assistant', content, createdAt: Date.now() }])
         setNotice('已收到模型回复。')
       }
     } catch (error) {
@@ -518,6 +527,19 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
 
       {activeTab === 'chat' && <>
         <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { onOpenDeposit?.(); void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />
+        <section className="ai-conversation" aria-label="AI 对话记录" aria-live="polite">
+          {chatMessages.length === 0 && !isSending && <article className="ai-message ai-message--assistant ai-message--welcome"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>就绪</time></header><div className="ai-message__bubble">我会结合当前导图与选定的上下文，帮你梳理思路、补充分支或形成下一步计划。</div></div></article>}
+          {chatMessages.map((message) => <article className={`ai-message ai-message--${message.role}`} key={message.id}>
+            {message.role === 'assistant' && <span className="ai-message__avatar" aria-hidden="true">✦</span>}
+            <div className="ai-message__content">
+              <header><strong>{message.role === 'assistant' ? 'MindTree Agent' : '你'}</strong><time>{formatChatTime(message.createdAt)}</time></header>
+              <div className="ai-message__bubble">{message.content}</div>
+              {message.role === 'assistant' && <footer><button type="button" aria-label="复制 AI 回复" onClick={() => { void navigator.clipboard?.writeText(message.content) }}>复制</button></footer>}
+            </div>
+            {message.role === 'user' && <span className="ai-message__avatar ai-message__avatar--user" aria-hidden="true">你</span>}
+          </article>)}
+          {isSending && <article className="ai-message ai-message--assistant ai-message--pending" role="status"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>正在思考</time></header><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
+        </section>
         <form className="ai-prompt" onSubmit={sendPrompt}>
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={contextScope === 'project' ? '询问项目进展、风险、资料或下一步…' : contextScope === 'workspace' ? '从知识库中查找并关联已有内容…' : '围绕当前内容继续思考…'} />
           <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button><button type="button" className="ai-generate-button ai-generate-button--reorganize" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}>整理全图</button></div>
@@ -525,7 +547,6 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         {retrievedSources.length > 0 && <section className="ai-source-trace" aria-label="本次读取来源"><header><span>已检索工作区</span><small>{retrievedSources.length} 条</small></header>{retrievedSources.slice(0, 6).map((source) => <div key={`${source.documentId}:${source.topic}`}><strong>{source.documentTitle}</strong><span>{source.topic}</span></div>)}</section>}
         {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
         {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
-        {response && <div className="ai-response" aria-live="polite">{response}</div>}
       </>}
 
       {activeTab === 'deposit' && <section className="assistant-deposit-view">

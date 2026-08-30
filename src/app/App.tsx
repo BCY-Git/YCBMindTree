@@ -60,7 +60,7 @@ import { createProject, loadProjects, saveProjects, type WorkspaceProject } from
 import { ProjectOverviewDialog } from '../projects/ProjectOverviewDialog'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 import type { WorkflowSession } from '../ai/workflow/workflow-types'
-import { EnterIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
+import { BellIcon, EnterIcon, ExitIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PersonIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
 
 // 工具栏图标包装组件（aria-hidden，不暴露给屏幕阅读器）。
 function Icon({ children }: { children: ReactNode }) {
@@ -1480,9 +1480,25 @@ export function App() {
           <footer className="sidebar-footer">
             <button className="sidebar-footer-action" type="button"><span><GearIcon /></span>设置</button>
             <button className="sidebar-footer-action" type="button"><span><QuestionMarkCircledIcon /></span>帮助与反馈</button>
+            <button className="sidebar-footer-action" type="button" onClick={() => setWorkspaceSearchOpen(true)}><span><MagnifyingGlassIcon /></span>搜索</button>
             <div className="sidebar-account">
-              <button className="sidebar-account__trigger" onClick={() => setAccountMenuOpen((open) => !open)}><span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span><span><strong>{accountSession?.user.email ?? '本地工作区'}</strong><small>{accountSession ? '已登录 · 可同步' : '未登录 · 本地保存'}</small></span><i>⋮</i></button>
-              {accountMenuOpen && <div className="sidebar-account__menu"><strong>{accountSession ? '已登录账号' : '同步账号'}</strong><p>{accountSession ? '此账号的同步数据与其他账号隔离。' : '登录后可使用账号会话安全同步导图。'}</p>{accountSession ? <button onClick={() => { void logoutAccount() }}>退出登录</button> : <button onClick={() => { setLoginOpen(true); setAccountMenuOpen(false) }}>登录 / 注册</button>}</div>}
+              <button className="sidebar-account__trigger" type="button" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}>
+                <span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span>
+                <span><strong>{accountSession?.user.email.split('@')[0] ?? '本地工作区'}</strong><small>{accountSession?.user.email ?? '未登录 · 本地保存'}</small></span>
+                <i aria-hidden="true">⋮</i>
+              </button>
+              {accountMenuOpen && <div className="sidebar-account__menu" role="menu" aria-label="账户菜单">
+                <div className="sidebar-account__menu-profile">
+                  <span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span>
+                  <span><strong>{accountSession?.user.email.split('@')[0] ?? '本地工作区'}</strong><small>{accountSession?.user.email ?? '登录后可安全同步'}</small></span>
+                </div>
+                <div className="sidebar-account__menu-items">
+                  <button type="button" role="menuitem" onClick={() => { setSyncOpen(true); setAccountMenuOpen(false) }}><GearIcon />账户与同步</button>
+                  <button type="button" role="menuitem" disabled title="通知功能即将推出"><BellIcon />通知</button>
+                  {!accountSession && <button type="button" role="menuitem" onClick={() => { setLoginOpen(true); setAccountMenuOpen(false) }}><PersonIcon />登录 / 注册</button>}
+                </div>
+                {accountSession && <><div className="sidebar-account__menu-divider" /><button className="sidebar-account__logout" type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void logoutAccount() }}><ExitIcon />退出登录</button></>}
+              </div>}
             </div>
           </footer>
         </aside>
