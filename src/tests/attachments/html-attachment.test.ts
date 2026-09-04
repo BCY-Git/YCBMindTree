@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_HTML_ATTACHMENT_SIZE, desktopPreviewUrl, isHtmlFile, isHtmlFileName, normalizeHtmlFile, sanitizePreviewId } from '@/attachments/html-attachment'
+import { MAX_HTML_ATTACHMENT_SIZE, desktopPreviewUrl, htmlTopicName, isHtmlFile, isHtmlFileName, normalizeHtmlFile, sanitizePreviewId } from '@/attachments/html-attachment'
+
+describe('htmlTopicName', () => {
+  it('strips the html extension and keeps the base name', () => {
+    expect(htmlTopicName('架构图.html')).toBe('架构图')
+    expect(htmlTopicName('Report.HTML')).toBe('Report')
+    expect(htmlTopicName('page.htm')).toBe('page')
+  })
+
+  it('falls back to a placeholder for extension-only names', () => {
+    expect(htmlTopicName('.html')).toBe('网页内容')
+    expect(htmlTopicName('  .HTML ')).toBe('网页内容')
+  })
+})
 
 describe('isHtmlFileName', () => {
   it('matches both html extensions case-insensitively', () => {

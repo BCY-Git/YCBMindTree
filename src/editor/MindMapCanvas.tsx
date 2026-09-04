@@ -55,7 +55,7 @@ import {
   type ClipboardImageReader,
 } from './clipboard-image'
 import { readImagePresentation } from '../attachments/image-presentation'
-import { MAX_HTML_ATTACHMENT_SIZE, isHtmlFile, normalizeHtmlFile } from '../attachments/html-attachment'
+import { MAX_HTML_ATTACHMENT_SIZE, htmlTopicName, isHtmlFile, normalizeHtmlFile } from '../attachments/html-attachment'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 import { planRelationTarget } from './relation-target'
 import { projectFocusedDocument } from '../focus/focus-projection'
@@ -941,9 +941,9 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   }, [dispatch, document.id, document.nodes, pasteIntoNode, showInteractionStatus])
 
   // ── 拖放 HTML 附件 ───────────────────────────────────────────────────────────
-  // 落点优先级：命中的节点 > 当前选中节点 > 根节点。macOS Finder 通常给 text/html
-  // MIME；部分来源只给扩展名甚至空 MIME，由 isHtmlFile 按扩展名兜底，入库前再
-  // 归一化成 text/html（节点渲染与布局都以该类型识别）。
+  // 落在节点上 → 挂到该节点；落在空白处 → 新建一个以文件名命名的自由主题节点，
+  // 预览直接长在节点里。macOS Finder 通常给 text/html MIME；部分来源只给扩展名
+  // 甚至空 MIME，由 isHtmlFile 按扩展名兜底，入库前归一化成 text/html。
   const dropHtmlFilesOnNode = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     htmlDragDepthRef.current = 0
@@ -955,17 +955,8 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     }
     const nodeElement = (event.target as Element | null)?.closest<HTMLElement>('.react-flow__node')
     const droppedNodeId = nodeElement?.dataset.id
-    const editor = useEditorStore.getState()
-    const targetId = droppedNodeId && document.nodes[droppedNodeId]
-      ? droppedNodeId
-      : editor.selectedNodeId && document.nodes[editor.selectedNodeId]
-        ? editor.selectedNodeId
-        : document.rootId
-    if (!document.nodes[targetId]) {
-      setPasteAttachmentStatus('画布中没有可挂载的节点。')
-      return
-    }
     void (async () => {
+      let hostId = droppedNodeId && document.nodes[droppedNodeId] ? droppedNodeId : null
       let addedCount = 0
       for (const raw of files) {
         if (raw.size > MAX_HTML_ATTACHMENT_SIZE) {
@@ -973,20 +964,57 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           continue
         }
         try {
+          let targetId = hostId
+          if (!targetId) {
+            if (!flowInstance) {
+              setPasteAttachmentStatus('画布尚未就绪，请重新拖放。')
+              return
+            }
+            const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+            const beforeIds = new Set(Object.keys(useEditorStore.getState().document.nodes))
+            if (!dispatch({ type: 'ADD_FREE_TOPIC', topic: htmlTopicName(raw.name), x: position.x, y: position.y })) {
+              setPasteAttachmentStatus('节点创建失败，请重试。')
+              return
+            }
+            const created = Object.values(useEditorStore.getState().document.nodes)
+              .find((node) => node.isFreeTopic && !beforeIds.has(node.id))
+            if (!created) {
+              setPasteAttachmentStatus('节点创建失败，请重试。')
+              return
+            }
+            targetId = created.id
+            hostId = created.id
+          }
           const attachment = await saveNodeAttachment(document.id, targetId, normalizeHtmlFile(raw))
           if (!dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: targetId, attachment })) {
             setPasteAttachmentStatus('目标节点已不存在，未添加。')
             return
           }
           addedCount += 1
-          setPasteAttachmentStatus(`已挂载 ${attachment.name}，点击卡片打开沙箱预览。`)
+          setPasteAttachmentStatus(`已挂载 ${attachment.name}，预览直接显示在节点上。`)
         } catch {
           setPasteAttachmentStatus('HTML 保存失败，请重试。')
         }
       }
       if (addedCount > 1) setPasteAttachmentStatus(`已挂载 ${addedCount} 个 HTML 文件。`)
     })()
-  }, [dispatch, document.id, document.nodes, document.rootId])
+  }, [dispatch, document.id, document.nodes, flowInstance])
+
+  // 浏览器对未被拦截的文件拖放的默认行为是“打开该文件”，会把整个应用替换掉。
+  // 画布内的 drop 由上面的管线处理；这里兜底拦下画布之外的所有文件拖放。
+  // 只认 Files 类型，不影响工作区导航等内部 HTML5 拖拽。
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
+    const block = (event: DragEvent) => {
+      if (hasFiles(event)) event.preventDefault()
+    }
+    window.addEventListener('dragover', block)
+    window.addEventListener('drop', block)
+    return () => {
+      window.removeEventListener('dragover', block)
+      window.removeEventListener('drop', block)
+    }
+  }, [])
 
   const hasFilesInDrag = (event: React.DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
 

@@ -50,6 +50,12 @@ export function desktopPreviewUrl(id: string): string | null {
     : `mindtree-preview://localhost/${safe}.html`
 }
 
+/** 拖到空白处新建自由主题时，用文件名（去扩展名）当主题。 */
+export function htmlTopicName(fileName: string): string {
+  const base = fileName.trim().replace(/\.html?$/i, '').trim()
+  return base || '网页内容'
+}
+
 /** IndexedDB 里的 Blob 转 base64，走 Tauri IPC 写入原生预览缓存。 */
 export function readBlobAsBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

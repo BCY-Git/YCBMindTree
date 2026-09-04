@@ -27,8 +27,9 @@ const NODE_HEIGHT = 44
 const ROOT_HEIGHT = 58
 const TEXT_CHARACTER_WIDTH = 11
 const HORIZONTAL_TEXT_PADDING = 44
-// HTML 附件卡片（约 26px）+ 上边距 7px；卡片是定高元素，布局必须预留同样高度。
-const HTML_PREVIEW_HEIGHT = 33
+// HTML 活预览：顶栏约 24px + iframe 150px + 上边距 7px；预览是定高元素，布局必须预留同样高度。
+const HTML_PREVIEW_HEIGHT = 182
+const HTML_PREVIEW_WIDTH = 252
 
 /**
  * 根据节点主题文本计算渲染尺寸。
@@ -41,7 +42,8 @@ function nodeSize(node: MindNode, isRoot: boolean, transientHeight?: number) {
   const imageAttachment = node.attachments.find((attachment) => attachment.type.startsWith('image/'))
   const imagePreviewWidth = imageAttachment?.image?.displayWidth ?? (imageAttachment ? 156 : 0)
   const widthWithImage = imagePreviewWidth ? Math.min(MAX_NODE_WIDTH, imagePreviewWidth + 32) : 0
-  const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth, widthWithImage)
+  const htmlPreviewWidth = node.attachments.some((attachment) => attachment.type === 'text/html') ? Math.min(MAX_NODE_WIDTH, HTML_PREVIEW_WIDTH) : 0
+  const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth, widthWithImage, htmlPreviewWidth)
   const charactersPerLine = Math.max(8, Math.floor((width - HORIZONTAL_TEXT_PADDING) / TEXT_CHARACTER_WIDTH))
   const lines = Math.max(1, node.topic.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
   // 旧附件没有展示元数据时沿用历史 96px 缩略图高度；首次载入后会自动写入真实宽高比。
