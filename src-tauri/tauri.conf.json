@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MindTree",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "identifier": "asia.bcy.mindtree",
   "build": {
     "frontendDist": "../dist",
@@ -18,11 +18,12 @@
         "minWidth": 1040,
         "minHeight": 720,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https: http:"
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https: http:; frame-src 'self' mindtree-preview: http://mindtree-preview.localhost"
     }
   },
   "bundle": {
