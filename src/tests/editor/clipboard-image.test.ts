@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findClipboardImageFile, readClipboardImageFile } from '@/editor/clipboard-image'
+import { findClipboardImageFile, readClipboardHtmlImageFile, readClipboardImageFile } from '@/editor/clipboard-image'
 
 describe('findClipboardImageFile', () => {
   it('reads an image copied as a macOS file when clipboard items are empty', () => {
@@ -46,5 +46,25 @@ describe('findClipboardImageFile', () => {
     expect(image?.name).toBe('粘贴图片.png')
     expect(image?.type).toBe('image/png')
     expect(image?.size).toBe(imageBlob.size)
+  })
+
+  it('stops waiting when the browser clipboard permission request never resolves', async () => {
+    const image = await readClipboardImageFile({ items: [], files: [] }, {
+      read: () => new Promise(() => {}),
+    }, 1)
+
+    expect(image).toBeNull()
+  })
+
+  it('reads a data image embedded in copied HTML when no image file is exposed', async () => {
+    const image = await readClipboardHtmlImageFile({
+      items: [],
+      files: [],
+      getData: (type) => type === 'text/html' ? '<img src="data:image/png;base64,cG5n">' : '',
+    })
+
+    expect(image?.name).toBe('粘贴图片.png')
+    expect(image?.type).toBe('image/png')
+    expect(image?.size).toBe(3)
   })
 })

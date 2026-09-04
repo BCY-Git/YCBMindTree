@@ -1,0 +1,88 @@
+name: 构建 MindTree macOS 测试包
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '要构建的已存在版本标签（例如 v1.22.1）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mindtree-desktop-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: 构建 Apple Silicon DMG
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 验证标签与应用版本一致
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const tag = process.env.RELEASE_TAG
+          if (!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) {
+            throw new Error(`发布标签必须是 vX.Y.Z 格式，当前为 ${tag}`)
+          }
+          const expected = tag.slice(1)
+          const versions = {
+            'package.json': JSON.parse(fs.readFileSync('package.json', 'utf8')).version,
+            'src-tauri/tauri.conf.json': JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8')).version,
+            'src-tauri/Cargo.toml': /^version = "([^"]+)"/m.exec(fs.readFileSync('src-tauri/Cargo.toml', 'utf8'))?.[1],
+          }
+          const mismatches = Object.entries(versions).filter(([, version]) => version !== expected)
+          if (mismatches.length) {
+            throw new Error(`版本不一致，标签 ${tag}，其他值：${JSON.stringify(versions)}`)
+          }
+          NODE
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm desktop:build
+
+      - name: 上传供测试的 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: MindTree-${{ env.RELEASE_TAG }}-macos-arm64
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 创建或更新 GitHub Release 草稿
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          assets=(src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#assets[@]}" -gt 0
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --draft \
+              --generate-notes \
+              --title "MindTree ${RELEASE_TAG#v}"
+          fi

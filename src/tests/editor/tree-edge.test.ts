@@ -18,15 +18,20 @@ describe('tree edge anchors', () => {
 
 })
 
-describe('Drawnix-style tree edge', () => {
-  it('starts a root branch directly with a cubic curve', () => {
+describe('XMind-style tree edge', () => {
+  it('uses a deterministic rounded elbow for a lower child', () => {
     expect(getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 90, fromRoot: true }))
-      .toBe('M 100 50 C 140 50, 170 90, 220 90')
+      .toBe('M 100 50 H 136 Q 148 50 148 62 V 78 Q 148 90 160 90 H 220')
   })
 
-  it('adds the short Plait stem for a nested branch and supports left-facing nodes', () => {
+  it('mirrors the same elbow rule for an upper left-facing child', () => {
     expect(getMindTreePath({ sourceX: 220, sourceY: 90, targetX: 100, targetY: 40, fromRoot: false }))
-      .toBe('M 220 90 L 212 90 C 174.667 90, 146.667 40, 100 40')
+      .toBe('M 220 90 H 184 Q 172 90 172 78 V 52 Q 172 40 160 40 H 100')
+  })
+
+  it('keeps a centered child on a straight horizontal line', () => {
+    expect(getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 50, fromRoot: false }))
+      .toBe('M 100 50 L 220 50')
   })
 
   it('inherits one color through every descendant of a top-level branch', () => {

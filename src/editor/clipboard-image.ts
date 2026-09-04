@@ -1,6 +1,7 @@
 export type ClipboardImageData = {
   items?: ArrayLike<Pick<DataTransferItem, 'type' | 'getAsFile'>> | null
   files?: ArrayLike<File> | null
+  getData?: (format: string) => string
 }
 
 export type ClipboardImageReader = {
@@ -37,6 +38,22 @@ function extensionForImageMime(type: string): string {
   return type.slice('image/'.length).split(/[;+]/, 1)[0] || 'png'
 }
 
+function waitForClipboardRead<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Clipboard read timed out')), timeoutMs)
+    void operation.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
+  })
+}
+
 /** 兼容浏览器截图（items）与 macOS/Finder 文件复制（files）两种剪贴板形态。 */
 export function findClipboardImageFile(data: ClipboardImageData | null | undefined): File | null {
   for (const item of Array.from(data?.items ?? [])) {
@@ -56,19 +73,41 @@ export function hasClipboardImageHint(data: ClipboardImageData | null | undefine
 }
 
 /**
+ * 某些网页与桌面应用复制图片时只会写入 text/html；仅接受内嵌 data:image，
+ * 不追随远程 URL 或 file: URL，避免复制操作隐式发起网络读取或越权读取本地文件。
+ */
+export async function readClipboardHtmlImageFile(data: ClipboardImageData | null | undefined): Promise<File | null> {
+  const html = data?.getData?.('text/html')
+  if (!html || typeof DOMParser === 'undefined') return null
+  const source = new DOMParser().parseFromString(html, 'text/html').querySelector('img[src^="data:image/"]')?.getAttribute('src')
+  if (!source) return null
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(source)
+  if (!match) return null
+  try {
+    const type = match[1].toLowerCase()
+    const binary = atob(match[2].replace(/\s/g, ''))
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+    return new File([bytes], `粘贴图片.${extensionForImageMime(type)}`, { type })
+  } catch {
+    return null
+  }
+}
+
+/**
  * 先读取事件自带的 File；若 WebKit 只给出 MIME 提示，再从 Async Clipboard API 取得真实字节。
- * 权限被拒绝时返回 null，由界面给用户可操作的错误提示。
+ * 权限被拒绝或超过等待上限时返回 null，由界面给用户可操作的错误提示。
  */
 export async function readClipboardImageFile(
   data: ClipboardImageData | null | undefined,
   reader: ClipboardImageReader | null | undefined,
+  timeoutMs = 1_200,
 ): Promise<File | null> {
   const directImage = findClipboardImageFile(data)
   if (directImage) return directImage
   if (!reader) return null
 
   try {
-    const clipboardItems = Array.from(await reader.read())
+    const clipboardItems = Array.from(await waitForClipboardRead(reader.read(), timeoutMs))
     for (const item of clipboardItems) {
       const imageType = Array.from(item.types).find((type) => type.startsWith('image/'))
       if (!imageType) continue

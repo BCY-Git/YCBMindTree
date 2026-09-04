@@ -17,6 +17,7 @@ export function AttachmentImage({ attachment, variant = 'inspector', onImageMeas
   const [url, setUrl] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [resizeMode, setResizeMode] = useState(false)
   const [intrinsicImage, setIntrinsicImage] = useState<MindNodeAttachmentImage | null>(null)
   const [previewWidth, setPreviewWidth] = useState<number | null>(null)
   const resizeStartRef = useRef<{ x: number; y: number; width: number; corner: string } | null>(null)
@@ -30,6 +31,7 @@ export function AttachmentImage({ attachment, variant = 'inspector', onImageMeas
     setMissing(false)
     setIntrinsicImage(null)
     setPreviewWidth(null)
+    setResizeMode(false)
     previewWidthRef.current = null
     measuredAttachmentRef.current = null
     void getNodeAttachment(attachment.id).then((stored) => {
@@ -106,8 +108,8 @@ export function AttachmentImage({ attachment, variant = 'inspector', onImageMeas
     <img src={url} alt={attachment.name} onMouseDown={(event) => event.stopPropagation()} />
   </div>, window.document.body) : null
   return <>
-    <span className={`attachment-image attachment-image--${variant} nodrag`} style={variant === 'node' ? { '--attachment-display-width': `${displayWidth}px`, '--attachment-aspect-ratio': `${image.width} / ${image.height}` } as React.CSSProperties : undefined} onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-      <button className="attachment-image__preview" aria-label={`查看图片 ${attachment.name}`} title={`查看原图：${attachment.name}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setExpanded(true) }}>
+    <span className={`attachment-image attachment-image--${variant} ${resizeMode ? 'is-resizing' : ''} nodrag`} style={variant === 'node' ? { '--attachment-display-width': `${displayWidth}px`, '--attachment-aspect-ratio': `${image.width} / ${image.height}` } as React.CSSProperties : undefined} onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+      <button className="attachment-image__preview" data-attachment-id={attachment.id} aria-label={variant === 'node' ? `调整图片 ${attachment.name}` : `查看图片 ${attachment.name}`} title={variant === 'node' ? '单击调整大小，双击查看原图；⌘ X 移除图片' : `查看原图：${attachment.name}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); if (variant === 'node') setResizeMode((active) => !active); else setExpanded(true) }} onDoubleClick={(event) => { event.stopPropagation(); setExpanded(true) }}>
         <img src={url} alt={attachment.name} draggable={false} onLoad={(event) => publishMeasuredImage(event.currentTarget)} />
       </button>
       {variant === 'node' && onImageResize && <span className="attachment-image__resize-layer" aria-label="拖动四角等比例缩放图片">

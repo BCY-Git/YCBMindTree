@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReactFlowProvider } from '@xyflow/react'
 import { MindNode, type MindNodeData } from '../../editor/MindNode'
 import { useEditorStore } from '../../store/editor.store'
 import { createInitialDocument } from '../../domain/document.factory'
+import { saveAiSettings } from '../../ai/ai-settings'
 
 const nodeId = 'node-under-edit'
 
@@ -59,9 +60,27 @@ beforeEach(() => {
   useEditorStore.getState().hydrate(document)
 })
 
-afterEach(() => act(() => useEditorStore.getState().editNode(null)))
+afterEach(() => {
+  act(() => useEditorStore.getState().editNode(null))
+  localStorage.clear()
+  vi.unstubAllGlobals()
+})
 
 describe('MindNode text editing', () => {
+  it('moves focus and the caret to the text end after a double click anywhere on the node', async () => {
+    const { container } = renderNode({ label: '双击后光标应到这里' }, nodeId, true)
+    const label = container.querySelector('.node-label') as HTMLElement
+
+    fireEvent.doubleClick(label)
+
+    const input = await screen.findByRole('textbox') as HTMLTextAreaElement
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input)
+      expect(input.selectionStart).toBe(input.value.length)
+      expect(input.selectionEnd).toBe(input.value.length)
+    })
+  })
+
   it('starts direct typing with the pressed character instead of appending to the old topic', () => {
     act(() => useEditorStore.getState().editNode(nodeId, 'X'))
     const data: MindNodeData = {
@@ -144,6 +163,69 @@ describe('MindNode tree branch anchor', () => {
 
     expect(sourceHandle.style.left).toBe('0px')
     expect(sourceHandle.style.transform).toBe('translate(-50%, -50%)')
+  })
+})
+
+describe('MindNode quick actions', () => {
+  it('can hide the floating toolbar while keeping add-topic buttons visible', () => {
+    renderNode({ showQuickActions: true, floatingToolbarVisibility: 'never', showAddTopicButtons: true, canAddChild: true }, nodeId, true)
+
+    expect(screen.queryByRole('button', { name: '扩展想法' })).toBeNull()
+    expect(screen.getByRole('button', { name: '添加子节点' })).toBeDefined()
+  })
+
+  it('shows the floating toolbar only while hovering in hover mode', () => {
+    const { container } = renderNode({ showQuickActions: true, floatingToolbarVisibility: 'hover', showAddTopicButtons: false }, nodeId, true)
+    const node = container.querySelector('.mind-node') as HTMLElement
+
+    expect(screen.queryByRole('button', { name: '扩展想法' })).toBeNull()
+    fireEvent.mouseEnter(node)
+    expect(screen.getByRole('button', { name: '扩展想法' })).toBeDefined()
+    fireEvent.mouseLeave(node)
+    expect(screen.queryByRole('button', { name: '扩展想法' })).toBeNull()
+  })
+
+  it('adds a child from the right plus button and immediately edits it', () => {
+    const document = useEditorStore.getState().document
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const before = document.nodes[parentId].childIds.length
+    renderNode({ showQuickActions: true, canAddChild: true, canAddSibling: true }, parentId, true)
+
+    fireEvent.click(screen.getByRole('button', { name: '添加子节点' }))
+
+    const current = useEditorStore.getState()
+    expect(current.document.nodes[parentId].childIds).toHaveLength(before + 1)
+    expect(current.editingNodeId).toBe(current.document.nodes[parentId].childIds.at(-1))
+  })
+
+  it('adds a sibling from the bottom plus button', () => {
+    const document = useEditorStore.getState().document
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const nodeId = document.nodes[parentId].childIds[0]
+    const before = document.nodes[parentId].childIds.length
+    renderNode({ showQuickActions: true, canAddChild: true, canAddSibling: true }, nodeId, true)
+
+    fireEvent.click(screen.getByRole('button', { name: '添加同级节点' }))
+
+    expect(useEditorStore.getState().document.nodes[parentId].childIds).toHaveLength(before + 1)
+  })
+
+  it('uses AI expansion to insert exactly three direct children', async () => {
+    const document = useEditorStore.getState().document
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const before = document.nodes[parentId].childIds.length
+    saveAiSettings({ endpoint: 'https://api.deepseek.com', model: 'test-model', apiKey: 'sk-test' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"ideas":["切入点","关键风险","下一步"]}' } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    renderNode({ showQuickActions: true, canAddChild: true, canAddSibling: true }, parentId, true)
+
+    fireEvent.click(screen.getByRole('button', { name: '扩展想法' }))
+
+    await waitFor(() => expect(useEditorStore.getState().document.nodes[parentId].childIds).toHaveLength(before + 3))
+    const childIds = useEditorStore.getState().document.nodes[parentId].childIds.slice(before)
+    expect(childIds.map((id) => useEditorStore.getState().document.nodes[id].topic)).toEqual(['切入点', '关键风险', '下一步'])
+    expect(screen.getByText('已生成 3 个直接子节点')).toBeDefined()
   })
 })
 

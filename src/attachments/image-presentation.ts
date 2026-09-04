@@ -1,10 +1,10 @@
 import type { MindNodeAttachmentImage } from '../domain/document.types'
+import { MAX_IMAGE_DISPLAY_WIDTH } from '../domain/layout-limits'
 
 const MIN_IMAGE_WIDTH = 120
-const MAX_IMAGE_WIDTH = 480
 
 export function clampImageDisplayWidth(width: number): number {
-  return Math.round(Math.min(MAX_IMAGE_WIDTH, Math.max(MIN_IMAGE_WIDTH, width)))
+  return Math.round(Math.min(MAX_IMAGE_DISPLAY_WIDTH, Math.max(MIN_IMAGE_WIDTH, width)))
 }
 
 export function imageDisplayHeight(image: MindNodeAttachmentImage | undefined): number {

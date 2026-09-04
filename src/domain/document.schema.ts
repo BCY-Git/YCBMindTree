@@ -11,6 +11,7 @@
  * 若数据不符合 schema，Zod 会抛出结构化错误，方便定位问题。
  */
 import { z } from 'zod'
+import { MAX_NODE_HEIGHT, MAX_NODE_WIDTH } from './layout-limits'
 
 export const mindNodeSchema = z.object({
   id: z.string().min(1),
@@ -27,8 +28,8 @@ export const mindNodeSchema = z.object({
   marks: z.array(z.enum(['flag', 'star', 'risk', 'idea'])).default([]),
   tagIds: z.array(z.string().min(1)).default([]),
   collapsed: z.boolean(),
-  width: z.number().min(118).max(560).nullable().default(null),
-  height: z.number().min(44).max(420).nullable().default(null),
+  width: z.number().min(118).max(MAX_NODE_WIDTH).nullable().default(null),
+  height: z.number().min(44).max(MAX_NODE_HEIGHT).nullable().default(null),
   offsetX: z.number(),
   offsetY: z.number(),
   createdAt: z.number(),

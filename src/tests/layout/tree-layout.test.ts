@@ -52,6 +52,18 @@ describe('tree layout', () => {
     expect(positions[2] - positions[1]).toBe(60)
   })
 
+  it('keeps two direct children symmetric even when only one has a deeper subtree', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const [firstChildId, secondChildId] = document.nodes[parentId].childIds
+    const deeper = executeCommand(document, { type: 'ADD_CHILD', parentId: firstChildId, topic: '更深的内容' }).document
+    const byId = Object.fromEntries(layoutTree(deeper).map((node) => [node.id, node]))
+    const center = (id: string) => byId[id].y + byId[id].height / 2
+
+    expect(center(parentId)).toBe((center(firstChildId) + center(secondChildId)) / 2)
+    expect(center(parentId) - center(firstChildId)).toBe(center(secondChildId) - center(parentId))
+  })
+
   it('places a free topic without adding it to the root tree layout', () => {
     const document = createInitialDocument()
     const freeId = 'free-topic'

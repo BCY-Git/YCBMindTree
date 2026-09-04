@@ -14,13 +14,16 @@ describe('AttachmentImage', () => {
     delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL
   })
 
-  it('shows a local image thumbnail and opens the original in a focused viewer', async () => {
+  it('enters proportional resize mode on click and opens the original on double click', async () => {
     const attachment = await saveNodeAttachment('image-document', 'image-node', new File(['image'], '架构图.png', { type: 'image/png' }))
     render(<AttachmentImage attachment={attachment} variant="node" />)
 
-    const open = await screen.findByRole('button', { name: '查看图片 架构图.png' })
-    expect(open.querySelector('img')?.getAttribute('src')).toBe('blob:mindtree-image')
-    fireEvent.click(open)
+    const image = await screen.findByRole('button', { name: '调整图片 架构图.png' })
+    expect(image.querySelector('img')?.getAttribute('src')).toBe('blob:mindtree-image')
+    fireEvent.click(image)
+    expect(image.closest('.attachment-image')?.classList.contains('is-resizing')).toBe(true)
+    expect(screen.queryByRole('dialog', { name: '图片预览 架构图.png' })).toBeNull()
+    fireEvent.doubleClick(image)
     expect(screen.getByRole('dialog', { name: '图片预览 架构图.png' })).toBeTruthy()
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '图片预览 架构图.png' })).toBeNull())

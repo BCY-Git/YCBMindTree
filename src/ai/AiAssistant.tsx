@@ -99,7 +99,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
-  const [settingsOpen, setSettingsOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [notice, setNotice] = useState('配置后即可让 AI 基于当前导图协助思考。')
@@ -194,6 +194,8 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     }
   }
   const depositNudge = !depositNudgeHidden && !depositBatch && shouldShowDepositNudge(document.id) ? depositNudgeReason(document, targetNodeId) : null
+  const focusNode = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
+  const scopeLabel = contextScope === 'selection' ? `节点「${focusNode.topic}」` : contextScope === 'document' ? `导图「${document.title}」` : contextScope === 'project' ? '当前项目' : '工作区知识库'
 
   const toggleGhostCompletion = (enabled: boolean) => {
     setGhostCompletionEnabled(enabled)
@@ -510,9 +512,9 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     <section className="ai-assistant" aria-label="AI 助手">
       <div className="ai-assistant__heading">
         <div><span className="ai-assistant__spark">✦</span><span>{heading}</span></div>
-        {activeTab === 'chat' && <button type="button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>{settingsOpen ? '收起配置' : '模型配置'}</button>}
+        {activeTab === 'chat' && <button type="button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>{settingsOpen ? '完成配置' : '连接模型'}</button>}
       </div>
-      <p className="ai-assistant__status">{notice}</p>
+      {activeTab === 'chat' && <p className={`ai-assistant__status ${isSending ? 'is-working' : ''}`} role={isSending ? 'status' : undefined}>{notice}</p>}
 
       {activeTab === 'chat' && settingsOpen && (
         <div className="ai-settings">
@@ -526,9 +528,20 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       )}
 
       {activeTab === 'chat' && <>
-        <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { onOpenDeposit?.(); void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />
+        <section className="ai-command-stage" aria-label="开始一项智能协作">
+          <div className="ai-command-stage__eyebrow"><span>正在协作</span><i /></div>
+          <h2>从 {scopeLabel} 出发</h2>
+          <p>描述你想推进的事，Agent 会先给出可审阅的结果，再由你决定是否写入导图。</p>
+          {!workflowSession && <div className="ai-intent-grid">
+            <button type="button" disabled={isSending} onClick={() => startWorkflow('explore')}><b>探索</b><span>展开未知与备选路径</span></button>
+            <button type="button" disabled={isSending} onClick={() => startWorkflow('decide')}><b>决策</b><span>厘清取舍与判断依据</span></button>
+            <button type="button" disabled={isSending} onClick={() => { void requestAssistant('plan') }}><b>行动</b><span>拆成可执行的下一步</span></button>
+            <button type="button" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}><b>整图</b><span>检查结构与归属关系</span></button>
+          </div>}
+        </section>
+        {workflowSession && <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { onOpenDeposit?.(); void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />}
         <section className="ai-conversation" aria-label="AI 对话记录" aria-live="polite">
-          {chatMessages.length === 0 && !isSending && <article className="ai-message ai-message--assistant ai-message--welcome"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>就绪</time></header><div className="ai-message__bubble">我会结合当前导图与选定的上下文，帮你梳理思路、补充分支或形成下一步计划。</div></div></article>}
+          {chatMessages.length === 0 && !isSending && <article className="ai-message ai-message--assistant ai-message--welcome"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>就绪</time></header><div className="ai-message__bubble">不止回答问题：我可以探索分支、整理结构，并把有价值的结果留在你可控的预览里。</div></div></article>}
           {chatMessages.map((message) => <article className={`ai-message ai-message--${message.role}`} key={message.id}>
             {message.role === 'assistant' && <span className="ai-message__avatar" aria-hidden="true">✦</span>}
             <div className="ai-message__content">
@@ -541,8 +554,8 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           {isSending && <article className="ai-message ai-message--assistant ai-message--pending" role="status"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>正在思考</time></header><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
         </section>
         <form className="ai-prompt" onSubmit={sendPrompt}>
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={contextScope === 'project' ? '询问项目进展、风险、资料或下一步…' : contextScope === 'workspace' ? '从知识库中查找并关联已有内容…' : '围绕当前内容继续思考…'} />
-          <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '思考中…' : '询问 AI'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>生成分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成计划</button><button type="button" className="ai-generate-button ai-generate-button--reorganize" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}>整理全图</button></div>
+          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={contextScope === 'project' ? '例如：找出项目最大的风险，并给我可执行的缓解方案…' : contextScope === 'workspace' ? '例如：关联已有资料，为这个主题找出值得复用的想法…' : '例如：把这个问题想透，给出三条值得继续探索的路径…'} />
+          <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '正在协作…' : '开始协作 ↗'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>扩展分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成行动</button></div>
         </form>
         {retrievedSources.length > 0 && <section className="ai-source-trace" aria-label="本次读取来源"><header><span>已检索工作区</span><small>{retrievedSources.length} 条</small></header>{retrievedSources.slice(0, 6).map((source) => <div key={`${source.documentId}:${source.topic}`}><strong>{source.documentTitle}</strong><span>{source.topic}</span></div>)}</section>}
         {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}

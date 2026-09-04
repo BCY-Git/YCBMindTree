@@ -43,6 +43,7 @@ type ContextMenuProps = {
   onCopy: () => void
   onCut: () => void
   onPaste: () => void
+  onPasteImage: () => void
   onResetPosition: () => void
   onAutoArrange: () => void
   onRestoreFreeform: () => void
@@ -73,7 +74,7 @@ function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
   )
 }
 
-export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddSiblingBefore, onAddParent, onDuplicate, onAddFreeTopic, onAttachToRoot, onEdit, onToggleMark, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onFocusBranch, onSelectBranch, onSelectSiblings, onSelectAll, onIndent, onOutdent, onCopy, onCut, onPaste, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteSingle, onResetRelationCurve, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
+export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddSiblingBefore, onAddParent, onDuplicate, onAddFreeTopic, onAttachToRoot, onEdit, onToggleMark, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onFocusBranch, onSelectBranch, onSelectSiblings, onSelectAll, onIndent, onOutdent, onCopy, onCut, onPaste, onPasteImage, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteSingle, onResetRelationCurve, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const isCanvasMenu = node === null && relation === null
 
@@ -139,6 +140,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <MenuItem onClick={onDuplicate} shortcut="⌘ D">复制一个副本</MenuItem>
           <MenuItem onClick={onCopy} shortcut="⌘ C">复制分支</MenuItem>
           <MenuItem onClick={onCut} shortcut="⌘ X">剪切分支</MenuItem>
+          <MenuItem onClick={onPasteImage}>粘贴图片</MenuItem>
           <MenuItem onClick={onDelete} shortcut="⌫" destructive>删除分支</MenuItem>
         </>
       ) : node ? (
@@ -170,6 +172,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <MenuItem onClick={onDuplicate} shortcut="⌘ D" disabled={isRoot}>复制一个副本</MenuItem>
           <MenuItem onClick={onCut} shortcut="⌘ X" disabled={isRoot}>剪切分支</MenuItem>
           <MenuItem onClick={onPaste} shortcut="⌘ V" disabled={!hasClipboard}>粘贴为子节点</MenuItem>
+          <MenuItem onClick={onPasteImage}>粘贴图片</MenuItem>
           <MenuItem onClick={onResetPosition} shortcut="—">重置节点位置</MenuItem>
           <div className="context-menu__divider" />
           <MenuItem onClick={onAutoArrange}>自动排列</MenuItem>

@@ -52,7 +52,7 @@ describe('AssistantDock resizing', () => {
     expect(screen.getByText('重构项目 · 主导图')).toBeTruthy()
     expect(screen.getByRole('button', { name: /待沉淀\s*3/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: '当前项目' }).classList.contains('is-active')).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '历史' }))
+    fireEvent.click(screen.getByRole('button', { name: '足迹' }))
     expect(onTabChange).toHaveBeenCalledWith('history')
     fireEvent.click(screen.getByRole('button', { name: '知识库' }))
     expect(onContextScopeChange).toHaveBeenCalledWith('workspace')

@@ -13,6 +13,7 @@
  *   接管；RESTORE_FREEFORM_LAYOUT 从快照恢复，实现"排列后可撤销"
  */
 import { createNode } from '@/domain/document.factory'
+import { MAX_IMAGE_DISPLAY_WIDTH, MAX_NODE_HEIGHT, MAX_NODE_WIDTH } from '@/domain/layout-limits'
 import { assertValidDocument } from '@/domain/document.validator'
 import type { DocumentKind, LayoutConfig, MindMapBoundary, MindMapDocument, MindMapRelation, MindMapSummary, MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '@/domain/document.types'
 import type { ThemeId } from '@/domain/themes'
@@ -24,6 +25,8 @@ import { randomUuid } from '@/platform/random-uuid'
  */
 export type MindMapCommand =
   | { type: 'ADD_CHILD'; parentId: string; topic?: string }
+  /** 一次写入多个直接子节点，供 AI 快速扩展使用；整批只占一条撤销历史。 */
+  | { type: 'ADD_CHILDREN'; parentId: string; topics: string[] }
   | { type: 'ADD_SIBLING'; nodeId: string; topic?: string; placement?: 'before' | 'after' }
   | { type: 'ADD_PARENT'; nodeId: string; topic?: string }
   | { type: 'DUPLICATE_NODE'; nodeId: string }
@@ -369,6 +372,23 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       focusNodeId = child.id
       break
     }
+    case 'ADD_CHILDREN': {
+      const parent = document.nodes[command.parentId]
+      if (!parent) throw new Error('父节点不存在')
+      if (parent.isFreeTopic) throw new Error('自由主题请先附加到主节点，再创建子节点')
+      const topics = command.topics.map((topic) => topic.trim()).filter(Boolean)
+      if (!topics.length || topics.length > 12) throw new Error('批量子节点数量无效')
+      topics.forEach((topic) => {
+        const child = createNode(topic.slice(0, 160), parent.id)
+        parent.childIds.push(child.id)
+        document.nodes[child.id] = child
+      })
+      parent.collapsed = false
+      arrangeAfterInsert(document)
+      // AI 扩展完成后保持父节点选中，方便继续查看工具条或再次扩展。
+      focusNodeId = parent.id
+      break
+    }
     case 'ADD_SIBLING': {
       const node = document.nodes[command.nodeId]
       if (!node?.parentId) throw new Error('根节点不能创建同级节点')
@@ -505,7 +525,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const node = document.nodes[command.nodeId]
       if (!node) throw new Error('节点不存在')
       if (!Number.isFinite(command.image.width) || !Number.isFinite(command.image.height) || !Number.isFinite(command.image.displayWidth)
-        || command.image.width <= 0 || command.image.height <= 0 || command.image.displayWidth < 120 || command.image.displayWidth > 480) throw new Error('图片尺寸无效')
+        || command.image.width <= 0 || command.image.height <= 0 || command.image.displayWidth < 120 || command.image.displayWidth > MAX_IMAGE_DISPLAY_WIDTH) throw new Error('图片尺寸无效')
       const attachment = node.attachments.find((item) => item.id === command.attachmentId)
       if (!attachment || !attachment.type.startsWith('image/')) throw new Error('图片附件不存在')
       attachment.image = {
@@ -798,7 +818,7 @@ export function executeCommand(source: MindMapDocument, command: MindMapCommand)
       const minWidth = node.id === document.rootId ? 196 : 118
       const minHeight = node.id === document.rootId ? 58 : 44
       if (!Number.isFinite(command.width) || !Number.isFinite(command.height)
-        || command.width < minWidth || command.width > 560 || command.height < minHeight || command.height > 420) throw new Error('节点尺寸无效')
+        || command.width < minWidth || command.width > MAX_NODE_WIDTH || command.height < minHeight || command.height > MAX_NODE_HEIGHT) throw new Error('节点尺寸无效')
       node.width = Math.round(command.width)
       node.height = Math.round(command.height)
       node.updatedAt = Date.now()

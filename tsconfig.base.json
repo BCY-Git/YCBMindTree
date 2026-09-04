@@ -11,7 +11,10 @@
       "@ts-piagent/agent": ["./packages/piagent-agent/src/index.ts"],
       "@ts-piagent/openai-provider": ["./packages/piagent-openai-provider/src/index.ts"],
       "@ts-piagent/session": ["./packages/piagent-session/src/index.ts"],
-      "@ts-piagent/protocol": ["./packages/piagent-protocol/src/index.ts"]
+      "@ts-piagent/protocol": ["./packages/piagent-protocol/src/index.ts"],
+      "@mindtree/agent-graph": ["./packages/mindtree-agent-graph/src/index.ts"],
+      "@mindtree/agent-graph/workspace-agent": ["./packages/mindtree-agent-graph/src/workspace-agent.ts"]
     }
   }
 }
+

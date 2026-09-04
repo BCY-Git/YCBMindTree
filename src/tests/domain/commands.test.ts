@@ -21,6 +21,19 @@ describe('MindTree command executor', () => {
     expect(() => assertValidDocument(result.document)).not.toThrow()
   })
 
+  it('adds three AI ideas as direct children in one command and keeps the parent focused', () => {
+    const document = createInitialDocument()
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const previousChildren = [...document.nodes[parentId].childIds]
+    const result = executeCommand(document, { type: 'ADD_CHILDREN', parentId, topics: ['切入点', '关键风险', '下一步'] })
+    const addedIds = result.document.nodes[parentId].childIds.slice(previousChildren.length)
+
+    expect(result.focusNodeId).toBe(parentId)
+    expect(addedIds.map((id) => result.document.nodes[id].topic)).toEqual(['切入点', '关键风险', '下一步'])
+    expect(addedIds.every((id) => result.document.nodes[id].parentId === parentId)).toBe(true)
+    expect(() => assertValidDocument(result.document)).not.toThrow()
+  })
+
   it('inserts sibling topics before or after the selected topic', () => {
     const document = createInitialDocument()
     const branchId = document.nodes[document.rootId].childIds[0]
@@ -366,8 +379,10 @@ describe('MindTree command executor', () => {
     const document = createInitialDocument()
     const nodeId = document.nodes[document.rootId].childIds[0]
     const resized = executeCommand(document, { type: 'SET_NODE_SIZE', nodeId, width: 320, height: 96 }).document
+    const enlarged = executeCommand(document, { type: 'SET_NODE_SIZE', nodeId, width: 1120, height: 840 }).document
 
     expect(resized.nodes[nodeId]).toMatchObject({ width: 320, height: 96 })
+    expect(enlarged.nodes[nodeId]).toMatchObject({ width: 1120, height: 840 })
     expect(() => executeCommand(document, { type: 'SET_NODE_SIZE', nodeId, width: 40, height: 20 })).toThrow('节点尺寸无效')
   })
 

@@ -31,26 +31,32 @@ export type MindTreePathInput = {
   sourceY: number
   targetX: number
   targetY: number
-  /** Drawnix/Plait 的中心主题直接进入曲线；普通节点会先伸出一小段树枝。 */
+  /** 为兼容现有边数据保留；XMind 风格中所有层级使用同一几何规则。 */
   fromRoot: boolean
 }
 
 /**
- * 复刻 Drawnix 底层 Plait mind 的 logic-link 轮廓：
- * 普通父节点先延伸 8px，再用非对称三次贝塞尔曲线连接到子节点。
- * 这里直接输出 SVG path，以便继续沿用 React Flow 的锚点、拖拽和缩放能力。
+ * XMind 风格的规则圆角折线：先从父节点水平伸出到统一分叉轴，再垂直转向子节点。
+ * 转角半径固定上限且只受可用空间约束，因此上下分支严格镜像，不会因距离不同产生
+ * 随机观感的贝塞尔弧度。
  */
-export function getMindTreePath({ sourceX, sourceY, targetX, targetY, fromRoot }: MindTreePathInput) {
+export function getMindTreePath({ sourceX, sourceY, targetX, targetY }: MindTreePathInput) {
   const round = (value: number) => Math.round(value * 1000) / 1000
   const direction = targetX >= sourceX ? 1 : -1
   const distance = Math.abs(targetX - sourceX)
-  const stemLength = fromRoot ? 0 : Math.min(8, distance * .16)
-  const curveStartX = round(sourceX + stemLength * direction)
-  const curveDistance = Math.max(0, Math.abs(targetX - curveStartX))
-  const control1X = round(curveStartX + (curveDistance / 3) * direction)
-  const control2X = round(targetX - (curveDistance / 2.4) * direction)
-  const stem = stemLength > 0 ? ` L ${curveStartX} ${sourceY}` : ''
-  return `M ${sourceX} ${sourceY}${stem} C ${control1X} ${sourceY}, ${control2X} ${targetY}, ${targetX} ${targetY}`
+  const verticalDistance = Math.abs(targetY - sourceY)
+  if (verticalDistance < .5) return `M ${round(sourceX)} ${round(sourceY)} L ${round(targetX)} ${round(targetY)}`
+
+  const branchDistance = Math.min(48, Math.max(24, distance * .42))
+  const branchX = sourceX + branchDistance * direction
+  const verticalDirection = targetY >= sourceY ? 1 : -1
+  const radius = Math.min(12, verticalDistance / 2, Math.max(0, distance - branchDistance) / 2)
+  const beforeFirstCornerX = branchX - radius * direction
+  const afterSecondCornerX = branchX + radius * direction
+  const afterFirstCornerY = sourceY + radius * verticalDirection
+  const beforeSecondCornerY = targetY - radius * verticalDirection
+
+  return `M ${round(sourceX)} ${round(sourceY)} H ${round(beforeFirstCornerX)} Q ${round(branchX)} ${round(sourceY)} ${round(branchX)} ${round(afterFirstCornerY)} V ${round(beforeSecondCornerY)} Q ${round(branchX)} ${round(targetY)} ${round(afterSecondCornerX)} ${round(targetY)} H ${round(targetX)}`
 }
 
 /**
