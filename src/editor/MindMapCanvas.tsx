@@ -39,6 +39,7 @@ import { ContextMenu, type ContextMenuPosition } from './ContextMenu'
 import { CommandPalette } from './CommandPalette'
 import { NodeSearchDialog } from './NodeSearchDialog'
 import { getTheme } from '../domain/themes'
+import { MAX_CANVAS_ZOOM } from '../domain/layout-limits'
 import { getTreeBranchColor, getTreeEdgeAnchors } from './tree-edge'
 import { retainDraggingNodePosition, translateDraggedSubtree } from './drag-state'
 import { resolveRegularTreeDragIntent, shouldDetachTreeBranch, stabilizeTreeDropIntent, type PendingTreeDropIntent, type TreeDropIntent } from './drag-intent'
@@ -49,11 +50,12 @@ import { hasActiveFilter, useNodeFilterStore } from './filter-store'
 import { listAllDepositProvenance, saveNodeAttachment } from '../persistence/database'
 import {
   findClipboardImageFile,
-  hasClipboardImageHint,
+  readClipboardHtmlImageFile,
   readClipboardImageFile,
   type ClipboardImageReader,
 } from './clipboard-image'
 import { readImagePresentation } from '../attachments/image-presentation'
+import { MAX_HTML_ATTACHMENT_SIZE, isHtmlFile, normalizeHtmlFile } from '../attachments/html-attachment'
 import { relationDraftGeometry, relationTopicPositionAt } from './relation-draft'
 import { planRelationTarget } from './relation-target'
 import { projectFocusedDocument } from '../focus/focus-projection'
@@ -67,6 +69,7 @@ import {
   shouldShowRelationLabel,
   type SemanticZoomLevel,
 } from './semantic-zoom'
+import { defaultEditorPreferences, type EditorPreferences } from './editor-preferences'
 
 const nodeTypes = { mindNode: MindNode }
 const edgeTypes = { relation: RelationEdge, mindTree: MindTreeEdge }
@@ -119,11 +122,12 @@ function renderedSize(candidate: Node<MindNodeData>) {
   }
 }
 
-export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focusRootId = null, onChangeFocusRoot }: {
+export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focusRootId = null, onChangeFocusRoot, editorPreferences = defaultEditorPreferences }: {
   workspaceDocuments: MindMapDocument[]
   onRevealWorkspaceNode: (documentId: string, nodeId: string) => void
   focusRootId?: string | null
   onChangeFocusRoot?: (nodeId: string | null) => void
+  editorPreferences?: EditorPreferences
 }) {
   const document = useEditorStore((state) => state.document)
   const theme = getTheme(document.theme.id)
@@ -166,10 +170,13 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>(() => resolveSemanticZoomLevel(null, 1, loadSemanticZoomEnabled()))
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
   const [pasteAttachmentStatus, setPasteAttachmentStatus] = useState<string | null>(null)
+  const [htmlDragActive, setHtmlDragActive] = useState(false)
+  const htmlDragDepthRef = useRef(0)
   const [interactionStatus, setInteractionStatus] = useState<string | null>(null)
   const viewDocument = useMemo(() => focusRootId ? projectFocusedDocument(document, focusRootId) : document, [document, focusRootId])
   const fittedDocumentIdRef = useRef<string | null>(null)
   const rightPointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const lastNodePointerRef = useRef<{ nodeId: string; x: number; y: number; at: number } | null>(null)
   const suppressContextMenuRef = useRef(false)
   const dropIntentRef = useRef<DropIntent | null>(null)
   const pendingDropIntentRef = useRef<PendingTreeDropIntent | null>(null)
@@ -294,11 +301,17 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             ? planRelationTarget(document, relationSourceIds, item.id).status === 'ready' ? 'available' : 'blocked'
             : null,
           imageAttachment: mindNode.attachments.find((attachment) => attachment.type.startsWith('image/')) ?? null,
+          htmlAttachment: mindNode.attachments.find((attachment) => attachment.type === 'text/html') ?? null,
           // 语义层级在渲染前单独覆盖，不能成为 layoutTree 的输入或触发布局重算。
           semanticZoomLevel: 'workspace',
           depth,
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
+          showQuickActions: selectedNodeIds.length === 1 && selectedNodeId === item.id,
+          floatingToolbarVisibility: editorPreferences.floatingToolbarVisibility,
+          showAddTopicButtons: editorPreferences.showAddTopicButtons,
+          canAddChild: !mindNode.isFreeTopic,
+          canAddSibling: item.id !== document.rootId && item.id !== focusRootId && !mindNode.isFreeTopic,
         },
         style: { width: item.width, height: item.height, opacity: matched ? 1 : .18 },
       }
@@ -386,7 +399,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
-  }, [dispatch, document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, filter, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectRelation, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
+  }, [dispatch, document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, editorPreferences, filter, focusRootId, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectRelation, selectedNodeId, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
 
   const onViewportMove = useCallback((_: MouseEvent | TouchEvent | null, viewport: { zoom: number }) => {
     setSemanticZoomLevel((current) => resolveSemanticZoomLevel(current, viewport.zoom, semanticZoomEnabled))
@@ -537,6 +550,14 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     }
     clearRelationCreationRequest()
   }, [clearRelationCreationRequest, document.nodes, relationCreationRequestSourceIds])
+
+  // 关系锚点属于当前选中的来源节点。来源失选时立即退出关系模式，
+  // 避免画布上留下没有上下文的悬挂锚点；点击目标节点仍由 onNodeClick 先完成关系。
+  useEffect(() => {
+    if (!relationSourceIds.length) return
+    if (relationSourceIds.every((sourceId) => selectedNodeIds.includes(sourceId))) return
+    cancelRelationCreation()
+  }, [cancelRelationCreation, relationSourceIds, selectedNodeIds])
 
   const onReconnect = useCallback((edge: Edge, connection: Connection) => {
     const relation = document.relations.find((item) => item.id === edge.id)
@@ -871,6 +892,104 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     closeContextMenu()
   }, [closeContextMenu])
 
+  const pasteImageToNode = useCallback((nodeId: string, fallBackToInternalClipboard = false) => {
+    const pasteInternalClipboard = () => {
+      if (!fallBackToInternalClipboard || !useEditorStore.getState().clipboard) return false
+      if (document.nodes[nodeId]?.isFreeTopic) {
+        showInteractionStatus('自由主题请先附加到主节点，再粘贴子节点')
+        return true
+      }
+      pasteIntoNode(nodeId)
+      return true
+    }
+    const clipboardReader = typeof navigator.clipboard?.read === 'function'
+      ? navigator.clipboard as ClipboardImageReader
+      : null
+    if (!clipboardReader) {
+      if (pasteInternalClipboard()) return
+      setPasteAttachmentStatus('当前浏览器不支持读取剪贴板图片。')
+      return
+    }
+    setPasteAttachmentStatus('正在读取剪贴板图片…')
+    void (async () => {
+      const image = await readClipboardImageFile(null, clipboardReader)
+      if (!image) {
+        if (pasteInternalClipboard()) return
+        setPasteAttachmentStatus('未读取到可用图片。请复制图片本身，并允许浏览器读取剪贴板后重试。')
+        return
+      }
+      if (image.size > 15 * 1024 * 1024) {
+        setPasteAttachmentStatus('图片超过 15 MB，未添加。')
+        return
+      }
+      const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
+      try {
+        const [attachment, imagePresentation] = await Promise.all([
+          saveNodeAttachment(document.id, nodeId, file),
+          readImagePresentation(file).catch(() => null),
+        ])
+        if (imagePresentation) attachment.image = imagePresentation
+        if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId, attachment })) {
+          setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
+        } else {
+          setPasteAttachmentStatus('目标节点已不存在，图片未添加。')
+        }
+      } catch {
+        setPasteAttachmentStatus('图片保存失败，请重试。')
+      }
+    })()
+  }, [dispatch, document.id, document.nodes, pasteIntoNode, showInteractionStatus])
+
+  // ── 拖放 HTML 附件 ───────────────────────────────────────────────────────────
+  // 落点优先级：命中的节点 > 当前选中节点 > 根节点。macOS Finder 通常给 text/html
+  // MIME；部分来源只给扩展名甚至空 MIME，由 isHtmlFile 按扩展名兜底，入库前再
+  // 归一化成 text/html（节点渲染与布局都以该类型识别）。
+  const dropHtmlFilesOnNode = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    htmlDragDepthRef.current = 0
+    setHtmlDragActive(false)
+    const files = Array.from(event.dataTransfer?.files ?? []).filter(isHtmlFile)
+    if (!files.length) {
+      setPasteAttachmentStatus('只支持挂载 .html / .htm 文件。')
+      return
+    }
+    const nodeElement = (event.target as Element | null)?.closest<HTMLElement>('.react-flow__node')
+    const droppedNodeId = nodeElement?.dataset.id
+    const editor = useEditorStore.getState()
+    const targetId = droppedNodeId && document.nodes[droppedNodeId]
+      ? droppedNodeId
+      : editor.selectedNodeId && document.nodes[editor.selectedNodeId]
+        ? editor.selectedNodeId
+        : document.rootId
+    if (!document.nodes[targetId]) {
+      setPasteAttachmentStatus('画布中没有可挂载的节点。')
+      return
+    }
+    void (async () => {
+      let addedCount = 0
+      for (const raw of files) {
+        if (raw.size > MAX_HTML_ATTACHMENT_SIZE) {
+          setPasteAttachmentStatus(`「${raw.name}」超过 15 MB，未添加。`)
+          continue
+        }
+        try {
+          const attachment = await saveNodeAttachment(document.id, targetId, normalizeHtmlFile(raw))
+          if (!dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: targetId, attachment })) {
+            setPasteAttachmentStatus('目标节点已不存在，未添加。')
+            return
+          }
+          addedCount += 1
+          setPasteAttachmentStatus(`已挂载 ${attachment.name}，点击卡片打开沙箱预览。`)
+        } catch {
+          setPasteAttachmentStatus('HTML 保存失败，请重试。')
+        }
+      }
+      if (addedCount > 1) setPasteAttachmentStatus(`已挂载 ${addedCount} 个 HTML 文件。`)
+    })()
+  }, [dispatch, document.id, document.nodes, document.rootId])
+
+  const hasFilesInDrag = (event: React.DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
+
   // ── 全局键盘快捷键路由 ───────────────────────────────────────────────────────
   // 拦截所有键盘事件（在画布未聚焦时也能响应），转换为命令派发。
   // 注意：输入框/文本框内输入时跳过，避免干扰正常文字编辑。
@@ -885,6 +1004,16 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       const editor = useEditorStore.getState()
       const selected = editor.selectedNodeId ?? editor.document.rootId
       if (editingNodeId || commandPaletteOpen) return
+      const attachmentId = target.closest<HTMLElement>('[data-attachment-id]')?.dataset.attachmentId
+      if (meta && event.key.toLowerCase() === 'x' && attachmentId) {
+        const attachmentNode = Object.values(editor.document.nodes).find((node) => node.attachments.some((attachment) => attachment.id === attachmentId))
+        if (attachmentNode) {
+          event.preventDefault()
+          dispatch({ type: 'DELETE_NODE_ATTACHMENT', nodeId: attachmentNode.id, attachmentId })
+          setPasteAttachmentStatus('已移除图片。')
+          return
+        }
+      }
       if (meta && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
       if (meta && event.key.toLowerCase() === 'a') { event.preventDefault(); selectAllVisible(); return }
       if (meta && event.key.toLowerCase() === 'c') { event.preventDefault(); copyNode(selected); return }
@@ -913,7 +1042,9 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       if (meta && (event.key === '=' || event.key === '+')) { event.preventDefault(); void flowInstance?.zoomIn({ duration: 140 }); return }
       if (meta && event.key === '-') { event.preventDefault(); void flowInstance?.zoomOut({ duration: 140 }); return }
       if (meta && event.key === '0') { event.preventDefault(); void flowInstance?.zoomTo(1, { duration: 160 }); return }
-      // 粘贴要等 ClipboardEvent 才能分辨图片还是内部复制的节点分支。
+      // Command/Ctrl+V 必须保留给 WebView 的原生 paste 事件。
+      // 右键粘贴与键盘粘贴因此共用下方 ClipboardEvent 路径，
+      // 才能稳定读到 macOS/Finder 提供的 clipboardData.files/items。
       if (meta && event.key.toLowerCase() === 'v') return
       if (event.key === 'Enter') {
         event.preventDefault()
@@ -995,18 +1126,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       const target = event.target
       if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
       const directImage = findClipboardImageFile(event.clipboardData)
-      const hasImage = Boolean(directImage || event.clipboardData === null || hasClipboardImageHint(event.clipboardData))
       const selected = useEditorStore.getState().selectedNodeId
-      if (!hasImage) {
-        if (!selected) return
-        event.preventDefault()
-        if (document.nodes[selected]?.isFreeTopic) {
-          showInteractionStatus('自由主题请先附加到主节点，再粘贴子节点')
-          return
-        }
-        pasteIntoNode(selected)
-        return
-      }
       event.preventDefault()
       if (!selected) {
         setPasteAttachmentStatus('请先选中一个节点，再粘贴图片。')
@@ -1016,9 +1136,24 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         ? navigator.clipboard as ClipboardImageReader
         : null
       void (async () => {
-        const image = directImage ?? await readClipboardImageFile(event.clipboardData, clipboardReader)
+        // 事件文件与 HTML data:image 不需要权限，优先处理以避免被异步剪贴板读取阻塞。
+        // Async Clipboard API 仅作为 WebKit 未暴露同步 File 时的兜底。
+        let image = directImage ?? await readClipboardHtmlImageFile(event.clipboardData)
+        if (!image && clipboardReader) {
+          setPasteAttachmentStatus('正在读取剪贴板图片…')
+          image = await readClipboardImageFile(event.clipboardData, clipboardReader)
+        }
         if (!image) {
-          setPasteAttachmentStatus('未能读取剪贴板图片，请允许剪贴板权限后重试。')
+          const internalClipboard = useEditorStore.getState().clipboard
+          if (internalClipboard) {
+            if (document.nodes[selected]?.isFreeTopic) {
+              showInteractionStatus('自由主题请先附加到主节点，再粘贴子节点')
+              return
+            }
+            pasteIntoNode(selected)
+            return
+          }
+          setPasteAttachmentStatus('未读取到可用图片。请复制图片本身，并允许浏览器读取剪贴板后重试。')
           return
         }
         if (image.size > 15 * 1024 * 1024) {
@@ -1059,6 +1194,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       '--selected': theme.selected,
     } as CSSProperties} onPointerDownCapture={(event) => {
       if (event.button === 2) rightPointerRef.current = { x: event.clientX, y: event.clientY, moved: false }
+      if (event.button === 0) {
+        const nodeElement = (event.target as HTMLElement).closest<HTMLElement>('.react-flow__node')
+        if (nodeElement?.dataset.id) lastNodePointerRef.current = { nodeId: nodeElement.dataset.id, x: event.clientX, y: event.clientY, at: Date.now() }
+      }
     }} onPointerMoveCapture={(event) => {
       const start = rightPointerRef.current
       if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) start.moved = true
@@ -1071,8 +1210,40 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         window.setTimeout(() => { suppressContextMenuRef.current = false }, 120)
       }
       rightPointerRef.current = null
-    }} onDoubleClickCapture={(event) => {
+    }} onDragEnter={(event) => {
+      if (!hasFilesInDrag(event)) return
+      event.preventDefault()
+      htmlDragDepthRef.current += 1
+      setHtmlDragActive(true)
+    }} onDragOver={(event) => {
+      if (!hasFilesInDrag(event)) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    }} onDragLeave={(event) => {
+      if (!hasFilesInDrag(event)) return
+      htmlDragDepthRef.current = Math.max(0, htmlDragDepthRef.current - 1)
+      if (!htmlDragDepthRef.current) setHtmlDragActive(false)
+    }} onDrop={dropHtmlFilesOnNode} onDoubleClickCapture={(event) => {
       const target = event.target as HTMLElement
+      // 第一次点击会更新选中态并重渲染节点；部分浏览器随后会把 dblclick 的 target
+      // 合并为两次点击的共同祖先（pane）。按当前指针位置再命中一次 DOM，避免把
+      // “双击节点”误判为“双击空白并新建自由主题”。
+      const hitTarget = globalThis.document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+      const hitNode = hitTarget?.closest<HTMLElement>('.react-flow__node')
+      const hitInteractiveControl = hitTarget?.closest('button, input, textarea, select, [contenteditable]')
+      const lastNodePointer = lastNodePointerRef.current
+      const recentNodeId = lastNodePointer
+        && Date.now() - lastNodePointer.at < 700
+        && Math.hypot(event.clientX - lastNodePointer.x, event.clientY - lastNodePointer.y) < 8
+        ? lastNodePointer.nodeId
+        : null
+      const nodeIdAtPointer = hitNode?.dataset.id ?? recentNodeId
+      if (nodeIdAtPointer && !hitInteractiveControl) {
+        event.preventDefault()
+        event.stopPropagation()
+        editNode(nodeIdAtPointer)
+        return
+      }
       // 只处理真正的画布空白区；节点、关系线、摘要等元素的双击仍交给它们自身。
       if (!flowInstance || !target.classList.contains('react-flow__pane')) return
       if (relationSourceIds.length) {
@@ -1092,6 +1263,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       const position = flowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
       dispatch({ type: 'ADD_FREE_TOPIC', x: position.x, y: position.y })
     }}>
+      {htmlDragActive && <div className="canvas-drop-hint" role="status">松开鼠标，把 HTML 文件挂到节点上</div>}
       <ReactFlow
         nodes={renderedFlowNodes}
         edges={renderedEdges}
@@ -1146,7 +1318,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         // 大图仅挂载当前视口附近的节点，避免远处卡片参与每次输入与拖拽的渲染。
         onlyRenderVisibleElements
         minZoom={0.25}
-        maxZoom={1.6}
+        maxZoom={MAX_CANVAS_ZOOM}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color={theme.grid} />
@@ -1260,6 +1432,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             onCopy={() => runContextAction(() => copyNode(targetNodeId))}
             onCut={() => runContextAction(() => cutNode(targetNodeId))}
             onPaste={() => runContextAction(() => pasteIntoNode(targetNodeId))}
+            onPasteImage={() => runContextAction(() => pasteImageToNode(targetNodeId))}
             onResetPosition={() => runContextAction(() => dispatch({ type: 'RESET_NODE_OFFSET', nodeId: targetNodeId }))}
             onAutoArrange={() => runContextAction(() => dispatch({ type: 'AUTO_ARRANGE' }))}
             onRestoreFreeform={() => runContextAction(() => dispatch({ type: 'RESTORE_FREEFORM_LAYOUT' }))}

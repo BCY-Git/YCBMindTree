@@ -10,13 +10,19 @@
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react'
+import { MagicWandIcon, PlusIcon } from '@radix-ui/react-icons'
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
+import { requestExpandedIdeas } from '../ai/expand-ideas'
+import { platformErrorMessage } from '../platform/tauri'
 import type { MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
 import { AttachmentImage } from '../attachments/AttachmentImage'
+import { AttachmentHtmlPreview } from '../attachments/AttachmentHtmlPreview'
+import { MAX_NODE_HEIGHT, MAX_NODE_WIDTH } from '../domain/layout-limits'
 import { resolveSemanticNodeEmphasis, type SemanticZoomLevel } from './semantic-zoom'
+import type { FloatingToolbarVisibility } from './editor-preferences'
 
 export type MindNodeData = {
   label: string
@@ -34,6 +40,7 @@ export type MindNodeData = {
   isRelationSource: boolean
   relationTargetState?: 'available' | 'blocked' | null
   imageAttachment?: MindNodeAttachment | null
+  htmlAttachment?: MindNodeAttachment | null
   /** 当前画布的信息密度；只影响内容显隐，不改变布局尺寸。 */
   semanticZoomLevel: SemanticZoomLevel
   /** 中心主题为 0；仅用于远景视觉权重，不参与节点尺寸与布局。 */
@@ -41,6 +48,12 @@ export type MindNodeData = {
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
   layoutHeight: number
   onEditingHeightChange?: (height: number | null) => void
+  /** 仅单选主节点时展示 XMind 风格快捷操作。 */
+  showQuickActions?: boolean
+  floatingToolbarVisibility?: FloatingToolbarVisibility
+  showAddTopicButtons?: boolean
+  canAddChild?: boolean
+  canAddSibling?: boolean
 }
 
 export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps) {
@@ -70,6 +83,14 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const reportedHeightRef = useRef<number | null>(null)
   const markerControlsRef = useRef<HTMLSpanElement>(null)
   const [markerMenu, setMarkerMenu] = useState<'task' | 'priority' | null>(null)
+  const ideaRequestRef = useRef<AbortController | null>(null)
+  const ideaStatusTimerRef = useRef<number | null>(null)
+  const [ideaStatus, setIdeaStatus] = useState<{ tone: 'working' | 'success' | 'error'; text: string } | null>(null)
+
+  useEffect(() => () => {
+    ideaRequestRef.current?.abort()
+    if (ideaStatusTimerRef.current !== null) window.clearTimeout(ideaStatusTimerRef.current)
+  }, [])
 
   useEffect(() => {
     if (!isEditing || editingInitialText === null) setTopic(node.label)
@@ -95,15 +116,26 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     }
     if (preparedEditRef.current === editKey) return
     preparedEditRef.current = editKey
-    let settleFrame = 0
-    const frame = window.requestAnimationFrame(() => {
+    const focusAtEnd = () => {
       const input = inputRef.current
       if (!input) return
       input.focus({ preventScroll: true })
-      input.setSelectionRange(input.value.length, input.value.length)
+      const end = input.value.length
+      input.setSelectionRange(end, end, 'none')
+      setCursorAtEnd(true)
+    }
+    // 先立即聚焦，再跨两帧重申光标位置。浏览器原生的双击选词行为
+    // 有时晚于 React 提交，只延迟一次仍可能把光标重新挪回双击位置。
+    focusAtEnd()
+    let settleFrame = 0
+    const frame = window.requestAnimationFrame(() => {
+      focusAtEnd()
       // WebKit 有时会在 setSelectionRange 后异步把 textarea 卷到末尾；
       // 卡片已经为全文预留高度，因此保持从首行显示，不能让首尾几行被截掉。
       settleFrame = window.requestAnimationFrame(() => {
+        focusAtEnd()
+        const input = inputRef.current
+        if (!input) return
         input.scrollTop = 0
         input.scrollLeft = 0
       })
@@ -187,8 +219,13 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const showWorkspaceDetails = effectiveDetailLevel === 'workspace'
   const showStructureSignals = effectiveDetailLevel === 'structure'
   const semanticEmphasis = resolveSemanticNodeEmphasis(effectiveDetailLevel, node.depth)
+  const showFloatingToolbar = Boolean(node.showQuickActions) && (
+    (node.floatingToolbarVisibility ?? 'always') === 'always'
+    || ((node.floatingToolbarVisibility ?? 'always') === 'hover' && isHovering)
+  )
+  const showAddTopicButtons = Boolean(node.showQuickActions) && (node.showAddTopicButtons ?? true)
   const beginEditing = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (isEditing || (event.target as HTMLElement).closest('.collapse-toggle, .node-resize-control')) return
+    if (isEditing || (event.target as HTMLElement).closest('button, input, textarea, [contenteditable], .collapse-toggle, .node-resize-control')) return
     event.preventDefault()
     event.stopPropagation()
     editNode(id)
@@ -197,6 +234,50 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     // React Flow 会把节点上的普通指针手势解释为拖拽；编辑态必须把它留给 textarea，
     // 否则文字选择会变成拖图，且指针落下时可能触发 blur 导致中文输入被提前提交。
     event.stopPropagation()
+  }
+  const keepNodeAction = (event: React.SyntheticEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  const addChild = (event: React.MouseEvent<HTMLButtonElement>) => {
+    keepNodeAction(event)
+    dispatch({ type: 'ADD_CHILD', parentId: id })
+  }
+  const addSibling = (event: React.MouseEvent<HTMLButtonElement>) => {
+    keepNodeAction(event)
+    dispatch({ type: 'ADD_SIBLING', nodeId: id })
+  }
+  const expandIdeas = (event: React.MouseEvent<HTMLButtonElement>) => {
+    keepNodeAction(event)
+    if (ideaStatus?.tone === 'working') return
+    const settings = loadAiSettings()
+    if (!settings.endpoint.trim() || !settings.model.trim() || (!settings.apiKey.trim() && !import.meta.env.DEV)) {
+      setIdeaStatus({ tone: 'error', text: '请先在 AI 工作台配置模型和 API Key' })
+      return
+    }
+    const currentDocument = useEditorStore.getState().document
+    const controller = new AbortController()
+    ideaRequestRef.current?.abort()
+    ideaRequestRef.current = controller
+    setIdeaStatus({ tone: 'working', text: '正在扩展 3 个想法…' })
+    void requestExpandedIdeas(settings, currentDocument, id, controller.signal)
+      .then((ideas) => {
+        if (controller.signal.aborted) return
+        const inserted = dispatch({ type: 'ADD_CHILDREN', parentId: id, topics: ideas })
+        setIdeaStatus(inserted
+          ? { tone: 'success', text: '已生成 3 个直接子节点' }
+          : { tone: 'error', text: '节点已变化，请重试' })
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setIdeaStatus({ tone: 'error', text: platformErrorMessage(error, '扩展失败，请重试') })
+      })
+      .finally(() => {
+        if (ideaRequestRef.current === controller) ideaRequestRef.current = null
+        if (!controller.signal.aborted) {
+          if (ideaStatusTimerRef.current !== null) window.clearTimeout(ideaStatusTimerRef.current)
+          ideaStatusTimerRef.current = window.setTimeout(() => setIdeaStatus(null), 2600)
+        }
+      })
   }
 
   return (
@@ -207,13 +288,24 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       onMouseLeave={() => setIsHovering(false)}
       onDoubleClick={beginEditing}
     >
+      {!isEditing && <>
+        {showFloatingToolbar && <div className="node-quick-toolbar nodrag nowheel" onPointerDown={keepNodeAction}>
+          <button type="button" className="node-quick-toolbar__expand" onClick={expandIdeas} disabled={ideaStatus?.tone === 'working'} title="让 AI 生成 3 个直接子节点">
+            <MagicWandIcon aria-hidden="true" />
+            <span>{ideaStatus?.tone === 'working' ? '扩展中…' : '扩展想法'}</span>
+          </button>
+          {ideaStatus && ideaStatus.tone !== 'working' && <span className={`node-quick-toolbar__status is-${ideaStatus.tone}`} role="status">{ideaStatus.text}</span>}
+        </div>}
+        {showAddTopicButtons && node.canAddChild && <button type="button" className="node-add-button node-add-button--child nodrag nowheel" aria-label="添加子节点" title="添加子节点（Tab）" onPointerDown={keepNodeAction} onClick={addChild}><PlusIcon /></button>}
+        {showAddTopicButtons && node.canAddSibling && <button type="button" className="node-add-button node-add-button--sibling nodrag nowheel" aria-label="添加同级节点" title="添加同级节点（Enter）" onPointerDown={keepNodeAction} onClick={addSibling}><PlusIcon /></button>}
+      </>}
       {!isEditing && showWorkspaceDetails && (selected || isHovering) && <NodeResizeControl
         position="bottom-right"
         className="node-resize-control"
         minWidth={node.isRoot ? 196 : 118}
         minHeight={node.isRoot ? 58 : 44}
-        maxWidth={560}
-        maxHeight={420}
+        maxWidth={MAX_NODE_WIDTH}
+        maxHeight={MAX_NODE_HEIGHT}
         autoScale
         onResizeEnd={(_, size) => dispatch({ type: 'SET_NODE_SIZE', nodeId: id, width: size.width, height: size.height })}
       />}
@@ -282,12 +374,13 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
       ) : <div className={`node-label ${showWorkspaceDetails && node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
-        {showStructureSignals && (taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0 || node.imageAttachment) && <span className="node-semantic-signals" aria-label="节点包含任务或资源信息">
+        {showStructureSignals && (taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0 || node.imageAttachment || node.htmlAttachment) && <span className="node-semantic-signals" aria-label="节点包含任务或资源信息">
           {taskIcon && <i>{taskIcon}</i>}
           {node.priority > 0 && <i>P{node.priority}</i>}
           {node.marks.length > 0 && <i>◆</i>}
           {node.tags.length > 0 && <i>●</i>}
           {node.imageAttachment && <i>▧</i>}
+          {node.htmlAttachment && <i>⌁</i>}
         </span>}
         {showWorkspaceDetails && (taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0) && <span ref={markerControlsRef} className="node-markers" title={[taskLabel, node.priority > 0 ? `优先级 ${node.priority}` : '', ...node.marks.map((mark) => nodeMarkMeta[mark].label), ...node.tags.map((tag) => tag.name)].filter(Boolean).join('，')}>
           {taskIcon && <button type="button" className={`node-task node-task--${node.taskStatus} nodrag`} aria-label={`任务状态：${taskLabel}，点击修改`} aria-haspopup="menu" aria-expanded={markerMenu === 'task'} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); selectNode(id); setMarkerMenu((current) => current === 'task' ? null : 'task') }}>{taskIcon}</button>}
@@ -303,6 +396,10 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           variant="node"
           onImageMeasured={(image) => dispatch({ type: 'SET_NODE_ATTACHMENT_IMAGE', nodeId: id, attachmentId: node.imageAttachment!.id, image })}
           onImageResize={(image) => dispatch({ type: 'SET_NODE_ATTACHMENT_IMAGE', nodeId: id, attachmentId: node.imageAttachment!.id, image })}
+        />}
+        {showWorkspaceDetails && node.htmlAttachment && <AttachmentHtmlPreview
+          attachment={node.htmlAttachment}
+          variant="node"
         />}
       </div>}
       <Handle
@@ -323,8 +420,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
         style={{ top: '50%', right: 0, transform: 'translate(50%, -50%)' }}
         isConnectable={false}
       />
-      <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation node-handle--relation-source" style={{ top: '28%', opacity: selected || isHovering ? 1 : undefined }} isConnectable aria-label="拖动建立关系" title="拖动到另一个节点建立关系" />
-      <Handle id="relation-source-right" type="source" position={Position.Right} className="node-handle node-handle--relation node-handle--relation-source" style={{ top: '28%', opacity: selected || isHovering ? 1 : undefined }} isConnectable aria-label="拖动建立关系" title="拖动到另一个节点建立关系" />
+      <Handle id="relation-source-left" type="source" position={Position.Left} className="node-handle node-handle--relation node-handle--relation-source" style={{ top: '28%', opacity: node.isRelationSource ? 1 : undefined }} isConnectable aria-label="拖动建立关系" title="拖动到另一个节点建立关系" />
+      <Handle id="relation-source-right" type="source" position={Position.Right} className="node-handle node-handle--relation node-handle--relation-source" style={{ top: '28%', opacity: node.isRelationSource ? 1 : undefined }} isConnectable aria-label="拖动建立关系" title="拖动到另一个节点建立关系" />
     </div>
   )
 })
