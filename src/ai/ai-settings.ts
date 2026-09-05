@@ -1,3 +1,5 @@
+import { rememberModelConnection } from './model-options'
+
 export type AiSettings = {
   endpoint: string
   model: string
@@ -24,6 +26,8 @@ export function loadAiSettings(): AiSettings {
 }
 
 export function saveAiSettings(settings: AiSettings) {
+  rememberModelConnection(loadAiSettings())
+  rememberModelConnection(settings)
   localStorage.setItem(storageKey, JSON.stringify(settings))
 }
 

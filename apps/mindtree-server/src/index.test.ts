@@ -66,6 +66,18 @@ afterEach(() => {
 })
 
 describe('AI production proxy', () => {
+  it('forwards image content larger than the default 1 MB body limit', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"choices":[]}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const app = await createTestApp()
+    const payload = { model: 'vision-model', messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,' + 'A'.repeat(1_100_000) } }] }] }
+    await api(app).post('/api/ai/chat')
+      .set('Authorization', 'Bearer sk-test-provider-key')
+      .send({ endpoint: 'https://api.deepseek.com/chat/completions', request: payload })
+      .expect(200)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.deepseek.com/chat/completions', expect.objectContaining({ body: JSON.stringify(payload) }))
+  })
+
   it('forwards a validated HTTPS request and returns the upstream response', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
       status: 200,

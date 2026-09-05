@@ -28,6 +28,7 @@ export async function createApp(repository: DocumentRepository, options: AppOpti
   expressApp.use(compression())
   expressApp.use(requireAllowedHost(options.allowedHosts))
   expressApp.use(requireAllowedOrigin(options.allowedOrigins))
+  expressApp.use('/api/ai/chat', express.json({ limit: '8mb' }))
   expressApp.use(express.json({ limit: '1mb' }))
 
   attachAiProxyRoute(expressApp, options.aiAllowedHosts)

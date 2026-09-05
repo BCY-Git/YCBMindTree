@@ -34,14 +34,14 @@ function assertPublicHttpsEndpoint(value: unknown): string {
   return endpoint
 }
 
-// 读取请求 body 的辅助函数；限制最大 1MB，防止内存耗尽。
+// 读取请求 body 的辅助函数；限制最大 8MB（容纳 4MB 截图的 base64 和文本），防止内存耗尽。
 function readBody(request: any): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = ''
     request.setEncoding('utf8')
     request.on('data', (chunk: string) => {
       body += chunk
-      if (body.length > 1_000_000) request.destroy(new Error('请求内容过大'))
+      if (Buffer.byteLength(body, 'utf8') > 8 * 1024 * 1024) request.destroy(new Error('请求内容过大'))
     })
     request.on('end', () => resolve(body))
     request.on('error', reject)

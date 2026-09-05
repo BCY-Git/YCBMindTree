@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Cross2Icon, InfoCircledIcon } from '@radix-ui/react-icons'
+import type { MindMapDocument } from '../domain/document.types'
 import type { EditorPreferences, FloatingToolbarVisibility } from './editor-preferences'
 
 const toolbarDescriptions: Record<FloatingToolbarVisibility, string> = {
@@ -8,7 +9,9 @@ const toolbarDescriptions: Record<FloatingToolbarVisibility, string> = {
   never: '选中主题时不显示浮动工具栏。',
 }
 
-export function EditorPreferencesDialog({ open, preferences, onChange, onClose }: {
+export function EditorPreferencesDialog({ open, preferences, onChange, onClose, layout, onLayoutChange }: {
+  layout?: MindMapDocument['layout']
+  onLayoutChange?: (layout: Partial<MindMapDocument['layout']>) => void
   open: boolean
   preferences: EditorPreferences
   onChange: (preferences: EditorPreferences) => void
@@ -36,8 +39,8 @@ export function EditorPreferencesDialog({ open, preferences, onChange, onClose }
         <header className="editor-preferences-dialog__header">
           <div>
             <p className="eyebrow">设置 · 编辑器</p>
-            <h2 id="editor-preferences-title">自定义你的编辑习惯</h2>
-            <p>按你的使用方式，决定节点工具在什么时候出现。</p>
+            <h2 id="editor-preferences-title">编辑器设置</h2>
+            <p>调整编辑交互与当前导图的布局。</p>
           </div>
           <button ref={closeButtonRef} type="button" className="editor-preferences-dialog__close" aria-label="关闭编辑器设置" onClick={onClose}><Cross2Icon /></button>
         </header>
@@ -58,8 +61,17 @@ export function EditorPreferencesDialog({ open, preferences, onChange, onClose }
           </div>
         </div>
 
+        {layout && onLayoutChange && <section className="editor-layout-settings" aria-label="当前导图布局">
+          <h3>当前导图布局</h3>
+          <p>间距随当前导图保存，可通过撤销恢复。</p>
+          <label htmlFor="settings-level-gap">层级间距 <output>{layout.levelGap}</output></label>
+          <input id="settings-level-gap" type="range" min="48" max="180" value={layout.levelGap} onChange={(event) => onLayoutChange({ levelGap: Number(event.target.value) })} />
+          <label htmlFor="settings-sibling-gap">同级间距 <output>{layout.siblingGap}</output></label>
+          <input id="settings-sibling-gap" type="range" min="8" max="72" value={layout.siblingGap} onChange={(event) => onLayoutChange({ siblingGap: Number(event.target.value) })} />
+        </section>}
+
         <footer className="editor-preferences-dialog__footer">
-          <p><InfoCircledIcon aria-hidden="true" />设置保存在当前设备，并会立即应用到画布。</p>
+          <p><InfoCircledIcon aria-hidden="true" />修改立即应用。编辑偏好保存在当前设备，布局随导图保存。</p>
           <button type="button" onClick={onClose}>完成</button>
         </footer>
       </section>

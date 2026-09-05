@@ -40,6 +40,9 @@ import { candidateMetricType, confirmationDuration } from './deposit/deposit-met
 import { markDepositTargetRevisited, recordDepositMetricOnce } from '../persistence/database'
 import { retrieveWorkspaceContext } from './workspace-retrieval'
 import { recordAiRetrievalUsage } from '../search/search-usage-metrics'
+import { readFlowScreenshot, screenshotToBranch, type FlowScreenshot } from './screenshot-to-branch'
+import { ModelSelector } from './ModelSelector'
+import { loadModelConnections } from './model-options'
 import type { AssistantContextScope, AssistantTab } from './AssistantDock'
 
 type ChatResponse = {
@@ -72,7 +75,7 @@ function mapContext(document: MindMapDocument, rootNodeId?: string) {
   })
 }
 
-type GeneratedBranch = { branch: MindNodeClipboard; targetId: string; targetTopic: string; mode: 'branch' | 'plan' | WorkflowAssetKind }
+type GeneratedBranch = { branch: MindNodeClipboard; targetId: string; targetTopic: string; documentId: string; mode: 'screenshot' | 'branch' | 'plan' | WorkflowAssetKind }
 type GeneratedReorganization = { plan: MapReorganization; sourceUpdatedAt: number }
 type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number }
 
@@ -100,7 +103,21 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [connections, setConnections] = useState<AiSettings[]>(loadModelConnections)
+  const settingsRef = useRef<HTMLDivElement>(null)
   const [prompt, setPrompt] = useState('')
+  const [screenshot, setScreenshot] = useState<FlowScreenshot | null>(null)
+  const [isReadingScreenshot, setIsReadingScreenshot] = useState(false)
+  const screenshotInputRef = useRef<HTMLInputElement>(null)
+  const screenshotReadVersion = useRef(0)
+  const activeDocumentId = useRef(document.id)
+  activeDocumentId.current = document.id
+  useEffect(() => {
+    screenshotReadVersion.current += 1
+    setScreenshot(null)
+    setIsReadingScreenshot(false)
+    setGeneratedBranch(null)
+  }, [document.id])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [notice, setNotice] = useState('配置后即可让 AI 基于当前导图协助思考。')
   const [isSending, setIsSending] = useState(false)
@@ -188,6 +205,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const saveSettings = () => {
     try {
       saveAiSettings(settings)
+      setConnections(loadModelConnections())
       setNotice(isConfigured ? '连接配置已仅保存到当前浏览器。' : '请填写服务地址、模型名和 API Key。')
     } catch {
       setNotice('当前浏览器无法保存配置，请检查本地存储权限。')
@@ -333,7 +351,7 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         setNotice(plan.moves.length ? `已生成 ${plan.moves.length} 项全图整理建议，请先核对预览。` : 'AI 认为当前结构无需调整。')
       } else if (intent !== 'chat') {
         const branch = isWorkflowAsset ? parseWorkflowAsset(content, intent) : parseGeneratedBranch(content)
-        setGeneratedBranch({ branch, targetId: target.id, targetTopic: target.topic, mode: intent })
+        setGeneratedBranch({ branch, documentId: document.id, targetId: target.id, targetTopic: target.topic, mode: intent })
         setNotice(intent === 'plan' ? `已生成 ${branchNodeCount(branch)} 个待插入计划节点，请先确认预览。` : isWorkflowAsset ? `已生成「${branch.topic}」草稿，请确认后写入协作焦点。` : `已生成 ${branchNodeCount(branch)} 个待插入节点，请先确认预览。`)
       } else {
         setChatMessages((current) => [...current, { id: randomUuid(), role: 'assistant', content, createdAt: Date.now() }])
@@ -353,13 +371,54 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
     void requestAssistant('deposit')
   }, [depositRequestId, requestAssistant])
 
+  const attachScreenshot = async (files: File[]) => {
+    if (isSending) return
+    if (files.length !== 1) { setNotice('请每次选择一张流程截图，确认插入后可继续转换下一张。'); return }
+    const version = ++screenshotReadVersion.current
+    setIsReadingScreenshot(true)
+    try {
+      const image = await readFlowScreenshot(files[0])
+      if (version !== screenshotReadVersion.current) return
+      setScreenshot(image)
+      setNotice('截图已就绪。选择支持图片的模型，点击“截图转导图”生成预览。')
+    } catch (error) {
+      if (version === screenshotReadVersion.current) setNotice(platformErrorMessage(error, '截图读取失败。'))
+    } finally {
+      if (version === screenshotReadVersion.current) setIsReadingScreenshot(false)
+    }
+  }
+
+  const convertScreenshot = async () => {
+    if (!screenshot || isSending || isReadingScreenshot) return
+    if (!isConfigured) { setSettingsOpen(true); setNotice('请先完成模型连接配置。'); return }
+    const sourceDocumentId = document.id
+    const target = document.nodes[targetNodeId] ?? document.nodes[document.rootId]
+    setIsSending(true)
+    setGeneratedBranch(null)
+    setNotice('正在识别流程截图并生成导图预览…')
+    try {
+      const branch = await screenshotToBranch(settings, screenshot, prompt)
+      if (activeDocumentId.current !== sourceDocumentId) return
+      setGeneratedBranch({ branch, documentId: sourceDocumentId, targetId: target.id, targetTopic: target.topic, mode: 'screenshot' })
+      setScreenshot(null)
+      setPrompt('')
+      setNotice(`已识别 ${branchNodeCount(branch)} 个节点，请核对步骤与条件分支后确认插入。`)
+    } catch (error) {
+      if (activeDocumentId.current === sourceDocumentId) setNotice(platformErrorMessage(error, '截图识别失败，请确认模型支持图片输入后重试。'))
+    } finally {
+      setIsSending(false)
+    }
+  }
+
   const sendPrompt = (event: FormEvent) => {
     event.preventDefault()
-    void requestAssistant('chat')
+    if (screenshot) void convertScreenshot()
+    else if (!isReadingScreenshot) void requestAssistant('chat')
   }
 
   const confirmGeneratedBranch = () => {
     if (!generatedBranch) return
+    if (generatedBranch.documentId !== document.id || useEditorStore.getState().document.id !== document.id) { setGeneratedBranch(null); setNotice('导图已切换，请重新生成预览。'); return }
     const inserted = insertGeneratedBranch(generatedBranch.targetId, generatedBranch.branch)
     setNotice(inserted ? `已插入「${generatedBranch.branch.topic}」，可按 ⌘Z 撤销。` : '插入失败：目标节点可能已被删除。')
     if (inserted) setGeneratedBranch(null)
@@ -517,11 +576,11 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       {activeTab === 'chat' && <p className={`ai-assistant__status ${isSending ? 'is-working' : ''}`} role={isSending ? 'status' : undefined}>{notice}</p>}
 
       {activeTab === 'chat' && settingsOpen && (
-        <div className="ai-settings">
-          <label>API 服务地址<input value={settings.endpoint} onChange={(event) => update('endpoint', event.target.value)} placeholder="https://…/v1" /></label>
-          <label>模型名称<input value={settings.model} onChange={(event) => update('model', event.target.value)} placeholder="例如 gpt-4o-mini" /></label>
-          <label>API Key<input type="password" value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="仅保存于此浏览器" autoComplete="off" /></label>
-          <button className="ai-save-button" type="button" onClick={saveSettings}>保存连接配置</button>
+        <div className="ai-settings" ref={settingsRef}>
+          <label>API 服务地址<input disabled={isSending} value={settings.endpoint} onChange={(event) => update('endpoint', event.target.value)} placeholder="https://…/v1" /></label>
+          <label>模型名称<input disabled={isSending} value={settings.model} onChange={(event) => update('model', event.target.value)} placeholder="例如 gpt-4o-mini" /></label>
+          <label>API Key<input disabled={isSending} type="password" value={settings.apiKey} onChange={(event) => update('apiKey', event.target.value)} placeholder="仅保存于此浏览器" autoComplete="off" /></label>
+          <button className="ai-save-button" type="button" disabled={isSending} onClick={saveSettings}>保存连接配置</button>
           <label className="ai-ghost-toggle"><input type="checkbox" checked={ghostCompletionEnabled} onChange={(event) => toggleGhostCompletion(event.target.checked)} />启用备注幽灵续写（DeepSeek Beta）</label>
           <p className="ai-assistant__privacy">兼容 OpenAI Chat Completions；Web 端经 MindTree 服务器受限转发，桌面端直连 AI 服务。当前 Key 仅保存在此浏览器。</p>
         </div>
@@ -554,11 +613,42 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           {isSending && <article className="ai-message ai-message--assistant ai-message--pending" role="status"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>正在思考</time></header><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
         </section>
         <form className="ai-prompt" onSubmit={sendPrompt}>
-          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={contextScope === 'project' ? '例如：找出项目最大的风险，并给我可执行的缓解方案…' : contextScope === 'workspace' ? '例如：关联已有资料，为这个主题找出值得复用的想法…' : '例如：把这个问题想透，给出三条值得继续探索的路径…'} />
-          <div className="ai-prompt__actions"><button type="submit" disabled={isSending}>{isSending ? '正在协作…' : '开始协作 ↗'}</button><button type="button" className="ai-generate-button" disabled={isSending} onClick={() => { void requestAssistant('branch') }}>扩展分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending} onClick={() => { void requestAssistant('plan') }}>生成行动</button></div>
+          <div className="ai-prompt__composer" onDragOver={(event) => { event.preventDefault() }} onDrop={(event) => {
+            event.preventDefault()
+            void attachScreenshot(Array.from(event.dataTransfer.files))
+          }}>
+          <input ref={screenshotInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="上传流程截图" hidden disabled={isSending || isReadingScreenshot} onChange={(event) => {
+            const files = Array.from(event.target.files ?? [])
+            event.target.value = ''
+            if (files.length) void attachScreenshot(files)
+          }} />
+          {screenshot && <div className="ai-screenshot"><img src={screenshot.dataUrl} alt="待转换的流程截图" /><span>{screenshot.name}</span><button type="button" disabled={isSending} aria-label="移除流程截图" onClick={() => { screenshotReadVersion.current += 1; setIsReadingScreenshot(false); setScreenshot(null) }}>×</button></div>}
+          {isReadingScreenshot && <p className="ai-screenshot-hint" role="status">正在读取截图…</p>}
+          <textarea onPaste={(event) => {
+            const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'))
+            if (images.length) { event.preventDefault(); void attachScreenshot(images) }
+          }} aria-label="发送给 AI 的消息" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={screenshot ? '补充转换要求（可选），例如：按用户操作顺序整理…' : contextScope === 'project' ? '例如：找出项目最大的风险，并给我可执行的缓解方案…' : contextScope === 'workspace' ? '例如：关联已有资料，为这个主题找出值得复用的想法…' : '例如：把这个问题想透，给出三条值得继续探索的路径…'} />
+          <div className="ai-prompt__toolbar"><button className="ai-screenshot-upload" type="button" disabled={isSending || isReadingScreenshot} onClick={() => screenshotInputRef.current?.click()} title="上传、拖入或粘贴流程截图（PNG / JPEG / WebP，最大 4 MB）">＋ 截图</button><ModelSelector settings={settings} connections={connections} disabled={isSending} onSelect={(next) => {
+            try {
+              saveAiSettings(next)
+              setSettings(next)
+              setConnections(loadModelConnections())
+              setNotice(`已切换到 ${next.model}。`)
+            } catch {
+              setNotice('模型切换未保存，请检查本地存储权限。')
+            }
+          }} onConfigure={() => {
+            setSettingsOpen(true)
+            requestAnimationFrame(() => {
+              settingsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+              settingsRef.current?.querySelector('input')?.focus({ preventScroll: true })
+            })
+          }} /></div>
+          </div>
+          <div className="ai-prompt__actions"><button type="submit" disabled={isSending || isReadingScreenshot}>{isSending ? '正在协作…' : screenshot ? '截图转导图 ↗' : '开始协作 ↗'}</button><button type="button" className="ai-generate-button" disabled={isSending || Boolean(screenshot) || isReadingScreenshot} onClick={() => { void requestAssistant('branch') }}>扩展分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending || Boolean(screenshot) || isReadingScreenshot} onClick={() => { void requestAssistant('plan') }}>生成行动</button></div>
         </form>
         {retrievedSources.length > 0 && <section className="ai-source-trace" aria-label="本次读取来源"><header><span>已检索工作区</span><small>{retrievedSources.length} 条</small></header>{retrievedSources.slice(0, 6).map((source) => <div key={`${source.documentId}:${source.topic}`}><strong>{source.documentTitle}</strong><span>{source.topic}</span></div>)}</section>}
-        {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
+        {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'screenshot' ? '截图识别预览' : generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
         {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
       </>}
 
