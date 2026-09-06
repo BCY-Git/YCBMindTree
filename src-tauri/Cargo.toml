@@ -1,6 +1,6 @@
 [package]
 name = "mindtree"
-version = "1.24.1"
+version = "1.24.2"
 description = "MindTree 离线优先思维导图"
 authors = ["MindTree"]
 license = ""
@@ -27,3 +27,6 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-http = "2"
+
+arboard = "3.6.1"
+png = "0.17"

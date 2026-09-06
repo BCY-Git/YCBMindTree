@@ -1,3 +1,4 @@
+import { isTauriRuntime } from '../platform/tauri'
 /**
  * MindMapCanvas — 思维导图画布主视图。
  *
@@ -170,6 +171,12 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>(() => resolveSemanticZoomLevel(null, 1, loadSemanticZoomEnabled()))
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
   const clipboardTargetRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!selectedNodeId || editingNodeId || commandPaletteOpen || searchOpen) return
+    const active = window.document.activeElement
+    if (active?.closest('input, textarea, [contenteditable="true"], [role="dialog"]')) return
+    clipboardTargetRef.current?.focus({ preventScroll: true })
+  }, [selectedNodeId, editingNodeId, commandPaletteOpen, searchOpen])
   const [pasteAttachmentStatus, setPasteAttachmentStatus] = useState<string | null>(null)
   const [htmlDragActive, setHtmlDragActive] = useState(false)
   const htmlDragDepthRef = useRef(0)
@@ -577,6 +584,10 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       return
     }
     selectNode(node.id, event.metaKey || event.ctrlKey)
+    // macOS 在分发快捷键前会检查原生 Paste 菜单是否可用；必须提前建立编辑焦点。
+    if (!(event.target as Element).closest('input, textarea, [contenteditable="true"]')) {
+      clipboardTargetRef.current?.focus({ preventScroll: true })
+    }
   }, [cancelRelationCreation, commitRelationTarget, relationSourceIds, selectNode])
 
   const relationDraftPaths = useMemo(() => {
@@ -906,7 +917,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     const clipboardReader = typeof navigator.clipboard?.read === 'function'
       ? navigator.clipboard as ClipboardImageReader
       : null
-    if (!clipboardReader) {
+    if (!clipboardReader && !isTauriRuntime()) {
       if (pasteInternalClipboard()) return
       setPasteAttachmentStatus('当前浏览器不支持读取剪贴板图片。')
       return
@@ -1075,6 +1086,11 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       // 右键粘贴与键盘粘贴因此共用下方 ClipboardEvent 路径，
       // 才能稳定读到 macOS/Finder 提供的 clipboardData.files/items。
       if (meta && event.key.toLowerCase() === 'v') {
+        if (isTauriRuntime()) {
+          event.preventDefault()
+          pasteImageToNode(selected, true)
+          return
+        }
         // 给 WebKit 的原生粘贴动作一个可编辑目标；仍不 preventDefault，
         // 图片由 ClipboardEvent 提供，不依赖 HTTPS 或额外剪贴板读取权限。
         clipboardTargetRef.current?.focus({ preventScroll: true })
@@ -1153,14 +1169,13 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [basePositionsById, cancelRelationCreation, canCreateBoundary, commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, flowInstance, focusRoot, focusRootId, pasteIntoNode, redo, relationSourceIds.length, selectAllVisible, selectNode, showInteractionStatus, toggleBranchFocus, undo])
+  }, [basePositionsById, cancelRelationCreation, canCreateBoundary, commandPaletteOpen, copyNode, cutNode, dispatch, editNode, editingNodeId, flowInstance, focusRoot, focusRootId, pasteImageToNode, pasteIntoNode, redo, relationSourceIds.length, selectAllVisible, selectNode, showInteractionStatus, toggleBranchFocus, undo])
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target
       if (event.defaultPrevented) return
       if (target !== clipboardTargetRef.current && target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
-      if (target === clipboardTargetRef.current) clipboardTargetRef.current?.blur()
       const directImage = findClipboardImageFile(event.clipboardData)
       const sourceDocumentId = useEditorStore.getState().document.id
       const selected = useEditorStore.getState().selectedNodeId
@@ -1176,7 +1191,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         // 事件文件与 HTML data:image 不需要权限，优先处理以避免被异步剪贴板读取阻塞。
         // Async Clipboard API 仅作为 WebKit 未暴露同步 File 时的兜底。
         let image = directImage ?? readClipboardHtmlImageFile(event.clipboardData)
-        if (!image && clipboardReader) {
+        if (!image && (clipboardReader || isTauriRuntime())) {
           setPasteAttachmentStatus('正在读取剪贴板图片…')
           // 必须在用户粘贴事件内、首次 await 之前调用 read()。
           image = await readClipboardImageFile(null, clipboardReader)

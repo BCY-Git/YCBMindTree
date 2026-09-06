@@ -1,3 +1,5 @@
+import { isTauriRuntime } from '../platform/tauri'
+
 export type ClipboardImageData = {
   items?: ArrayLike<Pick<DataTransferItem, 'type' | 'getAsFile'>> | null
   files?: ArrayLike<File> | null
@@ -104,6 +106,16 @@ export async function readClipboardImageFile(
 ): Promise<File | null> {
   const directImage = findClipboardImageFile(data)
   if (directImage) return directImage
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const base64 = await invoke<string | null>('read_clipboard_image')
+      if (base64) {
+        const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))
+        return new File([bytes], '粘贴图片.png', { type: 'image/png' })
+      }
+    } catch { /* 网页剪贴板仍可作为兜底。 */ }
+  }
   if (!reader) return null
 
   try {

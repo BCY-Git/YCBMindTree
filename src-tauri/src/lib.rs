@@ -4,6 +4,30 @@ use std::path::PathBuf;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use tauri::Manager;
 
+/// 用户主动粘贴时读取系统图片；不依赖 WKWebView 的网页剪贴板权限。
+#[tauri::command]
+fn read_clipboard_image() -> Result<Option<String>, String> {
+  let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+  let image = match clipboard.get_image() {
+    Ok(image) => image,
+    Err(arboard::Error::ContentNotAvailable) => return Ok(None),
+    Err(error) => return Err(error.to_string()),
+  };
+  if image.bytes.len() > 100 * 1024 * 1024 {
+    return Err("剪贴板图片尺寸过大".into());
+  }
+  let mut bytes = Vec::new();
+  {
+    let mut encoder = png::Encoder::new(&mut bytes, image.width as u32, image.height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer.write_image_data(&image.bytes).map_err(|e| e.to_string())?;
+  }
+  if bytes.len() > 15 * 1024 * 1024 { return Err("图片超过 15 MB".into()); }
+  Ok(Some(BASE64_STANDARD.encode(bytes)))
+}
+
 #[tauri::command]
 fn reveal_export_in_finder(path: String) -> Result<(), String> {
   #[cfg(target_os = "macos")]
@@ -94,7 +118,7 @@ pub fn run() {
           .unwrap(),
       }
     })
-    .invoke_handler(tauri::generate_handler![reveal_export_in_finder, read_dropped_html, store_html_preview])
+    .invoke_handler(tauri::generate_handler![read_clipboard_image, reveal_export_in_finder, read_dropped_html, store_html_preview])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

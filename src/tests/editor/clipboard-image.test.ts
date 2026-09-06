@@ -1,5 +1,26 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { findClipboardImageFile, readClipboardHtmlImageFile, readClipboardImageFile } from '@/editor/clipboard-image'
+
+const native = vi.hoisted(() => ({ enabled: false, invoke: vi.fn() }))
+vi.mock('../../platform/tauri', () => ({ isTauriRuntime: () => native.enabled }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke }))
+afterEach(() => { native.enabled = false; native.invoke.mockReset() })
+
+it('reads system images in the desktop WebView without a browser clipboard API', async () => {
+  native.enabled = true
+  native.invoke.mockResolvedValue(btoa('png-bytes'))
+  const file = await readClipboardImageFile(null, null)
+  expect(native.invoke).toHaveBeenCalledWith('read_clipboard_image')
+  expect(file?.type).toBe('image/png')
+  expect(file?.size).toBe(9)
+})
+
+it('falls back to browser image data when native reading fails', async () => {
+  native.enabled = true
+  native.invoke.mockRejectedValue(new Error('unavailable'))
+  const file = await readClipboardImageFile(null, { read: async () => [{ types: ['image/png'], getType: async () => new Blob(['png'], { type: 'image/png' }) }] })
+  expect(file?.size).toBe(3)
+})
 
 describe('findClipboardImageFile', () => {
   it('reads an image copied as a macOS file when clipboard items are empty', () => {

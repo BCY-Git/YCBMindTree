@@ -5,6 +5,10 @@ import { MindMapCanvas } from '../../editor/MindMapCanvas'
 import { createInitialDocument } from '../../domain/document.factory'
 import { useEditorStore } from '../../store/editor.store'
 
+const nativeClipboard = vi.hoisted(() => ({ enabled: false, invoke: vi.fn() }))
+vi.mock('../../platform/tauri', () => ({ isTauriRuntime: () => nativeClipboard.enabled }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeClipboard.invoke }))
+
 vi.mock('../../persistence/database', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../persistence/database')>(),
   saveNodeAttachment: vi.fn(async (_documentId: string, _nodeId: string, file: File) => ({ id: 'pasted-image', name: file.name, type: file.type, size: file.size, createdAt: 1 })),
@@ -15,6 +19,8 @@ vi.mock('../../attachments/image-presentation', async (importOriginal) => ({
 }))
 
 beforeEach(() => {
+  nativeClipboard.enabled = false
+  nativeClipboard.invoke.mockReset()
   const document = createInitialDocument()
   act(() => useEditorStore.getState().hydrate(document))
   vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
@@ -72,6 +78,19 @@ describe('MindMapCanvas clipboard shortcuts', () => {
     expect(useEditorStore.getState().document.nodes[selectedId].attachments[0].name).toBe('截图.png')
     act(() => useEditorStore.getState().undo())
     expect(useEditorStore.getState().document.nodes[selectedId].attachments).toHaveLength(0)
+  })
+
+  it('pastes desktop screenshots on Cmd+V even when WebKit emits no paste event', async () => {
+    nativeClipboard.enabled = true
+    nativeClipboard.invoke.mockResolvedValue(btoa('png-bytes'))
+    const mapDocument = useEditorStore.getState().document
+    const selectedId = mapDocument.rootId
+    act(() => useEditorStore.getState().selectNode(selectedId))
+    renderCanvas()
+    const event = dispatchCommandShortcut('v')
+    expect(event.defaultPrevented).toBe(true)
+    await waitFor(() => expect(useEditorStore.getState().document.nodes[selectedId].attachments).toHaveLength(1))
+    expect(nativeClipboard.invoke).toHaveBeenCalledWith('read_clipboard_image')
   })
 
   it('does not steal Command+V or image paste from a text editor', () => {
