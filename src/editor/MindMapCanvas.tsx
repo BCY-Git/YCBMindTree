@@ -169,6 +169,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const [semanticZoomEnabled, setSemanticZoomEnabled] = useState(loadSemanticZoomEnabled)
   const [semanticZoomLevel, setSemanticZoomLevel] = useState<SemanticZoomLevel>(() => resolveSemanticZoomLevel(null, 1, loadSemanticZoomEnabled()))
   const [editingNodeHeights, setEditingNodeHeights] = useState<Map<string, number>>(new Map())
+  const clipboardTargetRef = useRef<HTMLTextAreaElement>(null)
   const [pasteAttachmentStatus, setPasteAttachmentStatus] = useState<string | null>(null)
   const [htmlDragActive, setHtmlDragActive] = useState(false)
   const htmlDragDepthRef = useRef(0)
@@ -1028,7 +1029,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       if (relationSourceIds.length && event.key === 'Escape') { event.preventDefault(); cancelRelationCreation(); return }
       if (meta && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandPaletteOpen(true); return }
       if (meta && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); return }
-      if (target.closest('input, textarea, [contenteditable="true"]')) return
+      if (target !== clipboardTargetRef.current && target.closest('input, textarea, [contenteditable="true"]')) return
       const editor = useEditorStore.getState()
       const selected = editor.selectedNodeId ?? editor.document.rootId
       if (editingNodeId || commandPaletteOpen) return
@@ -1073,7 +1074,12 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       // Command/Ctrl+V 必须保留给 WebView 的原生 paste 事件。
       // 右键粘贴与键盘粘贴因此共用下方 ClipboardEvent 路径，
       // 才能稳定读到 macOS/Finder 提供的 clipboardData.files/items。
-      if (meta && event.key.toLowerCase() === 'v') return
+      if (meta && event.key.toLowerCase() === 'v') {
+        // 给 WebKit 的原生粘贴动作一个可编辑目标；仍不 preventDefault，
+        // 图片由 ClipboardEvent 提供，不依赖 HTTPS 或额外剪贴板读取权限。
+        clipboardTargetRef.current?.focus({ preventScroll: true })
+        return
+      }
       if (event.key === 'Enter') {
         event.preventDefault()
         const selectedNode = editor.document.nodes[selected]
@@ -1152,8 +1158,11 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target
-      if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
+      if (event.defaultPrevented) return
+      if (target !== clipboardTargetRef.current && target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return
+      if (target === clipboardTargetRef.current) clipboardTargetRef.current?.blur()
       const directImage = findClipboardImageFile(event.clipboardData)
+      const sourceDocumentId = useEditorStore.getState().document.id
       const selected = useEditorStore.getState().selectedNodeId
       event.preventDefault()
       if (!selected) {
@@ -1166,11 +1175,13 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       void (async () => {
         // 事件文件与 HTML data:image 不需要权限，优先处理以避免被异步剪贴板读取阻塞。
         // Async Clipboard API 仅作为 WebKit 未暴露同步 File 时的兜底。
-        let image = directImage ?? await readClipboardHtmlImageFile(event.clipboardData)
+        let image = directImage ?? readClipboardHtmlImageFile(event.clipboardData)
         if (!image && clipboardReader) {
           setPasteAttachmentStatus('正在读取剪贴板图片…')
-          image = await readClipboardImageFile(event.clipboardData, clipboardReader)
+          // 必须在用户粘贴事件内、首次 await 之前调用 read()。
+          image = await readClipboardImageFile(null, clipboardReader)
         }
+        if (useEditorStore.getState().document.id !== sourceDocumentId) return
         if (!image) {
           const internalClipboard = useEditorStore.getState().clipboard
           if (internalClipboard) {
@@ -1192,10 +1203,11 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         try {
           // 尺寸读取是增强信息；某些系统照片格式无法解码时，仍要保留已粘贴的文件。
           const [attachment, imagePresentation] = await Promise.all([
-            saveNodeAttachment(document.id, selected, file),
+            saveNodeAttachment(sourceDocumentId, selected, file),
             readImagePresentation(file).catch(() => null),
           ])
           if (imagePresentation) attachment.image = imagePresentation
+          if (useEditorStore.getState().document.id !== sourceDocumentId) return
           if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selected, attachment })) {
             setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
           } else {
@@ -1419,6 +1431,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       {freeTopicAttachmentParentId && <div className="free-topic-attach-hint" role="status">松开即可添加到高亮分支</div>}
       {detachingNodeId && <div className="tree-drop-hint" role="status">松开即可成为独立主题</div>}
       {dropIntent && <div className="tree-drop-hint" role="status">{dropIntent.kind === 'child' ? '松开即可成为该节点的子节点' : `松开即可插入此分支的第 ${dropIntent.index + 1} 个位置`}</div>}
+      <textarea ref={clipboardTargetRef} className="canvas-clipboard-target" tabIndex={-1} aria-label="画布粘贴接收区" />
       {pasteAttachmentStatus && <div className="paste-attachment-hint" role="status">{pasteAttachmentStatus}</div>}
       {interactionStatus && <div className="paste-attachment-hint" role="status">{interactionStatus}</div>}
       {searchOpen && <NodeSearchDialog currentDocumentId={document.id} documents={[document, ...workspaceDocuments.filter((item) => item.id !== document.id)]} tags={tags} provenance={searchProvenance} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const selected = selectedNodeId ? document.nodes[selectedNodeId] : null; const parentId = selected && !selected.isFreeTopic ? selected.id : document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}

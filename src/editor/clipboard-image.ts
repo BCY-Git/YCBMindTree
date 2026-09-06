@@ -76,7 +76,7 @@ export function hasClipboardImageHint(data: ClipboardImageData | null | undefine
  * 某些网页与桌面应用复制图片时只会写入 text/html；仅接受内嵌 data:image，
  * 不追随远程 URL 或 file: URL，避免复制操作隐式发起网络读取或越权读取本地文件。
  */
-export async function readClipboardHtmlImageFile(data: ClipboardImageData | null | undefined): Promise<File | null> {
+export function readClipboardHtmlImageFile(data: ClipboardImageData | null | undefined): File | null {
   const html = data?.getData?.('text/html')
   if (!html || typeof DOMParser === 'undefined') return null
   const source = new DOMParser().parseFromString(html, 'text/html').querySelector('img[src^="data:image/"]')?.getAttribute('src')
@@ -111,7 +111,7 @@ export async function readClipboardImageFile(
     for (const item of clipboardItems) {
       const imageType = Array.from(item.types).find((type) => type.startsWith('image/'))
       if (!imageType) continue
-      const blob = await item.getType(imageType)
+      const blob = await waitForClipboardRead(item.getType(imageType), timeoutMs)
       const type = blob.type.startsWith('image/') ? blob.type : imageType
       return new File([blob], `粘贴图片.${extensionForImageMime(type)}`, { type })
     }
