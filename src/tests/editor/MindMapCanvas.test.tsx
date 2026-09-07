@@ -93,6 +93,39 @@ describe('MindMapCanvas clipboard shortcuts', () => {
     expect(nativeClipboard.invoke).toHaveBeenCalledWith('read_clipboard_image')
   })
 
+  it('attaches an image pasted while a node title is being edited', async () => {
+    const mapDocument = useEditorStore.getState().document
+    const selectedId = mapDocument.nodes[mapDocument.rootId].childIds[0]
+    act(() => useEditorStore.getState().selectNode(selectedId))
+    renderCanvas()
+    act(() => useEditorStore.getState().editNode(selectedId))
+
+    const input = screen.getByDisplayValue(mapDocument.nodes[selectedId].topic)
+    fireEvent.paste(input, { clipboardData: { files: [new File(['png'], '编辑时截图.png', { type: 'image/png' })], items: [] } })
+
+    await waitFor(() => expect(useEditorStore.getState().document.nodes[selectedId].attachments).toHaveLength(1))
+    expect(useEditorStore.getState().document.nodes[selectedId].attachments[0].name).toBe('编辑时截图.png')
+    expect(useEditorStore.getState().editingNodeId).toBeNull()
+  })
+
+  it('removes the clicked image attachment with Command+X', () => {
+    const mapDocument = useEditorStore.getState().document
+    const selectedId = mapDocument.nodes[mapDocument.rootId].childIds[0]
+    const attachment = { id: 'clicked-image', name: '流程图.png', type: 'image/png', size: 3, createdAt: 1 }
+    act(() => useEditorStore.getState().dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId: selectedId, attachment }))
+    renderCanvas()
+    const image = document.createElement('button')
+    image.dataset.attachmentId = attachment.id
+    document.body.append(image)
+    image.focus()
+
+    fireEvent.keyDown(image, { key: 'x', metaKey: true })
+
+    expect(useEditorStore.getState().document.nodes[selectedId].attachments).toHaveLength(0)
+    expect(screen.getByRole('status').textContent).toContain('已移除图片。')
+    image.remove()
+  })
+
   it('does not steal Command+V or image paste from a text editor', () => {
     const view = renderCanvas()
     const input = document.createElement('textarea')

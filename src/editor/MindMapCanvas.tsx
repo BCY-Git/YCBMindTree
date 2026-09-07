@@ -225,6 +225,32 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
     })
   }, [])
 
+  const attachPastedImage = useCallback((nodeId: string, image: File) => {
+    if (image.size > 15 * 1024 * 1024) {
+      setPasteAttachmentStatus('图片超过 15 MB，未添加。')
+      return
+    }
+    const sourceDocumentId = document.id
+    const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
+    void (async () => {
+      try {
+        const [attachment, imagePresentation] = await Promise.all([
+          saveNodeAttachment(sourceDocumentId, nodeId, file),
+          readImagePresentation(file).catch(() => null),
+        ])
+        if (imagePresentation) attachment.image = imagePresentation
+        if (useEditorStore.getState().document.id !== sourceDocumentId) return
+        if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId, attachment })) {
+          setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
+        } else {
+          setPasteAttachmentStatus('目标节点已不存在，图片未添加。')
+        }
+      } catch {
+        setPasteAttachmentStatus('图片保存失败，请重试。')
+      }
+    })()
+  }, [dispatch, document.id])
+
   useEffect(() => setEditingNodeHeights(new Map()), [document.id])
 
   // ── 构建 React Flow nodes / edges（响应 document / selectedNodeId / theme 变化）─────────
@@ -315,6 +341,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
           depth,
           layoutHeight: item.height,
           onEditingHeightChange: (height) => reportEditingNodeHeight(item.id, height),
+          onPasteImage: (image) => attachPastedImage(item.id, image),
           showQuickActions: selectedNodeIds.length === 1 && selectedNodeId === item.id,
           floatingToolbarVisibility: editorPreferences.floatingToolbarVisibility,
           showAddTopicButtons: editorPreferences.showAddTopicButtons,
@@ -407,7 +434,7 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       return [{ id: summary.id, topic: summary.topic, left, top, width: 172, height: 44, sources, targetY: centerY }]
     })
     return { baseNodes, edges: [...treeEdges, ...relationEdges], basePositionsById: new Map(stablePlaced.map((item) => [item.id, item])), boundaryBoxes, summaryBoxes }
-  }, [dispatch, document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, editorPreferences, filter, focusRootId, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectRelation, selectedNodeId, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
+  }, [attachPastedImage, dispatch, document, dragPreview, dropIntent, editingNodeHeights, editingNodeId, editorPreferences, filter, focusRootId, freeTopicAttachmentParentId, relationSourceIds, reportEditingNodeHeight, selectRelation, selectedNodeId, selectedNodeIds, selectedRelationId, tags, theme, viewDocument])
 
   const onViewportMove = useCallback((_: MouseEvent | TouchEvent | null, viewport: { zoom: number }) => {
     setSemanticZoomLevel((current) => resolveSemanticZoomLevel(current, viewport.zoom, semanticZoomEnabled))
@@ -930,27 +957,9 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
         setPasteAttachmentStatus('未读取到可用图片。请复制图片本身，并允许浏览器读取剪贴板后重试。')
         return
       }
-      if (image.size > 15 * 1024 * 1024) {
-        setPasteAttachmentStatus('图片超过 15 MB，未添加。')
-        return
-      }
-      const file = new File([image], image.name || `粘贴图片-${Date.now()}.${image.type.split('/')[1] || 'png'}`, { type: image.type })
-      try {
-        const [attachment, imagePresentation] = await Promise.all([
-          saveNodeAttachment(document.id, nodeId, file),
-          readImagePresentation(file).catch(() => null),
-        ])
-        if (imagePresentation) attachment.image = imagePresentation
-        if (dispatch({ type: 'ADD_NODE_ATTACHMENT', nodeId, attachment })) {
-          setPasteAttachmentStatus(`已添加图片：${attachment.name}`)
-        } else {
-          setPasteAttachmentStatus('目标节点已不存在，图片未添加。')
-        }
-      } catch {
-        setPasteAttachmentStatus('图片保存失败，请重试。')
-      }
+      attachPastedImage(nodeId, image)
     })()
-  }, [dispatch, document.id, document.nodes, pasteIntoNode, showInteractionStatus])
+  }, [attachPastedImage, document.nodes, pasteIntoNode, showInteractionStatus])
 
   // ── 拖放 HTML 附件 ───────────────────────────────────────────────────────────
   // 落在节点上 → 挂到该节点；落在空白处 → 新建一个以文件名命名的自由主题节点，

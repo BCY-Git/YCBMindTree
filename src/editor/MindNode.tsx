@@ -16,6 +16,8 @@ import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
 import { requestExpandedIdeas } from '../ai/expand-ideas'
 import { platformErrorMessage } from '../platform/tauri'
+import { isTauriRuntime } from '../platform/tauri'
+import { findClipboardImageFile, readClipboardImageFile } from './clipboard-image'
 import type { MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
 import { AttachmentImage } from '../attachments/AttachmentImage'
@@ -48,6 +50,8 @@ export type MindNodeData = {
   /** 布局层分配给当前卡片的高度；编辑框以它为最低高度，避免进入编辑后裁掉原有多行内容。 */
   layoutHeight: number
   onEditingHeightChange?: (height: number | null) => void
+  /** 编辑标题时粘贴图片，将图片挂到当前节点并结束文本编辑。 */
+  onPasteImage?: (image: File) => void
   /** 仅单选主节点时展示 XMind 风格快捷操作。 */
   showQuickActions?: boolean
   floatingToolbarVisibility?: FloatingToolbarVisibility
@@ -235,6 +239,30 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     // 否则文字选择会变成拖图，且指针落下时可能触发 blur 导致中文输入被提前提交。
     event.stopPropagation()
   }
+  const pasteIntoTopic = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const directImage = findClipboardImageFile(event.clipboardData)
+    // 浏览器的普通文本粘贴保持原生行为；桌面端再从 macOS 原生剪贴板确认图片。
+    if (!directImage && !isTauriRuntime()) return
+    event.preventDefault()
+    const input = event.currentTarget
+    const text = event.clipboardData.getData?.('text/plain') ?? ''
+    void (async () => {
+      const image = directImage ?? await readClipboardImageFile(event.clipboardData, null)
+      if (image) {
+        node.onPasteImage?.(image)
+        editNode(null)
+        return
+      }
+      if (!text) return
+      const start = input.selectionStart ?? topic.length
+      const end = input.selectionEnd ?? start
+      setTopic((current) => `${current.slice(0, start)}${text}${current.slice(end)}`)
+      window.requestAnimationFrame(() => {
+        const cursor = start + text.length
+        input.setSelectionRange(cursor, cursor)
+      })
+    })()
+  }
   const keepNodeAction = (event: React.SyntheticEvent) => {
     event.preventDefault()
     event.stopPropagation()
@@ -335,6 +363,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
             onPointerDown={keepEditingGesture}
             onMouseDown={keepEditingGesture}
             onDoubleClick={keepEditingGesture}
+            onPaste={pasteIntoTopic}
             onChange={(event) => { setCursorAtEnd(event.target.selectionStart === event.target.value.length); setTopic(event.target.value) }}
             onSelect={(event) => setCursorAtEnd(event.currentTarget.selectionStart === event.currentTarget.value.length && event.currentTarget.selectionEnd === event.currentTarget.value.length)}
             onCompositionStart={() => { composingRef.current = true; setComposing(true) }}

@@ -1,7 +1,7 @@
 {
   "name": "@mindtree/web",
   "private": true,
-  "version": "1.24.2",
+  "version": "1.24.3",
   "type": "module",
   "packageManager": "pnpm@11.21.0",
   "engines": {
