@@ -213,6 +213,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const effectiveDetailLevel: SemanticZoomLevel = selected || isEditing ? 'workspace' : node.semanticZoomLevel
   const showWorkspaceDetails = effectiveDetailLevel === 'workspace'
   const showStructureSignals = effectiveDetailLevel === 'structure'
+  // 图片/HTML 附件是正文内容而非装饰：只有「概览」远焦才收起，结构层照常显示（布局已预留空间）。
+  const showAttachments = effectiveDetailLevel !== 'overview'
   const semanticEmphasis = resolveSemanticNodeEmphasis(effectiveDetailLevel, node.depth)
   const showFloatingToolbar = Boolean(node.showQuickActions) && (
     (node.floatingToolbarVisibility ?? 'always') === 'always'
@@ -355,7 +357,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {suggestion && <span className="sr-only">按 Tab 接受 AI 续写，按 Esc 忽略</span>}
           {completionError && <span className="sr-only" role="status">AI 续写暂不可用</span>}
         </div>
-      ) : <div className={`node-label ${showWorkspaceDetails && node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
+      ) : <div className={`node-label ${showAttachments && node.imageAttachment ? 'has-image' : ''}`} title="双击编辑主题">
         {showStructureSignals && (taskIcon || node.priority > 0 || node.marks.length > 0 || node.tags.length > 0 || node.imageAttachment || node.htmlAttachment) && <span className="node-semantic-signals" aria-label="节点包含任务或资源信息">
           {taskIcon && <i>{taskIcon}</i>}
           {node.priority > 0 && <i>P{node.priority}</i>}
@@ -373,13 +375,13 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           {node.tags.map((tag) => <i key={tag.id} className="node-tag-dot" title={tag.name} style={{ '--tag-color': tag.color } as CSSProperties} aria-hidden="true" />)}
         </span>}
         <span>{node.label}</span>
-        {showWorkspaceDetails && node.imageAttachment && <AttachmentImage
+        {showAttachments && node.imageAttachment && <AttachmentImage
           attachment={node.imageAttachment}
           variant="node"
           onImageMeasured={(image) => dispatch({ type: 'SET_NODE_ATTACHMENT_IMAGE', nodeId: id, attachmentId: node.imageAttachment!.id, image })}
           onImageResize={(image) => dispatch({ type: 'SET_NODE_ATTACHMENT_IMAGE', nodeId: id, attachmentId: node.imageAttachment!.id, image })}
         />}
-        {showWorkspaceDetails && node.htmlAttachment && <AttachmentHtmlPreview
+        {showAttachments && node.htmlAttachment && <AttachmentHtmlPreview
           attachment={node.htmlAttachment}
           variant="node"
         />}
