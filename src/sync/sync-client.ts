@@ -12,6 +12,8 @@ export const defaultSyncServerUrl = 'http://106.54.44.45:18789'
 export type SyncConfig = {
   serverUrl: string
   token: string
+  /** 自动同步总开关：后台定时 + 窗口聚焦时检查云端；默认开启。 */
+  autoSync: boolean
 }
 
 export type RemoteDocument = {
@@ -54,9 +56,9 @@ export function loadSyncConfig(): SyncConfig {
   try {
     const value = JSON.parse(localStorage.getItem(configStorageKey) ?? '{}') as Partial<SyncConfig>
     const savedServerUrl = typeof value.serverUrl === 'string' ? value.serverUrl.trim() : ''
-    return { serverUrl: savedServerUrl || defaultSyncServerUrl, token: typeof value.token === 'string' ? value.token : '' }
+    return { serverUrl: savedServerUrl || defaultSyncServerUrl, token: typeof value.token === 'string' ? value.token : '', autoSync: value.autoSync !== false }
   } catch {
-    return { serverUrl: defaultSyncServerUrl, token: '' }
+    return { serverUrl: defaultSyncServerUrl, token: '', autoSync: true }
   }
 }
 

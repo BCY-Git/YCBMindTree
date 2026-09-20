@@ -4,7 +4,7 @@ import type { MindMapDocument } from '@/domain/document.types'
 import { isUntouchedStarterDocument, synchronizeAccountLibrary, type AccountLibrarySyncDependencies } from '@/sync/account-library'
 import type { RemoteDocument, SyncConfig } from '@/sync/sync-client'
 
-const config: SyncConfig = { serverUrl: 'https://sync.example.com', token: 'session-token' }
+const config: SyncConfig = { serverUrl: 'https://sync.example.com', token: 'session-token', autoSync: true }
 
 function remote(document: MindMapDocument, version = 1): RemoteDocument {
   return { id: document.id, version, payload: document, updatedAt: document.updatedAt }
