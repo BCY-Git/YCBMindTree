@@ -4,5 +4,6 @@
 - [实施路线](./implementation-plan.md)：从核心编辑到 AI 增强的迭代路线。
 - [节点语义层规划](./node-marks-tags-plan.md)：标记、标签、筛选与任务聚合设计。
 - [XMind 核心操作对齐](./xmind-operation-parity.md)：画布、命令、焦点和撤销行为对照。
+- [使用说明](./user-guide.md)：面向人类用户的功能与快捷键手册（1.25.0）。
 
 智能沉淀与协作的完整产品设计仍保存在相邻的 [`mindtree-agent-design-v0.3`](../mindtree-agent-design-v0.3/README.md) 设计包中。
