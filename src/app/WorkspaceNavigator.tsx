@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon, DrawingPinFilledIcon, DrawingPinIcon, FileTextIcon, MagnifyingGlassIcon, Pencil2Icon, PlusIcon, ReaderIcon, TrashIcon } from '@radix-ui/react-icons'
+import { useEffect, useMemo, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { ArchiveIcon, CheckCircledIcon, ChevronDownIcon, ChevronRightIcon, CounterClockwiseClockIcon, DashboardIcon, DownloadIcon, DrawingPinFilledIcon, DrawingPinIcon, FileTextIcon, LightningBoltIcon, Link1Icon, MagnifyingGlassIcon, Pencil2Icon, PlusIcon, ReaderIcon, Share1Icon, TrashIcon, UploadIcon } from '@radix-ui/react-icons'
 import { documentKindLabels, documentKinds, type DocumentKind, type MindMapDocument } from '@/domain/document.types'
 import { projectStatusLabels, type ProjectStatus, type WorkspaceProject } from '@/projects/project-library'
 
@@ -36,6 +36,7 @@ type WorkspaceNavigatorProps = {
 }
 
 const kindMarks: Record<DocumentKind, string> = { map: '◇', record: '·', source: '↗', output: '✓', knowledge: '※' }
+const kindIcons: Record<DocumentKind, ReactNode> = { map: <Share1Icon />, record: <Pencil2Icon />, source: <Link1Icon />, output: <CheckCircledIcon />, knowledge: <ReaderIcon /> }
 
 function loadExpandedProjects(): Set<string> {
   try {
@@ -68,7 +69,7 @@ function DocumentRow({ document, active, compact = true, projectName, onOpen, on
 }) {
   return <div className={`workspace-file-row ${active ? 'is-active' : ''}`} draggable onDragStart={onDragStart} onDragEnd={onDragEnd} onContextMenu={onContextMenu}>
     <button type="button" className="workspace-file-row__open" onClick={onOpen} title={document.title}>
-      <span className={`workspace-file-row__icon is-${document.kind}`} aria-hidden="true">{document.isDraft ? <Pencil2Icon /> : <i>{kindMarks[document.kind]}</i>}</span>
+      <span className={`workspace-file-row__icon is-${document.kind}`} aria-hidden="true">{document.isDraft ? <Pencil2Icon /> : kindIcons[document.kind]}</span>
       <span className="workspace-file-row__copy"><strong>{document.title}</strong>{!compact && <small>{projectName ? `${projectName} · ` : ''}{document.isDraft ? '待整理记录' : documentKindLabels[document.kind]}</small>}</span>
     </button>
     {document.isDraft
@@ -77,8 +78,8 @@ function DocumentRow({ document, active, compact = true, projectName, onOpen, on
   </div>
 }
 
-function SmartEntry({ active, mark, label, count, onClick }: { active: boolean; mark: string; label: string; count?: number; onClick: () => void }) {
-  return <button type="button" className={`workspace-smart-entry ${active ? 'is-active' : ''}`} onClick={onClick}><span aria-hidden="true">{mark}</span><strong>{label}</strong>{typeof count === 'number' && <small>{count}</small>}</button>
+function SmartEntry({ active, icon, label, count, onClick }: { active: boolean; icon: ReactNode; label: string; count?: number; onClick: () => void }) {
+  return <button type="button" className={`workspace-smart-entry ${active ? 'is-active' : ''}`} onClick={onClick}><span aria-hidden="true">{icon}</span><strong>{label}</strong>{typeof count === 'number' && <small>{count}</small>}</button>
 }
 
 export function WorkspaceNavigator({ projects, documents, activeDocumentId, pendingDepositDocumentIds = new Set(), query, onQueryChange, onOpenDocument, onOpenProjectOverview, onAssignProject, onSetDocumentKind, onTogglePinned, onRenameDocument, onDeleteDocument, onDeleteDraft, onCreateProject, openTaskCount, onOpenTaskCenter, onRenameProject, onUpdateProject, onDeleteProject, onCreateDocument, onImport, onRestore }: WorkspaceNavigatorProps) {
@@ -150,11 +151,11 @@ export function WorkspaceNavigator({ projects, documents, activeDocumentId, pend
         {!archived && <button type="button" className="workspace-project__add" onClick={() => onCreateDocument(project.id, 'map')} aria-label={`在“${project.name}”新建导图`} title="新建导图"><PlusIcon /></button>}
       </div>
       {open && <div className="workspace-project__contents">
-        <button type="button" className="workspace-project-overview-entry" onClick={() => onOpenProjectOverview(project)}><span>◎</span><strong>项目总览</strong><small>{projectStatusLabels[project.status]}</small></button>
+        <button type="button" className="workspace-project-overview-entry" onClick={() => onOpenProjectOverview(project)}><span><DashboardIcon /></span><strong>项目总览</strong><small>{projectStatusLabels[project.status]}</small></button>
         {documentKinds.filter((kind) => kind !== 'knowledge').map((kind) => {
           const items = projectDocuments.filter((item) => item.kind === kind)
           if (!items.length) return null
-          return <section className="workspace-kind-group" key={kind} aria-label={`${project.name}的${documentKindLabels[kind]}`}><header><span>{kindMarks[kind]}</span><strong>{documentKindLabels[kind]}</strong><small>{items.length}</small></header>{items.map((item) => renderDocument(item))}</section>
+          return <section className="workspace-kind-group" key={kind} aria-label={`${project.name}的${documentKindLabels[kind]}`}><header><span>{kindIcons[kind]}</span><strong>{documentKindLabels[kind]}</strong><small>{items.length}</small></header>{items.map((item) => renderDocument(item))}</section>
         })}
         {!projectDocuments.length && !archived && <button type="button" className="workspace-project__empty" onClick={() => onCreateDocument(project.id, 'map')}><PlusIcon />创建第一张导图</button>}
       </div>}
@@ -167,22 +168,22 @@ export function WorkspaceNavigator({ projects, documents, activeDocumentId, pend
     <label className="workspace-navigator__search"><MagnifyingGlassIcon /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索项目与内容…" aria-label="搜索项目与内容" /></label>
 
     <section className="workspace-smart" aria-label="工作台">
-      <header className="workspace-navigator__label"><span><ReaderIcon />工作台</span></header>
-      <SmartEntry active={smartView === 'inbox'} mark="↓" label="收件箱" count={inboxDocuments.length} onClick={() => toggleSmartView('inbox')} />
-      <SmartEntry active={smartView === 'deposit'} mark="✦" label="待沉淀" count={pendingDocuments.length} onClick={() => toggleSmartView('deposit')} />
-      <SmartEntry active={smartView === 'recent'} mark="◷" label="最近" onClick={() => toggleSmartView('recent')} />
-      <SmartEntry active={smartView === 'pinned'} mark="⌁" label="置顶" count={pinnedDocuments.length} onClick={() => toggleSmartView('pinned')} />
-      <SmartEntry active={false} mark="✓" label="任务中心" count={openTaskCount} onClick={onOpenTaskCenter} />
+      <header className="workspace-navigator__label"><span>工作台</span></header>
+      <SmartEntry active={smartView === 'inbox'} icon={<DownloadIcon />} label="收件箱" count={inboxDocuments.length} onClick={() => toggleSmartView('inbox')} />
+      <SmartEntry active={smartView === 'deposit'} icon={<LightningBoltIcon />} label="待沉淀" count={pendingDocuments.length} onClick={() => toggleSmartView('deposit')} />
+      <SmartEntry active={smartView === 'recent'} icon={<CounterClockwiseClockIcon />} label="最近" onClick={() => toggleSmartView('recent')} />
+      <SmartEntry active={smartView === 'pinned'} icon={<DrawingPinIcon />} label="置顶" count={pinnedDocuments.length} onClick={() => toggleSmartView('pinned')} />
+      <SmartEntry active={false} icon={<CheckCircledIcon />} label="任务中心" count={openTaskCount} onClick={onOpenTaskCenter} />
       {smartView && <div className="workspace-smart-results" aria-label={`${smartView}内容`}>{smartDocuments.length ? smartDocuments.map((item) => renderDocument(item, false, projects.find((project) => project.id === item.projectId)?.name)) : <p>这里暂时没有内容</p>}</div>}
     </section>
 
     <section className="workspace-navigator__section" aria-label="项目">
-      <header className="workspace-navigator__label"><span><ArchiveIcon />项目</span><button type="button" onClick={onCreateProject} aria-label="新建项目" title="新建项目"><PlusIcon /></button></header>
+      <header className="workspace-navigator__label"><span>项目</span><button type="button" onClick={onCreateProject} aria-label="新建项目" title="新建项目"><PlusIcon /></button></header>
       <div className="workspace-project-list">{activeProjects.map((project) => renderProject(project))}{!activeProjects.length && <button type="button" className="workspace-project-list__empty" onClick={onCreateProject}><ArchiveIcon /><span><strong>创建第一个项目</strong><small>把导图、记录和资料收在同一处</small></span></button>}</div>
     </section>
 
     <section className="workspace-navigator__section workspace-knowledge" aria-label="知识库">
-      <header className="workspace-navigator__label"><span><FileTextIcon />知识库</span><button type="button" onClick={() => onCreateDocument(null, 'knowledge')} aria-label="新建知识"><PlusIcon /></button></header>
+      <header className="workspace-navigator__label"><span>知识库</span><button type="button" onClick={() => onCreateDocument(null, 'knowledge')} aria-label="新建知识"><PlusIcon /></button></header>
       {knowledgeDocuments.slice(0, 8).map((item) => renderDocument(item))}{!knowledgeDocuments.length && <button type="button" className="workspace-project__empty" onClick={() => onCreateDocument(null, 'knowledge')}><PlusIcon />沉淀第一条长期知识</button>}
     </section>
 
@@ -194,7 +195,7 @@ export function WorkspaceNavigator({ projects, documents, activeDocumentId, pend
       {(unassignedOpen || Boolean(normalizedQuery)) && <div className="workspace-unassigned__contents" tabIndex={unassignedDocuments.length > 8 ? 0 : undefined}>{unassignedDocuments.map((item) => renderDocument(item))}{!unassignedDocuments.length && <p>没有未归属内容</p>}</div>}
     </section>
 
-    <div className="workspace-navigator__utilities"><button type="button" onClick={onImport}>导入内容</button><button type="button" onClick={onRestore}>恢复备份</button></div>
+    <div className="workspace-navigator__utilities"><button type="button" onClick={onImport}><UploadIcon />导入内容</button><button type="button" onClick={onRestore}><CounterClockwiseClockIcon />恢复备份</button></div>
 
     {fileMenu && <div className="workspace-file-context-menu" role="menu" aria-label={`整理“${fileMenu.document.title}”`} style={{ '--context-menu-x': `${fileMenu.x}px`, '--context-menu-y': `${fileMenu.y}px` } as CSSProperties} onClick={(event) => event.stopPropagation()}>
       <header><strong>{fileMenu.document.title}</strong><small>{documentKindLabels[fileMenu.document.kind]}</small></header>
