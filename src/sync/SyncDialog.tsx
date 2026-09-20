@@ -98,7 +98,7 @@ export function SyncDialog({ open, config, remoteVersion, status, remotePreview,
   }, [redeem, scannerOpen])
 
   if (!open) return null
-  const save = () => onSaveConfig({ serverUrl: draft.serverUrl.trim(), token: draft.token.trim() })
+  const save = () => onSaveConfig({ ...draft, serverUrl: draft.serverUrl.trim(), token: draft.token.trim() })
   const ready = Boolean(draft.serverUrl.trim() && draft.token.trim())
   const preview = conflict ?? remotePreview
 
@@ -106,7 +106,7 @@ export function SyncDialog({ open, config, remoteVersion, status, remotePreview,
     try {
       setPairingBusy(true)
       setPairingStatus(null)
-      setInvite(await onCreatePairing({ serverUrl: draft.serverUrl.trim(), token: draft.token.trim() }))
+      setInvite(await onCreatePairing({ ...draft, serverUrl: draft.serverUrl.trim(), token: draft.token.trim() }))
       setPairingStatus('请用新设备扫码。二维码 5 分钟内有效，且只能使用一次。')
     } catch (error) {
       setPairingStatus(error instanceof Error ? error.message : '创建配对二维码失败')
@@ -118,14 +118,15 @@ export function SyncDialog({ open, config, remoteVersion, status, remotePreview,
   return (
     <div className="sync-dialog-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <section className="sync-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-title">
-        <header><div><p className="eyebrow">云端同步</p><h2 id="sync-title">手动、安全地同步</h2></div><button className="sync-dialog__close" onClick={onClose} aria-label="关闭同步设置">×</button></header>
-        <p className="sync-dialog__intro">默认连接你的 MindTree 同步服务；只需填写 Token。上传与拉取均需手动触发，版本冲突时不会覆盖本地内容。</p>
+        <header><div><p className="eyebrow">云端同步</p><h2 id="sync-title">自动、安全地同步</h2></div><button className="sync-dialog__close" onClick={onClose} aria-label="关闭同步设置">×</button></header>
+        <p className="sync-dialog__intro">默认连接你的 MindTree 同步服务；只需填写 Token。开启自动同步后，云端有新版本且本地未改动时会自动拉取，本地修改也会自动上传；版本冲突时不会覆盖本地内容。</p>
         <label>同步服务地址
           <input value={draft.serverUrl} onChange={(event) => setDraft((current) => ({ ...current, serverUrl: event.target.value }))} placeholder="https://sync.example.com" autoComplete="url" />
         </label>
         <label>同步 Token
           <input value={draft.token} onChange={(event) => setDraft((current) => ({ ...current, token: event.target.value }))} placeholder="仅保存在此浏览器" type="password" autoComplete="off" />
         </label>
+        <label className="sync-dialog__autosync"><input type="checkbox" checked={draft.autoSync} onChange={(event) => setDraft((current) => ({ ...current, autoSync: event.target.checked }))} />自动同步（每 45 秒与窗口聚焦时检查；冲突时仍会先询问）</label>
         <div className="sync-dialog__actions">
           <button className="subtle-button" onClick={save}>保存连接设置</button>
           <span>{remoteVersion === null ? '此导图尚未同步' : `云端版本 v${remoteVersion}`}</span>

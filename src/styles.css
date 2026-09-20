@@ -1786,3 +1786,7 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 .ai-message__bubble--streaming::after { content: '▍'; margin-left: 2px; color: var(--accent, #5d8e7b); animation: ai-streaming-caret .9s steps(2) infinite; }
 @keyframes ai-streaming-caret { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .ai-message__bubble--streaming::after { animation: none; } }
+
+/* 自动同步开关 */
+.sync-dialog__autosync { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; color: var(--app-text, #45473f); font-size: 11px; cursor: pointer; }
+.sync-dialog__autosync input { accent-color: var(--accent, #47766a); }

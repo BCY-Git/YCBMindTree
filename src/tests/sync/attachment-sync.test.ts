@@ -25,7 +25,7 @@ vi.mock('@/store/editor.store', () => ({
   useEditorStore: { getState: () => ({ document: createInitialDocument() }) },
 }))
 
-const config = { serverUrl: 'https://sync.example', token: 't' }
+const config = { serverUrl: 'https://sync.example', token: 't', autoSync: true }
 
 function documentWithAttachment(id = 'att-1'): MindMapDocument {
   const document = createInitialDocument()

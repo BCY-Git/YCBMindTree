@@ -25,6 +25,7 @@ import { documentKindLabels, documentKinds, type DocumentKind, type MindMapDocum
 import { SyncDialog } from '../sync/SyncDialog'
 import { createPairingInvite, fetchRemoteDocument, fetchRemoteDocuments, loadSyncConfig, pushDocument, redeemPairingInvite, saveSyncConfig, type PairingInvite, type RemoteDocument, type SyncConfig } from '../sync/sync-client'
 import { downloadMissingAttachments, uploadMissingAttachments } from '../sync/attachment-sync'
+import { decideAutoSync } from '../sync/auto-sync-policy'
 import { isUntouchedStarterDocument, synchronizeAccountLibrary } from '../sync/account-library'
 import { VersionHistoryDialog } from '../history/VersionHistoryDialog'
 import { createDocumentVersion, duplicateDocumentVersion, restoreDocumentVersion, type DocumentVersion } from '../history/version-history'
@@ -1117,7 +1118,7 @@ export function App() {
       : await registerAccount({ serverUrl: syncConfig.serverUrl }, email, password)
     saveAccountSession(session)
     setAccountSession(session)
-    saveSyncSettings({ serverUrl: syncConfig.serverUrl, token: session.token })
+    saveSyncSettings({ serverUrl: syncConfig.serverUrl, token: session.token, autoSync: true })
     setLoginOpen(false)
   }, [saveSyncSettings, syncConfig.serverUrl])
 
@@ -1125,7 +1126,7 @@ export function App() {
     if (accountSession) await revokeAccountSession({ serverUrl: syncConfig.serverUrl }, accountSession.token).catch(() => undefined)
     clearAccountSession()
     setAccountSession(null)
-    saveSyncSettings({ serverUrl: syncConfig.serverUrl, token: '' })
+    saveSyncSettings({ serverUrl: syncConfig.serverUrl, token: '', autoSync: true })
     setAccountMenuOpen(false)
   }
 
@@ -1139,7 +1140,7 @@ export function App() {
       setSyncStatus(null)
       setSyncPreview(null)
       setSyncConflict(null)
-      saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
+      saveSyncSettings({ ...config, serverUrl: config.serverUrl.trim(), token: config.token.trim() })
       await flushCurrentDocument()
       const metadata = await getSyncMetadata(document.id)
       if (accountSession && metadata && metadata.accountId !== accountSession.user.id) {
@@ -1173,7 +1174,7 @@ export function App() {
       setSyncBusy(true)
       setSyncStatus(null)
       setSyncConflict(null)
-      saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
+      saveSyncSettings({ ...config, serverUrl: config.serverUrl.trim(), token: config.token.trim() })
       const remote = await fetchRemoteDocument(config, document.id)
       if (!remote) {
         setSyncPreview(null)
@@ -1190,13 +1191,13 @@ export function App() {
   }, [document.id, saveSyncSettings])
 
   const createDevicePairing = useCallback(async (config: SyncConfig) => {
-    saveSyncSettings({ serverUrl: config.serverUrl.trim(), token: config.token.trim() })
+    saveSyncSettings({ ...config, serverUrl: config.serverUrl.trim(), token: config.token.trim() })
     return createPairingInvite(config)
   }, [saveSyncSettings])
 
   const redeemDevicePairing = useCallback(async (invite: PairingInvite) => {
     const token = await redeemPairingInvite(invite)
-    const nextConfig = { serverUrl: invite.serverUrl, token }
+    const nextConfig = { serverUrl: invite.serverUrl, token, autoSync: true }
     saveSyncSettings(nextConfig)
     setSyncStatus('扫码配对成功，已保存此设备的同步连接。')
     return nextConfig
@@ -1220,10 +1221,11 @@ export function App() {
   }, [accountSession?.user.id, hydrate])
 
   const autoSyncRef = useRef(false)
-  // 自动同步：打开应用或切换文档时静默检查云端。本地无未上传修改时直接拉取较新版本；
-  // 本地也改过时只提示冲突，不自动覆盖（保守，绝不丢本地工作）。未配置 Token 则跳过。
+  // 自动同步：打开应用、切换文档、定时与窗口聚焦时静默检查云端。
+  // 云端更新且本地干净 → 自动拉取；本地有未上传修改且云端不新 → 自动上传；
+  // 两边都改过 → 只提示冲突，绝不自动覆盖。未配置 Token 或关闭开关则跳过。
   const autoSync = useCallback(async (config: SyncConfig) => {
-    if (autoSyncRef.current || !config.token.trim()) return
+    if (autoSyncRef.current || !config.token.trim() || !config.autoSync) return
     autoSyncRef.current = true
     try {
       const currentDoc = useEditorStore.getState().document
@@ -1231,19 +1233,34 @@ export function App() {
       const metadata = await getSyncMetadata(currentDoc.id)
       if (accountSession && metadata && metadata.accountId !== accountSession.user.id) return
       const remote = await fetchRemoteDocument(config, currentDoc.id)
-      if (!remote) return
-      if (metadata && remote.version <= metadata.remoteVersion) return
-      setSyncRemoteVersion(remote.version)
-      // 本地在上次同步后是否改动过（留 2s 容差应对防抖保存）。
-      const localDirty = !metadata || currentDoc.updatedAt > metadata.syncedAt + 2000
-      if (localDirty) {
+      const metadataSnapshot = metadata ? { remoteVersion: metadata.remoteVersion, syncedAt: metadata.syncedAt } : null
+      const decision = decideAutoSync(remote?.version ?? null, metadataSnapshot, currentDoc.updatedAt)
+      if (decision === 'none') return
+      if (decision === 'conflict') {
         setSyncPreview(null)
         setSyncConflict(remote)
-        setSyncStatus(`云端有新版本 v${remote.version}，但本地也有未上传的修改，已暂停自动同步。请打开「同步」手动决定。`)
+        setSyncStatus(`云端有新版本 v${remote?.version}，但本地也有未上传的修改，已暂停自动同步。请打开「同步」手动决定。`)
         return
       }
-      await pullRemoteDocument(remote)
-      setSyncStatus(`已自动同步云端版本 v${remote.version}`)
+      if (decision === 'pull' && remote) {
+        setSyncRemoteVersion(remote.version)
+        await pullRemoteDocument(remote)
+        setSyncConflict(null)
+        setSyncStatus(`已自动同步云端版本 v${remote.version}`)
+        return
+      }
+      // decision === 'push'：本地有未上传的修改，云端不新，自动推上去（版本锁兜底）。
+      const result = await pushDocument(config, currentDoc, metadata?.remoteVersion ?? 0)
+      if (result.type === 'conflict') {
+        setSyncConflict(result.remote)
+        setSyncStatus('云端已有较新版本，自动上传已暂停。请打开「同步」手动决定。')
+        return
+      }
+      await saveSyncMetadata({ documentId: currentDoc.id, remoteVersion: result.remote.version, syncedAt: Date.now(), accountId: accountSession?.user.id })
+      setSyncRemoteVersion(result.remote.version)
+      setSyncConflict(null)
+      await uploadMissingAttachments(config, currentDoc)
+      setSyncStatus(`已自动上传本地修改 · v${result.remote.version}`)
     } catch {
       // 自动同步静默失败，不打扰用户；可在「同步」里手动重试。
     } finally {
@@ -1345,13 +1362,29 @@ export function App() {
     if (dispatch({ type: 'REVEAL_NODE', nodeId: pending.nodeId })) requestNodeFocus(pending.nodeId)
   }, [dispatch, document.id, requestNodeFocus])
 
-  // 自动同步触发：每次打开应用或切换文档后，静默拉取云端较新版本。
+  // 自动同步触发：每次打开应用或切换文档后，静默检查云端。
   useEffect(() => {
     if (!hydrated) return
     const config = loadSyncConfig()
     if (!config.token.trim()) return
     void autoSync(config)
   }, [document.id, hydrated, autoSync])
+
+  // 后台自动同步：每 45 秒检查一次，窗口重新聚焦时立即检查。
+  // agent 经 MCP 或其他设备推上去的版本，无需再开弹窗手动拉取。
+  useEffect(() => {
+    if (!hydrated) return
+    const tick = () => {
+      const config = loadSyncConfig()
+      if (config.token.trim() && config.autoSync) void autoSync(config)
+    }
+    const interval = window.setInterval(tick, 45_000)
+    window.addEventListener('focus', tick)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', tick)
+    }
+  }, [hydrated, autoSync])
 
   // 同一账号在新设备登录后，先发现并导入整个云端导图库；账号云端为空时则上传现有本地导图。
   useEffect(() => {
