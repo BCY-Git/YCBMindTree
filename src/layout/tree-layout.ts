@@ -25,31 +25,104 @@ const ROOT_WIDTH = 196
 const NODE_WIDTH = 176
 const NODE_HEIGHT = 44
 const ROOT_HEIGHT = 58
-const TEXT_CHARACTER_WIDTH = 11
+// 与 .node-label 的 font-size: 12px / line-height: 1.45 保持一致，高度估算才不偏。
+const TEXT_FONT_SIZE = 12
+const TEXT_LINE_HEIGHT = TEXT_FONT_SIZE * 1.45
+// 卡片纵向固定开销：上下 padding 12 + 文本内 padding 4 + 上下边框 2。
+const NODE_VERTICAL_PADDING = 18
 const HORIZONTAL_TEXT_PADDING = 44
 // HTML 活预览：顶栏约 24px + iframe 150px + 上边距 7px；预览是定高元素，布局必须预留同样高度。
 const HTML_PREVIEW_HEIGHT = 182
 const HTML_PREVIEW_WIDTH = 252
 
 /**
+ * 文本实测（markmap/plait/mind-elixir 的通用做法）：用与渲染一致的字体在
+ * canvas 2d 上下文里 measureText。浏览器/Tauri 都可用；jsdom 等无 canvas
+ * 环境回退到按字符类型估算（CJK 1em、ASCII 约 0.56em），仅供测试使用。
+ */
+let measureContext: CanvasRenderingContext2D | null | undefined
+const textWidthCache = new Map<string, number>()
+
+function getMeasureContext() {
+  if (measureContext === undefined) {
+    try {
+      measureContext = typeof document !== 'undefined'
+        ? document.createElement('canvas').getContext('2d')
+        : null
+    } catch {
+      measureContext = null
+    }
+  }
+  return measureContext
+}
+
+const CJK_PATTERN = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\uff00-\uffef\u3000-\u303f]/
+
+function measureTextWidth(text: string, fontSize = TEXT_FONT_SIZE): number {
+  const cacheKey = `${fontSize}|${text}`
+  const cached = textWidthCache.get(cacheKey)
+  if (cached !== undefined) return cached
+  const context = getMeasureContext()
+  let width: number
+  if (context) {
+    context.font = `${fontSize}px Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`
+    width = context.measureText(text).width
+  } else {
+    width = 0
+    for (const ch of text) width += CJK_PATTERN.test(ch) ? fontSize : fontSize * .56
+  }
+  if (textWidthCache.size > 5000) textWidthCache.clear()
+  textWidthCache.set(cacheKey, width)
+  return width
+}
+
+/** 模拟 word-break: break-word 的逐字符贪心换行；布局与 SVG 导出共用同一套测量。 */
+export function wrapTextLine(line: string, maxTextWidth: number, fontSize = TEXT_FONT_SIZE): string[] {
+  if (!line) return [' ']
+  if (measureTextWidth(line, fontSize) <= maxTextWidth) return [line]
+  const lines: string[] = []
+  let current = ''
+  let currentWidth = 0
+  for (const ch of line) {
+    const charWidth = measureTextWidth(ch, fontSize)
+    if (current && currentWidth + charWidth > maxTextWidth) {
+      lines.push(current)
+      current = ch
+      currentWidth = charWidth
+    } else {
+      current += ch
+      currentWidth += charWidth
+    }
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
+/** 返回单行文本在指定宽度下的实际行数。 */
+function wrappedLineCount(line: string, maxTextWidth: number): number {
+  return wrapTextLine(line, maxTextWidth).length
+}
+
+/**
  * 根据节点主题文本计算渲染尺寸。
- * - 宽度：按中英文混合文本宽度估算，受 min/max 约束
- * - 高度：根节点 58px，子节点 44px，每多一行文字 +20px
+ * - 宽度：canvas measureText 实测（无 canvas 时按字符类型估算），受 min/max 约束
+ * - 高度：根节点 58px、子节点 44px 起步，每多一行文字 +17.4px（12px × 1.45 行高）
  */
 function nodeSize(node: MindNode, isRoot: boolean, transientHeight?: number) {
-  const longestLine = Math.max(...node.topic.split('\n').map((line) => line.length), 1)
-  const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, longestLine * TEXT_CHARACTER_WIDTH + HORIZONTAL_TEXT_PADDING))
+  const topicLines = node.topic.split('\n')
+  const longestLineWidth = Math.max(...topicLines.map((line) => measureTextWidth(line)), 1)
+  const automaticWidth = Math.min(isRoot ? 260 : NODE_WIDTH + 36, Math.max(isRoot ? ROOT_WIDTH : 118, Math.ceil(longestLineWidth) + HORIZONTAL_TEXT_PADDING))
   const imageAttachment = node.attachments.find((attachment) => attachment.type.startsWith('image/'))
   const imagePreviewWidth = imageAttachment?.image?.displayWidth ?? (imageAttachment ? 156 : 0)
   const widthWithImage = imagePreviewWidth ? Math.min(MAX_NODE_WIDTH, imagePreviewWidth + 32) : 0
   const htmlPreviewWidth = node.attachments.some((attachment) => attachment.type === 'text/html') ? Math.min(MAX_NODE_WIDTH, HTML_PREVIEW_WIDTH) : 0
   const width = Math.max(isRoot ? ROOT_WIDTH : 118, node.width ?? automaticWidth, widthWithImage, htmlPreviewWidth)
-  const charactersPerLine = Math.max(8, Math.floor((width - HORIZONTAL_TEXT_PADDING) / TEXT_CHARACTER_WIDTH))
-  const lines = Math.max(1, node.topic.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0))
+  const maxTextWidth = Math.max(48, width - HORIZONTAL_TEXT_PADDING)
+  const lines = Math.max(1, topicLines.reduce((count, line) => count + wrappedLineCount(line, maxTextWidth), 0))
   // 旧附件没有展示元数据时沿用历史 96px 缩略图高度；首次载入后会自动写入真实宽高比。
   const imagePreviewHeight = imageAttachment ? (imageAttachment.image ? imageDisplayHeight(imageAttachment.image) + 8 : 96) : 0
   const htmlPreviewHeight = node.attachments.some((attachment) => attachment.type === 'text/html') ? HTML_PREVIEW_HEIGHT : 0
-  const automaticHeight = (isRoot ? ROOT_HEIGHT : NODE_HEIGHT) + (lines - 1) * 20 + imagePreviewHeight + htmlPreviewHeight
+  const automaticHeight = Math.max(isRoot ? ROOT_HEIGHT : NODE_HEIGHT, NODE_VERTICAL_PADDING + lines * TEXT_LINE_HEIGHT) + imagePreviewHeight + htmlPreviewHeight
   return { width, height: Math.max(node.height ?? 0, automaticHeight, transientHeight ?? 0) }
 }
 

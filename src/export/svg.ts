@@ -1,7 +1,7 @@
 import type { MindMapDocument } from '@/domain/document.types'
 import { getTheme } from '@/domain/themes'
 import { relationControlPoint, relationDashArray, relationPath } from '@/editor/relation-geometry'
-import { layoutTree, type PositionedNode } from '@/layout/tree-layout'
+import { layoutTree, wrapTextLine, type PositionedNode } from '@/layout/tree-layout'
 import { getNodeAttachment } from '@/persistence/database'
 import { saveExportFile } from '@/export/export-file'
 
@@ -26,14 +26,9 @@ function depthOf(document: MindMapDocument, nodeId: string) {
   return depth
 }
 
-function textLines(topic: string, width: number) {
-  const charactersPerLine = Math.max(8, Math.floor((width - 32) / 11))
-  return topic.split('\n').flatMap((line) => {
-    const chars = Array.from(line || ' ')
-    const lines: string[] = []
-    for (let index = 0; index < chars.length; index += charactersPerLine) lines.push(chars.slice(index, index + charactersPerLine).join(''))
-    return lines.length ? lines : [' ']
-  })
+function textLines(topic: string, width: number, fontSize: number) {
+  const maxTextWidth = Math.max(32, width - 32)
+  return topic.split('\n').flatMap((line) => wrapTextLine(line || ' ', maxTextWidth, fontSize))
 }
 
 function treePath(parent: PositionedNode, child: PositionedNode, shiftX: number, shiftY: number) {
@@ -102,7 +97,7 @@ export function exportDocumentSvg(document: MindMapDocument, options: SvgExportO
     const textColor = isRoot ? theme.rootText : theme.nodeText
     const x = position.x + shiftX
     const y = position.y + shiftY
-    const lines = textLines(node.topic, position.width)
+    const lines = textLines(node.topic, position.width, isRoot ? 16 : 14)
     const imageAttachment = node.attachments.find((attachment) => attachment.type.startsWith('image/'))
     const imageUrl = imageAttachment ? options.images?.[imageAttachment.id] : undefined
     const lineHeight = 20

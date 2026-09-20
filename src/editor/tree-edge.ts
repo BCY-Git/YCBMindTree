@@ -12,6 +12,7 @@
  */
 import type { PositionedNode } from '@/layout/tree-layout'
 import type { MindMapDocument } from '@/domain/document.types'
+import { getSmoothStepPath, Position } from '@xyflow/react'
 
 export type TreeEdgeAnchors = {
   sourceHandle: 'source-left' | 'source-right'
@@ -36,27 +37,29 @@ export type MindTreePathInput = {
 }
 
 /**
- * XMind 风格的规则圆角折线：先从父节点水平伸出到统一分叉轴，再垂直转向子节点。
- * 转角半径固定上限且只受可用空间约束，因此上下分支严格镜像，不会因距离不同产生
- * 随机观感的贝塞尔弧度。
+ * XMind 风格的规则圆角折线：从父节点水平伸出到统一分叉轴，再垂直转向子节点。
+ *
+ * 路径生成委托给 xyflow 官方维护的 `getSmoothStepPath`（转角半径自动钳制、
+ * 反向/共线等边角情况均有上游测试覆盖）；我们只通过 `centerX` 保留原有的
+ * 分叉轴规则（距父节点 24~48px，约为间距的 42%），保证同一父节点的所有
+ * 分支共享同一根主干，上下分支严格镜像。
  */
 export function getMindTreePath({ sourceX, sourceY, targetX, targetY }: MindTreePathInput) {
-  const round = (value: number) => Math.round(value * 1000) / 1000
   const direction = targetX >= sourceX ? 1 : -1
   const distance = Math.abs(targetX - sourceX)
-  const verticalDistance = Math.abs(targetY - sourceY)
-  if (verticalDistance < .5) return `M ${round(sourceX)} ${round(sourceY)} L ${round(targetX)} ${round(targetY)}`
-
   const branchDistance = Math.min(48, Math.max(24, distance * .42))
-  const branchX = sourceX + branchDistance * direction
-  const verticalDirection = targetY >= sourceY ? 1 : -1
-  const radius = Math.min(12, verticalDistance / 2, Math.max(0, distance - branchDistance) / 2)
-  const beforeFirstCornerX = branchX - radius * direction
-  const afterSecondCornerX = branchX + radius * direction
-  const afterFirstCornerY = sourceY + radius * verticalDirection
-  const beforeSecondCornerY = targetY - radius * verticalDirection
-
-  return `M ${round(sourceX)} ${round(sourceY)} H ${round(beforeFirstCornerX)} Q ${round(branchX)} ${round(sourceY)} ${round(branchX)} ${round(afterFirstCornerY)} V ${round(beforeSecondCornerY)} Q ${round(branchX)} ${round(targetY)} ${round(afterSecondCornerX)} ${round(targetY)} H ${round(targetX)}`
+  const [path] = getSmoothStepPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition: direction === 1 ? Position.Right : Position.Left,
+    targetPosition: direction === 1 ? Position.Left : Position.Right,
+    borderRadius: 12,
+    centerX: sourceX + branchDistance * direction,
+    offset: 0,
+  })
+  return path
 }
 
 /**

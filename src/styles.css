@@ -1371,6 +1371,10 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   background: color-mix(in srgb, var(--node-bg, #fffefa) 92%, transparent);
 }
 
+/* 布局槽位（wrapper）高度由 tree-layout 估算，卡片按内容渲染；垂直居中保证
+   即使估算略有偏差，连线分叉点依然相对可见卡片严格居中对称。 */
+.react-flow__node { display: flex; align-items: center; }
+
 .mind-node .collapse-toggle {
   right: -10px !important;
   left: auto;
@@ -1382,6 +1386,18 @@ button:disabled { cursor: not-allowed; opacity: .38; }
   font-size: 13px;
   line-height: 1;
   box-shadow: none;
+}
+
+/* 折叠计数徽标：恢复 .collapse-toggle.is-collapsed 的胶囊设计（前面规则的 20px 定宽/13px 字号会把两位数挤出圆圈）。 */
+.mind-node .collapse-toggle.is-collapsed {
+  left: calc(100% + 5px);
+  right: auto !important;
+  width: auto;
+  min-width: 20px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .mind-tree-edge__path {

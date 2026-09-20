@@ -13,7 +13,8 @@ describe('SVG visual export', () => {
     expect(xml.documentElement.getAttribute('viewBox')).toMatch(/^0 0 \d+ \d+$/)
     expect(xml.querySelectorAll('[data-node-id]')).toHaveLength(4)
     expect(xml.querySelectorAll('[data-tree-edge]')).toHaveLength(3)
-    expect(svg).toContain('按 Tab 创建子节点')
+    // 文本可能因实测宽度换行拆到多个 tspan，剥离标签后再断言主题完整存在
+    expect(svg.replace(/<[^>]+>/g, '')).toContain('按 Tab 创建子节点')
     expect(svg).toContain('#f5f5ef')
   })
 

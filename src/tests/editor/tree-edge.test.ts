@@ -18,20 +18,38 @@ describe('tree edge anchors', () => {
 
 })
 
+const pathNumbers = (path: string) => path.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
+
 describe('XMind-style tree edge', () => {
-  it('uses a deterministic rounded elbow for a lower child', () => {
-    expect(getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 90, fromRoot: true }))
-      .toBe('M 100 50 H 136 Q 148 50 148 62 V 78 Q 148 90 160 90 H 220')
-  })
-
-  it('mirrors the same elbow rule for an upper left-facing child', () => {
-    expect(getMindTreePath({ sourceX: 220, sourceY: 90, targetX: 100, targetY: 40, fromRoot: false }))
-      .toBe('M 220 90 H 184 Q 172 90 172 78 V 52 Q 172 40 160 40 H 100')
-  })
-
   it('keeps a centered child on a straight horizontal line', () => {
-    expect(getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 50, fromRoot: false }))
-      .toBe('M 100 50 L 220 50')
+    const path = getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 50, fromRoot: false })
+    const ys = pathNumbers(path).filter((_, index) => index % 2 === 1)
+    expect(ys.length).toBeGreaterThan(0)
+    expect(ys.every((y) => y === 50)).toBe(true)
+  })
+
+  it('starts at the source, ends at the target and bends through the shared trunk axis', () => {
+    const path = getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 90, fromRoot: true })
+    // 主干 x = 100 + min(48, max(24, 120 * .42)) = 148
+    expect(path.startsWith('M100 50')).toBe(true)
+    expect(path.trimEnd().endsWith('220 90')).toBe(true)
+    expect(path).toContain('Q')
+    expect(pathNumbers(path).filter((_, index) => index % 2 === 0)).toContain(148)
+  })
+
+  it('clamps the trunk axis within 24~48px from the parent for any distance', () => {
+    for (const distance of [40, 120, 400, 1000]) {
+      const path = getMindTreePath({ sourceX: 0, sourceY: 0, targetX: distance, targetY: 80, fromRoot: false })
+      const trunkX = Math.min(48, Math.max(24, distance * .42))
+      expect(pathNumbers(path).filter((_, index) => index % 2 === 0)).toContain(trunkX)
+    }
+  })
+
+  it('mirrors upper and lower children around the parent axis', () => {
+    const down = pathNumbers(getMindTreePath({ sourceX: 100, sourceY: 50, targetX: 220, targetY: 90, fromRoot: true }))
+    const up = pathNumbers(getMindTreePath({ sourceX: 100, sourceY: 90, targetX: 220, targetY: 50, fromRoot: true }))
+    // 以 y=70 为轴镜像上方路径后应与下方路径逐点一致
+    expect(up.map((value, index) => (index % 2 === 1 ? 140 - value : value))).toEqual(down)
   })
 
   it('inherits one color through every descendant of a top-level branch', () => {

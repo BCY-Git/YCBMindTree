@@ -127,7 +127,7 @@ describe('tree layout', () => {
     document.nodes[document.rootId].topic = '第一行\n第二行\n第三行\n第四行\n第五行'
 
     const root = layoutTree(document).find((node) => node.id === document.rootId)!
-    expect(root.height).toBe(138) // 58px 根主题 + 4 行 × 20px
+    expect(root.height).toBe(105) // 18px 固定开销 + 5 行 × 17.4px（12px 字号 × 1.45 行高）
   })
 
   it('reserves a calm thumbnail area when a node contains an image attachment', () => {
