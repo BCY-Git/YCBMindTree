@@ -91,9 +91,30 @@ export function attachAiProxyRoute(app: Express, allowedHosts: readonly string[]
         await upstream.body?.cancel().catch(() => {})
         return response.status(502).json({ error: { message: 'AI 服务返回了不安全的重定向' } })
       }
+      const contentType = upstream.headers.get('content-type') ?? 'application/json; charset=utf-8'
+      // SSE 流式响应边收边转，保证打字机体验；仍受最大字节数与超时约束。
+      if (upstream.body && contentType.includes('text/event-stream')) {
+        response.status(upstream.status)
+        response.type(contentType)
+        response.setHeader('x-accel-buffering', 'no')
+        const reader = (upstream.body as ReadableStream<Uint8Array>).getReader()
+        let total = 0
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            total += value.byteLength
+            if (total > maximumUpstreamBytes) throw new Error('AI 服务响应过大')
+            response.write(Buffer.from(value))
+          }
+        } finally {
+          reader.releaseLock()
+        }
+        return response.end()
+      }
       const body = await readLimitedBody(upstream)
       response.status(upstream.status)
-      response.type(upstream.headers.get('content-type') ?? 'application/json; charset=utf-8')
+      response.type(contentType)
       return response.send(body)
     } catch (error) {
       const timeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')

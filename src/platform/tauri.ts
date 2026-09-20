@@ -51,3 +51,43 @@ export async function requestAiChat(endpoint: string, request: unknown, apiKey: 
     body: JSON.stringify({ endpoint: safeEndpoint, request }),
   })
 }
+
+type ChatResponsePayload = { choices?: Array<{ message?: { content?: string } }>; error?: { message?: string } }
+
+/**
+ * 流式发送 chat 请求：上游支持 SSE 时逐段回调增量，否则静默退回整包解析。
+ * Tauri 原生 HTTP 不提供可靠的响应流，桌面端同样退回整包。
+ * 仅用于纯对话；结构化生成（分支/计划/沉淀）需要完整 JSON 校验，不走流式。
+ */
+export async function streamAiChatReply(
+  endpoint: string,
+  request: Record<string, unknown>,
+  apiKey: string,
+  onDelta: (delta: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (isTauriRuntime()) {
+    const response = await requestAiChat(endpoint, request, apiKey, signal)
+    const payload = await response.json().catch(() => ({})) as ChatResponsePayload
+    if (!response.ok) throw new Error(payload.error?.message || `AI 请求失败（${response.status}）`)
+    const content = payload.choices?.[0]?.message?.content ?? ''
+    if (content) onDelta(content)
+    return content
+  }
+  const safeEndpoint = assertPublicHttpsAiEndpoint(endpoint)
+  const response = await fetch('/api/ai/chat', {
+    method: 'POST', signal,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` },
+    body: JSON.stringify({ endpoint: safeEndpoint, request: { ...request, stream: true } }),
+  })
+  const contentType = response.headers.get('content-type') ?? ''
+  if (response.ok && response.body && contentType.includes('text/event-stream')) {
+    const { readSseStream } = await import('./ai-stream')
+    return readSseStream(response.body, onDelta)
+  }
+  const payload = await response.json().catch(() => ({})) as ChatResponsePayload
+  if (!response.ok) throw new Error(payload.error?.message || `AI 请求失败（${response.status}）`)
+  const content = payload.choices?.[0]?.message?.content ?? ''
+  if (content) onDelta(content)
+  return content
+}

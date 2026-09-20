@@ -75,7 +75,7 @@ describe('流程截图转导图', () => {
     expect(screen.getByAltText('待转换的流程截图')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '移除流程截图' }))
     expect(screen.queryByAltText('待转换的流程截图')).toBeNull()
-    expect(screen.getByRole('button', { name: '开始协作 ↗' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '发送 ↗' })).toBeTruthy()
   })
 
   it('模型返回错误结构时不产生可写入预览', async () => {

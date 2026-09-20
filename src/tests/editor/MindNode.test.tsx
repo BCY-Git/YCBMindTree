@@ -225,7 +225,28 @@ describe('MindNode quick actions', () => {
     await waitFor(() => expect(useEditorStore.getState().document.nodes[parentId].childIds).toHaveLength(before + 3))
     const childIds = useEditorStore.getState().document.nodes[parentId].childIds.slice(before)
     expect(childIds.map((id) => useEditorStore.getState().document.nodes[id].topic)).toEqual(['切入点', '关键风险', '下一步'])
-    expect(screen.getByText('已生成 3 个直接子节点')).toBeDefined()
+    expect(screen.getByText('已生成 3 个节点 · ⌘Z 撤销')).toBeDefined()
+  })
+
+  it('generates a hierarchical branch from the 分支 button', async () => {
+    const document = useEditorStore.getState().document
+    const parentId = document.nodes[document.rootId].childIds[0]
+    const before = document.nodes[parentId].childIds.length
+    saveAiSettings({ endpoint: 'https://api.deepseek.com', model: 'test-model', apiKey: 'sk-test' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"topic":"当前主题原文","children":[{"topic":"方向A","children":[{"topic":"子点A1","children":[]}]}]}' } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    renderNode({ showQuickActions: true, canAddChild: true, canAddSibling: true }, parentId, true)
+
+    fireEvent.click(screen.getByRole('button', { name: '分支' }))
+
+    await waitFor(() => expect(useEditorStore.getState().document.nodes[parentId].childIds).toHaveLength(before + 1))
+    const state = useEditorStore.getState()
+    const newChildId = state.document.nodes[parentId].childIds.at(-1)!
+    expect(state.document.nodes[newChildId].topic).toBe('方向A')
+    const grandChildId = state.document.nodes[newChildId].childIds[0]
+    expect(state.document.nodes[grandChildId].topic).toBe('子点A1')
+    expect(screen.getByText('已生成 2 个节点 · ⌘Z 撤销')).toBeDefined()
   })
 })
 

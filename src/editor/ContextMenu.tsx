@@ -7,9 +7,10 @@
  *
  * 菜单在视口边缘自动收缩，防止溢出；点击菜单外部或按 Escape 关闭。
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { MindMapRelation, MindNode, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta, nodeMarkOrder } from '../domain/node-semantics'
+import { nodeAiActionMeta, type NodeAiAction } from '../ai/node-actions'
 
 export type ContextMenuPosition = { x: number; y: number }
 
@@ -51,6 +52,9 @@ type ContextMenuProps = {
   onDeleteSingle: () => void
   onResetRelationCurve: () => void
   onDeleteRelation: () => void
+  onAiAction: (action: NodeAiAction) => void
+  onAiCustom: () => void
+  onAskAi: () => void
   hasClipboard: boolean
   hasFreeformHistory: boolean
   canOutdent: boolean
@@ -60,7 +64,7 @@ type ContextMenuProps = {
 }
 
 function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
-  children: string
+  children: ReactNode
   shortcut?: string
   destructive?: boolean
   disabled?: boolean
@@ -74,7 +78,7 @@ function MenuItem({ children, shortcut, destructive, disabled, onClick }: {
   )
 }
 
-export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddSiblingBefore, onAddParent, onDuplicate, onAddFreeTopic, onAttachToRoot, onEdit, onToggleMark, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onFocusBranch, onSelectBranch, onSelectSiblings, onSelectAll, onIndent, onOutdent, onCopy, onCut, onPaste, onPasteImage, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteSingle, onResetRelationCurve, onDeleteRelation, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
+export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAddSibling, onAddSiblingBefore, onAddParent, onDuplicate, onAddFreeTopic, onAttachToRoot, onEdit, onToggleMark, onCreateRelation, onCreateBoundary, onCreateSummary, onToggleCollapse, onCollapseDescendants, onExpandDescendants, onFocusRoot, onFocusBranch, onSelectBranch, onSelectSiblings, onSelectAll, onIndent, onOutdent, onCopy, onCut, onPaste, onPasteImage, onResetPosition, onAutoArrange, onRestoreFreeform, onDelete, onDeleteSingle, onResetRelationCurve, onDeleteRelation, onAiAction, onAiCustom, onAskAi, hasClipboard, hasFreeformHistory, canOutdent, canIndent, canCreateBoundary, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const isCanvasMenu = node === null && relation === null
 
@@ -91,7 +95,7 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
     }
   }, [onClose])
 
-  const estimatedHeight = relation ? 148 : isCanvasMenu ? 386 : 790
+  const estimatedHeight = relation ? 148 : isCanvasMenu ? 386 : 990
   // 顶部工具栏属于更高层的工作区容器；菜单始终留在其下方，避免首项被遮住。
   const menuTop = Math.max(70, Math.min(position.y, window.innerHeight - estimatedHeight - 8))
   const style = {
@@ -151,6 +155,13 @@ export function ContextMenu({ position, node, relation, isRoot, onAddChild, onAd
           <MenuItem onClick={onAddParent} shortcut="⌘ Enter" disabled={isRoot}>插入父节点</MenuItem>
           <div className="context-menu__divider" />
           <MenuItem onClick={onEdit} shortcut="F2">编辑主题</MenuItem>
+          <div className="context-menu__hint">AI</div>
+          <MenuItem onClick={() => onAiAction('expand-ideas')}>✨ {nodeAiActionMeta['expand-ideas'].label}</MenuItem>
+          <MenuItem onClick={() => onAiAction('expand-branch')}>🌿 {nodeAiActionMeta['expand-branch'].label}</MenuItem>
+          <MenuItem onClick={onAiCustom}>✏️ AI 扩展（自定义）…</MenuItem>
+          <MenuItem onClick={() => onAiAction('summarize')} disabled={!node.childIds.length}>📋 {nodeAiActionMeta.summarize.label}</MenuItem>
+          <MenuItem onClick={() => onAiAction('tasks')}>✅ {nodeAiActionMeta.tasks.label}</MenuItem>
+          <MenuItem onClick={onAskAi}>💬 向 AI 提问…</MenuItem>
           <div className="context-menu__hint">标记</div>
           {nodeMarkOrder.map((mark) => <MenuItem key={mark} onClick={() => onToggleMark(mark)}>{`${node.marks.includes(mark) ? '✓ ' : ''}${nodeMarkMeta[mark].icon} ${nodeMarkMeta[mark].label}`}</MenuItem>)}
           <MenuItem onClick={onCreateRelation}>创建关系…</MenuItem>

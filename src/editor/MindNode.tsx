@@ -10,13 +10,12 @@
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react'
-import { MagicWandIcon, PlusIcon } from '@radix-ui/react-icons'
+import { PlusIcon } from '@radix-ui/react-icons'
 import { useEditorStore } from '../store/editor.store'
 import { isGhostCompletionEnabled, loadAiSettings } from '../ai/ai-settings'
 import { requestGhostCompletion } from '../ai/ghost-completion'
-import { requestExpandedIdeas } from '../ai/expand-ideas'
-import { platformErrorMessage } from '../platform/tauri'
 import { isTauriRuntime } from '../platform/tauri'
+import { NodeAiToolbar } from './NodeAiToolbar'
 import { findClipboardImageFile, readClipboardImageFile } from './clipboard-image'
 import type { MindNodeAttachment, MindNodePriority, MindNodeTaskStatus, NodeMark } from '../domain/document.types'
 import { nodeMarkMeta } from '../domain/node-semantics'
@@ -87,14 +86,6 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   const reportedHeightRef = useRef<number | null>(null)
   const markerControlsRef = useRef<HTMLSpanElement>(null)
   const [markerMenu, setMarkerMenu] = useState<'task' | 'priority' | null>(null)
-  const ideaRequestRef = useRef<AbortController | null>(null)
-  const ideaStatusTimerRef = useRef<number | null>(null)
-  const [ideaStatus, setIdeaStatus] = useState<{ tone: 'working' | 'success' | 'error'; text: string } | null>(null)
-
-  useEffect(() => () => {
-    ideaRequestRef.current?.abort()
-    if (ideaStatusTimerRef.current !== null) window.clearTimeout(ideaStatusTimerRef.current)
-  }, [])
 
   useEffect(() => {
     if (!isEditing || editingInitialText === null) setTopic(node.label)
@@ -275,38 +266,6 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
     keepNodeAction(event)
     dispatch({ type: 'ADD_SIBLING', nodeId: id })
   }
-  const expandIdeas = (event: React.MouseEvent<HTMLButtonElement>) => {
-    keepNodeAction(event)
-    if (ideaStatus?.tone === 'working') return
-    const settings = loadAiSettings()
-    if (!settings.endpoint.trim() || !settings.model.trim() || (!settings.apiKey.trim() && !import.meta.env.DEV)) {
-      setIdeaStatus({ tone: 'error', text: '请先在 AI 工作台配置模型和 API Key' })
-      return
-    }
-    const currentDocument = useEditorStore.getState().document
-    const controller = new AbortController()
-    ideaRequestRef.current?.abort()
-    ideaRequestRef.current = controller
-    setIdeaStatus({ tone: 'working', text: '正在扩展 3 个想法…' })
-    void requestExpandedIdeas(settings, currentDocument, id, controller.signal)
-      .then((ideas) => {
-        if (controller.signal.aborted) return
-        const inserted = dispatch({ type: 'ADD_CHILDREN', parentId: id, topics: ideas })
-        setIdeaStatus(inserted
-          ? { tone: 'success', text: '已生成 3 个直接子节点' }
-          : { tone: 'error', text: '节点已变化，请重试' })
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) setIdeaStatus({ tone: 'error', text: platformErrorMessage(error, '扩展失败，请重试') })
-      })
-      .finally(() => {
-        if (ideaRequestRef.current === controller) ideaRequestRef.current = null
-        if (!controller.signal.aborted) {
-          if (ideaStatusTimerRef.current !== null) window.clearTimeout(ideaStatusTimerRef.current)
-          ideaStatusTimerRef.current = window.setTimeout(() => setIdeaStatus(null), 2600)
-        }
-      })
-  }
 
   return (
     <div
@@ -317,13 +276,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       onDoubleClick={beginEditing}
     >
       {!isEditing && <>
-        {showFloatingToolbar && <div className="node-quick-toolbar nodrag nowheel" onPointerDown={keepNodeAction}>
-          <button type="button" className="node-quick-toolbar__expand" onClick={expandIdeas} disabled={ideaStatus?.tone === 'working'} title="让 AI 生成 3 个直接子节点">
-            <MagicWandIcon aria-hidden="true" />
-            <span>{ideaStatus?.tone === 'working' ? '扩展中…' : '扩展想法'}</span>
-          </button>
-          {ideaStatus && ideaStatus.tone !== 'working' && <span className={`node-quick-toolbar__status is-${ideaStatus.tone}`} role="status">{ideaStatus.text}</span>}
-        </div>}
+        {showFloatingToolbar && <NodeAiToolbar nodeId={id} canAddChild={Boolean(node.canAddChild)} />}
         {showAddTopicButtons && node.canAddChild && <button type="button" className="node-add-button node-add-button--child nodrag nowheel" aria-label="添加子节点" title="添加子节点（Tab）" onPointerDown={keepNodeAction} onClick={addChild}><PlusIcon /></button>}
         {showAddTopicButtons && node.canAddSibling && <button type="button" className="node-add-button node-add-button--sibling nodrag nowheel" aria-label="添加同级节点" title="添加同级节点（Enter）" onPointerDown={keepNodeAction} onClick={addSibling}><PlusIcon /></button>}
       </>}

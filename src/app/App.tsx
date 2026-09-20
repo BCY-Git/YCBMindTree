@@ -18,6 +18,7 @@ import { useEditorStore } from '../store/editor.store'
 import { getTheme, themes } from '../domain/themes'
 import { AiAssistant } from '../ai/AiAssistant'
 import { AssistantDock, AssistantDockToggleButton, loadAssistantDockOpen, loadAssistantDockWidth, saveAssistantDockOpen, saveAssistantDockWidth, type AssistantContextScope, type AssistantTab } from '../ai/AssistantDock'
+import { askAiAboutNodeEvent } from '../ai/node-actions'
 import { depositNudgeReason, shouldShowDepositNudge } from '../ai/deposit/deposit-nudge'
 import { WorkspaceNavigator } from './WorkspaceNavigator'
 import { documentKindLabels, documentKinds, type DocumentKind, type MindMapDocument, type NodeMark } from '../domain/document.types'
@@ -167,6 +168,9 @@ export function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => loadPanelWidth('right'))
   const [assistantDockWidth, setAssistantDockWidth] = useState(loadAssistantDockWidth)
   const [assistantDepositRequestId, setAssistantDepositRequestId] = useState(0)
+  const [assistantPrefill, setAssistantPrefill] = useState<{ id: number; text: string } | null>(null)
+  // P1-3：协作范围默认跟随画布选中状态自动推断；用户手动切换后锁定，切换文档时重置。
+  const assistantScopeLockedRef = useRef(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('content')
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(loadSyncConfig)
@@ -275,6 +279,30 @@ export function App() {
   }, [])
 
   useEffect(() => { setFocusedNodeId(null) }, [document.id])
+  useEffect(() => { assistantScopeLockedRef.current = false }, [document.id])
+  useEffect(() => {
+    if (assistantScopeLockedRef.current) return
+    setAssistantContextScope(selectedNodeId ? 'selection' : 'document')
+  }, [selectedNodeId])
+  // 画布「向 AI 提问」：打开工作台、锁定范围到当前节点并预填问题开头。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId
+      const topic = nodeId ? useEditorStore.getState().document.nodes[nodeId]?.topic : null
+      assistantScopeLockedRef.current = true
+      setAssistantTab('chat')
+      setAssistantContextScope(nodeId ? 'selection' : 'document')
+      setAssistantOpen(true)
+      saveAssistantDockOpen(true)
+      if (topic) setAssistantPrefill({ id: Date.now(), text: `关于「${topic}」：` })
+    }
+    window.addEventListener(askAiAboutNodeEvent, handler)
+    return () => window.removeEventListener(askAiAboutNodeEvent, handler)
+  }, [])
+  const handleAssistantScopeChange = (scope: AssistantContextScope) => {
+    assistantScopeLockedRef.current = true
+    setAssistantContextScope(scope)
+  }
   useEffect(() => {
     if (!selectedNodeId && assistantContextScope === 'selection') setAssistantContextScope('document')
     if (!document.projectId && assistantContextScope === 'project') setAssistantContextScope(selectedNodeId ? 'selection' : 'document')
@@ -1535,8 +1563,8 @@ export function App() {
           </div>
         </section>
 
-        {assistantOpen && <AssistantDock width={assistantDockWidth} onWidthChange={setAssistantDockWidth} onWidthCommit={saveAssistantDockWidth} onClose={toggleAssistantDock} title="MindTree Agent" subtitle={currentProject ? `${currentProject.name} · ${document.title}` : document.title} activeTab={assistantTab} onTabChange={setAssistantTab} contextScope={assistantContextScope} onContextScopeChange={setAssistantContextScope} hasSelection={Boolean(selectedNodeId)} hasProject={Boolean(currentProject)} pendingCount={currentPendingDepositCount}>
-          <AiAssistant heading={assistantTab === 'chat' ? '当前协作' : assistantTab === 'deposit' ? '待沉淀' : '历史记录'} document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} onOpenDeposit={() => setAssistantTab('deposit')} depositRequestId={assistantDepositRequestId} activeTab={assistantTab} contextScope={assistantContextScope} />
+        {assistantOpen && <AssistantDock width={assistantDockWidth} onWidthChange={setAssistantDockWidth} onWidthCommit={saveAssistantDockWidth} onClose={toggleAssistantDock} title="MindTree Agent" subtitle={currentProject ? `${currentProject.name} · ${document.title}` : document.title} activeTab={assistantTab} onTabChange={setAssistantTab} pendingCount={currentPendingDepositCount}>
+          <AiAssistant heading={assistantTab === 'chat' ? '当前协作' : assistantTab === 'deposit' ? '待沉淀' : '历史记录'} document={document} targetNodeId={selectedNodeId ?? document.rootId} workspaceDocuments={taskDocuments} onBeforeWorkspaceApply={flushCurrentDocument} onWorkspaceDocumentsChanged={adoptWorkspaceDocuments} onOpenDeposit={() => setAssistantTab('deposit')} depositRequestId={assistantDepositRequestId} prefillRequest={assistantPrefill} activeTab={assistantTab} contextScope={assistantContextScope} onContextScopeChange={handleAssistantScopeChange} hasSelection={Boolean(selectedNodeId)} hasProject={Boolean(currentProject)} />
         </AssistantDock>}
 
         <aside className="inspector">

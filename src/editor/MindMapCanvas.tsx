@@ -1,4 +1,4 @@
-import { isTauriRuntime } from '../platform/tauri'
+import { isTauriRuntime, platformErrorMessage } from '../platform/tauri'
 /**
  * MindMapCanvas — 思维导图画布主视图。
  *
@@ -39,6 +39,12 @@ import { MindNode, type MindNodeData } from './MindNode'
 import { ContextMenu, type ContextMenuPosition } from './ContextMenu'
 import { CommandPalette } from './CommandPalette'
 import { NodeSearchDialog } from './NodeSearchDialog'
+import { AiCustomPrompt } from './AiCustomPrompt'
+import { aiCustomPromptEvent } from './NodeAiToolbar'
+import { loadAiSettings } from '../ai/ai-settings'
+import { requestExpandedIdeas } from '../ai/expand-ideas'
+import { branchNodeCount } from '../ai/generated-branch'
+import { aiConfigurationError, askAiAboutNode, nodeAiActionMeta, requestNodeAiBranches, type NodeAiAction } from '../ai/node-actions'
 import { getTheme } from '../domain/themes'
 import { MAX_CANVAS_ZOOM } from '../domain/layout-limits'
 import { getTreeBranchColor, getTreeEdgeAnchors } from './tree-edge'
@@ -181,6 +187,8 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   const [htmlDragActive, setHtmlDragActive] = useState(false)
   const htmlDragDepthRef = useRef(0)
   const [interactionStatus, setInteractionStatus] = useState<string | null>(null)
+  const [aiCustomNodeId, setAiCustomNodeId] = useState<string | null>(null)
+  const aiRequestRef = useRef<AbortController | null>(null)
   const viewDocument = useMemo(() => focusRootId ? projectFocusedDocument(document, focusRootId) : document, [document, focusRootId])
   const fittedDocumentIdRef = useRef<string | null>(null)
   const rightPointerRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
@@ -201,7 +209,54 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
   useEffect(() => () => {
     if (interactionStatusTimerRef.current !== null) window.clearTimeout(interactionStatusTimerRef.current)
     if (relationPaneCancelTimerRef.current !== null) window.clearTimeout(relationPaneCancelTimerRef.current)
+    aiRequestRef.current?.abort()
   }, [])
+
+  // 节点级 AI 动作的统一执行入口：右键菜单与命令面板走这里，生成结果直接上图（可 ⌘Z 撤销）。
+  // 浮动工具条（NodeAiToolbar）自带就地状态提示，独立执行同一批动作。
+  const runNodeAiAction = useCallback(async (action: NodeAiAction, nodeId: string, customPrompt?: string) => {
+    const settings = loadAiSettings()
+    const configError = aiConfigurationError(settings, import.meta.env.DEV)
+    if (configError) { showInteractionStatus(configError); return }
+    const currentDocument = useEditorStore.getState().document
+    if (!currentDocument.nodes[nodeId]) { showInteractionStatus('节点已变化，请重试'); return }
+    const controller = new AbortController()
+    aiRequestRef.current?.abort()
+    aiRequestRef.current = controller
+    showInteractionStatus(nodeAiActionMeta[action].working)
+    try {
+      let count = 0
+      if (action === 'expand-ideas') {
+        const ideas = await requestExpandedIdeas(settings, currentDocument, nodeId, controller.signal)
+        if (!controller.signal.aborted) {
+          const inserted = dispatch({ type: 'ADD_CHILDREN', parentId: nodeId, topics: ideas })
+          count = inserted ? ideas.length : 0
+        }
+      } else {
+        const branches = await requestNodeAiBranches(settings, currentDocument, nodeId, action, customPrompt, controller.signal)
+        if (!controller.signal.aborted) {
+          const insert = useEditorStore.getState().insertGeneratedBranch
+          for (const branch of branches) if (insert(nodeId, branch)) count += branchNodeCount(branch)
+        }
+      }
+      if (controller.signal.aborted) return
+      showInteractionStatus(count > 0 ? `已生成 ${count} 个节点 · ⌘Z 可撤销` : '节点已变化，请重试')
+    } catch (error) {
+      if (!controller.signal.aborted) showInteractionStatus(platformErrorMessage(error, 'AI 生成失败，请重试'))
+    }
+  }, [dispatch, showInteractionStatus])
+
+  // 浮动工具条的「自定义…」通过事件交给画布层弹出输入层（工具条可能被偏好隐藏，画布层始终可用）。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId
+      if (!nodeId || !useEditorStore.getState().document.nodes[nodeId]) return
+      selectNode(nodeId)
+      setAiCustomNodeId(nodeId)
+    }
+    window.addEventListener(aiCustomPromptEvent, handler)
+    return () => window.removeEventListener(aiCustomPromptEvent, handler)
+  }, [selectNode])
 
   useEffect(() => {
     const reload = () => setTags(loadTags())
@@ -1458,6 +1513,13 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
       <textarea ref={clipboardTargetRef} className="canvas-clipboard-target" tabIndex={-1} aria-label="画布粘贴接收区" />
       {pasteAttachmentStatus && <div className="paste-attachment-hint" role="status">{pasteAttachmentStatus}</div>}
       {interactionStatus && <div className="paste-attachment-hint" role="status">{interactionStatus}</div>}
+      {aiCustomNodeId && document.nodes[aiCustomNodeId] && (() => {
+        const flowNode = flowNodes.find((item) => item.id === aiCustomNodeId)
+        const anchor = flowNode && flowInstance
+          ? flowInstance.flowToScreenPosition({ x: flowNode.position.x + (flowNode.measured?.width ?? 160) / 2, y: flowNode.position.y + (flowNode.measured?.height ?? 44) + 10 })
+          : null
+        return <AiCustomPrompt nodeTopic={document.nodes[aiCustomNodeId].topic} anchor={anchor} onClose={() => setAiCustomNodeId(null)} onSubmit={(prompt) => { const nodeId = aiCustomNodeId; setAiCustomNodeId(null); void runNodeAiAction('expand-branch', nodeId, prompt) }} />
+      })()}
       {searchOpen && <NodeSearchDialog currentDocumentId={document.id} documents={[document, ...workspaceDocuments.filter((item) => item.id !== document.id)]} tags={tags} provenance={searchProvenance} onClose={() => setSearchOpen(false)} onSelect={revealSearchResult} onCreate={(topic) => { const selected = selectedNodeId ? document.nodes[selectedNodeId] : null; const parentId = selected && !selected.isFreeTopic ? selected.id : document.rootId; if (dispatch({ type: 'ADD_CHILD', parentId, topic })) setSearchOpen(false) }} />}
       {contextMenu && (() => {
         const contextNode = contextMenu.nodeId ? document.nodes[contextMenu.nodeId] : null
@@ -1505,6 +1567,9 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
             onDeleteSingle={() => runContextAction(() => dispatch({ type: 'DELETE_SINGLE_NODE', nodeId: targetNodeId }))}
             onResetRelationCurve={() => contextRelation && runContextAction(() => dispatch({ type: 'UPDATE_RELATION_STYLE', relationId: contextRelation.id, patch: { controlOffsetX: 0, controlOffsetY: 0 } }))}
             onDeleteRelation={() => contextRelation && runContextAction(() => dispatch({ type: 'DELETE_RELATION', relationId: contextRelation.id }))}
+            onAiAction={(action) => runContextAction(() => { selectNode(targetNodeId); void runNodeAiAction(action, targetNodeId) })}
+            onAiCustom={() => runContextAction(() => { selectNode(targetNodeId); setAiCustomNodeId(targetNodeId) })}
+            onAskAi={() => runContextAction(() => { selectNode(targetNodeId); askAiAboutNode(targetNodeId) })}
             hasClipboard={clipboard !== null}
             hasFreeformHistory={document.layout.freeformOffsets !== null}
             canOutdent={contextNode !== null && contextNode.parentId !== null && document.nodes[contextNode.parentId].parentId !== null}
@@ -1527,6 +1592,12 @@ export function MindMapCanvas({ workspaceDocuments, onRevealWorkspaceNode, focus
               { label: '插入父节点', detail: '在当前节点与原父节点之间增加一层', shortcut: '⌘ ↵', disabled: selectedId === document.rootId || selected.isFreeTopic, run: () => dispatch({ type: 'ADD_PARENT', nodeId: selectedId }) },
               ...(selected.isFreeTopic ? [{ label: '附加到主节点', detail: '转为中心主题下的一级分支，并自动排列', shortcut: '—', run: () => dispatch({ type: 'ATTACH_FREE_TOPIC', nodeId: selectedId, parentId: document.rootId }) }] : []),
               { label: '编辑当前节点', detail: '修改节点主题文字', shortcut: 'F2', run: () => editNode(selectedId) },
+              { label: '✨ AI 扩展想法', detail: '生成 3 个直接子节点，直接上图可撤销', shortcut: '—', disabled: selected.isFreeTopic, run: () => void runNodeAiAction('expand-ideas', selectedId) },
+              { label: '🌿 AI 扩展分支（多级）', detail: '生成 2-3 层的结构化分支树', shortcut: '—', disabled: selected.isFreeTopic, run: () => void runNodeAiAction('expand-branch', selectedId) },
+              { label: '✏️ AI 扩展（自定义）…', detail: '输入扩展要求后生成结构化分支', shortcut: '—', disabled: selected.isFreeTopic, run: () => setAiCustomNodeId(selectedId) },
+              { label: '📋 AI 总结分支', detail: '把当前分支内容总结为要点分支', shortcut: '—', disabled: selected.isFreeTopic || !selected.childIds.length, run: () => void runNodeAiAction('summarize', selectedId) },
+              { label: '✅ AI 拆解为任务', detail: '生成带待办状态的任务分支', shortcut: '—', disabled: selected.isFreeTopic, run: () => void runNodeAiAction('tasks', selectedId) },
+              { label: '💬 向 AI 提问', detail: '在 AI 工作台中围绕当前节点提问', shortcut: '—', run: () => askAiAboutNode(selectedId) },
               { label: '创建关系', detail: '连线跟随鼠标，单击已有节点或双击空白处', shortcut: '—', run: () => { selectNode(selectedId); setRelationSourceIds([selectedId]); setRelationPointer(null) } },
               { label: '为所选节点创建边界', detail: '圈定两个或以上同级节点，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_BOUNDARY', nodeIds: selectedNodeIds }) },
               { label: '为所选节点创建摘要', detail: '为同级分支写下一个结论，不改变树结构', shortcut: '—', disabled: !canCreateBoundary, run: () => dispatch({ type: 'CREATE_SUMMARY', nodeIds: selectedNodeIds }) },

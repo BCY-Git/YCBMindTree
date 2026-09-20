@@ -82,14 +82,26 @@ const aiDevProxy: Plugin = {
         if (!authorization) throw new Error('缺少 API Key：请填写 AI 设置或在项目 .env 配置 DEEPSEEK_API_KEY')
         if (!body.request || typeof body.request !== 'object') throw new Error('请求内容无效')
 
-        const fetchUpstream = (globalThis as unknown as { fetch: (input: string, init: Record<string, unknown>) => Promise<{ status: number; headers: { get: (name: string) => string | null }; text: () => Promise<string> }> }).fetch
+        const fetchUpstream = (globalThis as unknown as { fetch: (input: string, init: Record<string, unknown>) => Promise<{ status: number; headers: { get: (name: string) => string | null }; body: AsyncIterable<Uint8Array> | null; text: () => Promise<string> }> }).fetch
         const upstream = await fetchUpstream(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: authorization },
           body: JSON.stringify(body.request),
         })
         response.statusCode = upstream.status
-        response.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'application/json; charset=utf-8')
+        const contentType = upstream.headers.get('content-type') ?? 'application/json; charset=utf-8'
+        response.setHeader('Content-Type', contentType)
+        // SSE 流式响应必须边收边转，不能等上游结束后一次性回吐；保持 8MB 上限。
+        if (upstream.body && contentType.includes('text/event-stream')) {
+          let total = 0
+          for await (const chunk of upstream.body) {
+            total += chunk.byteLength
+            if (total > 8 * 1024 * 1024) throw new Error('AI 服务响应过大')
+            response.write(chunk)
+          }
+          response.end()
+          return
+        }
         response.end(await upstream.text())
       } catch (error) {
         const message = error instanceof Error ? error.message : 'AI 代理请求失败'

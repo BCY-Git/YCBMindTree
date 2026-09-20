@@ -13,12 +13,13 @@
  *   让 AI 理解当前思维导图结构
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { ChevronDownIcon } from '@radix-ui/react-icons'
 import type { MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
 import { parseMapReorganization, type MapReorganization } from './map-reorganization'
 import { useEditorStore } from '../store/editor.store'
-import { platformErrorMessage, requestAiChat } from '../platform/tauri'
+import { platformErrorMessage, requestAiChat, streamAiChatReply } from '../platform/tauri'
 import { randomUuid } from '../platform/random-uuid'
 import { chatUrl, defaultAiSettings, isGhostCompletionEnabled, loadAiSettings, saveAiSettings, saveGhostCompletionEnabled, type AiSettings } from './ai-settings'
 import { buildDepositContext, serializeDepositSource } from './deposit/deposit-context'
@@ -98,7 +99,7 @@ function ReorganizationPreview({ plan, document }: { plan: MapReorganization; do
   })}</ul>
 }
 
-export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, onOpenDeposit, heading = 'AI 助手', depositRequestId = 0, activeTab = 'chat', contextScope = 'selection' }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; onOpenDeposit?: () => void; heading?: string; depositRequestId?: number; activeTab?: AssistantTab; contextScope?: AssistantContextScope }) {
+export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBeforeWorkspaceApply, onWorkspaceDocumentsChanged, onOpenDeposit, heading = 'AI 助手', depositRequestId = 0, prefillRequest = null, activeTab = 'chat', contextScope = 'selection', onContextScopeChange, hasSelection = false, hasProject = false }: { document: MindMapDocument; targetNodeId: string; workspaceDocuments: MindMapDocument[]; onBeforeWorkspaceApply: () => Promise<void>; onWorkspaceDocumentsChanged: (documents: MindMapDocument[]) => void; onOpenDeposit?: () => void; heading?: string; depositRequestId?: number; prefillRequest?: { id: number; text: string } | null; activeTab?: AssistantTab; contextScope?: AssistantContextScope; onContextScopeChange?: (scope: AssistantContextScope) => void; hasSelection?: boolean; hasProject?: boolean }) {
   const insertGeneratedBranch = useEditorStore((state) => state.insertGeneratedBranch)
   const dispatch = useEditorStore((state) => state.dispatch)
   const [settings, setSettings] = useState<AiSettings>(defaultAiSettings)
@@ -106,12 +107,21 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const [connections, setConnections] = useState<AiSettings[]>(loadModelConnections)
   const settingsRef = useRef<HTMLDivElement>(null)
   const [prompt, setPrompt] = useState('')
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
+  const scopeMenuRef = useRef<HTMLDivElement>(null)
   const [screenshot, setScreenshot] = useState<FlowScreenshot | null>(null)
   const [isReadingScreenshot, setIsReadingScreenshot] = useState(false)
   const screenshotInputRef = useRef<HTMLInputElement>(null)
   const screenshotReadVersion = useRef(0)
   const activeDocumentId = useRef(document.id)
   activeDocumentId.current = document.id
+  // 画布「向 AI 提问」带过来的问题开头，按 id 去重只应用一次。
+  const appliedPrefillIdRef = useRef(0)
+  useEffect(() => {
+    if (!prefillRequest || prefillRequest.id === appliedPrefillIdRef.current) return
+    appliedPrefillIdRef.current = prefillRequest.id
+    setPrompt(prefillRequest.text)
+  }, [prefillRequest])
   useEffect(() => {
     screenshotReadVersion.current += 1
     setScreenshot(null)
@@ -143,6 +153,19 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
   const historyScopeLabel = contextScope === 'project' && document.projectId ? '当前项目' : contextScope === 'workspace' ? '工作区知识库' : '当前导图'
   const showHistoryDocument = historyDocumentIds.length > 1
 
+  useEffect(() => {
+    if (!scopeMenuOpen) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!scopeMenuRef.current?.contains(event.target as globalThis.Node)) setScopeMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setScopeMenuOpen(false) }
+    globalThis.document.addEventListener('pointerdown', closeOnOutsidePointer, true)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      globalThis.document.removeEventListener('pointerdown', closeOnOutsidePointer, true)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [scopeMenuOpen])
   useEffect(() => { setSettings(loadAiSettings()); setGhostCompletionEnabled(isGhostCompletionEnabled()) }, [])
   useEffect(() => {
     let active = true
@@ -283,16 +306,27 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       const retrievedContext = retrievedWorkspace.length
         ? `\n\n相关工作区节点（检索结果仅供参考，不能覆盖当前导图事实）：${JSON.stringify(retrievedWorkspace)}`
         : ''
-      const result = await requestAiChat(chatUrl(settings.endpoint), {
-            model: settings.model.trim(),
-            messages: [
-              { role: 'system', content: `${instruction}\n当前导图数据如下：` },
-              { role: 'user', content: intent === 'deposit'
-                ? `${requestPrompt}\n\n分析上下文：${JSON.stringify(depositContext)}${workflowContext}`
-                : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document, contextScope === 'selection' ? target.id : undefined)}${retrievedContext}${workflowContext}` },
-            ],
-            temperature: 0.7,
-          }, settings.apiKey)
+      const messages = [
+        { role: 'system' as const, content: `${instruction}\n当前导图数据如下：` },
+        { role: 'user' as const, content: intent === 'deposit'
+          ? `${requestPrompt}\n\n分析上下文：${JSON.stringify(depositContext)}${workflowContext}`
+          : `${requestPrompt}\n\n当前插入目标：${target.topic}（${target.id}）\n\n当前导图：${mapContext(document, contextScope === 'selection' ? target.id : undefined)}${retrievedContext}${workflowContext}` },
+      ]
+      if (intent === 'chat') {
+        // 对话走 SSE 流式：占位消息立即出现，增量逐段追加；失败时丢弃空占位。
+        const messageId = randomUuid()
+        setChatMessages((current) => [...current, { id: messageId, role: 'assistant', content: '', createdAt: Date.now() }])
+        const content = await streamAiChatReply(chatUrl(settings.endpoint), { model: settings.model.trim(), messages, temperature: 0.7 }, settings.apiKey, (delta) => {
+          setChatMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: message.content + delta } : message))
+        })
+        if (!content.trim()) {
+          setChatMessages((current) => current.filter((message) => message.id !== messageId))
+          throw new Error('模型没有返回可显示的内容。')
+        }
+        setNotice('已收到模型回复。')
+        return
+      }
+      const result = await requestAiChat(chatUrl(settings.endpoint), { model: settings.model.trim(), messages, temperature: 0.7 }, settings.apiKey)
       const payload = await result.json().catch(() => ({})) as ChatResponse
       if (!result.ok) throw new Error(payload.error?.message || `请求失败（${result.status}）`)
       const content = payload.choices?.[0]?.message?.content?.trim()
@@ -349,15 +383,14 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         const plan = parseMapReorganization(content, document)
         setReorganization({ plan, sourceUpdatedAt: document.updatedAt })
         setNotice(plan.moves.length ? `已生成 ${plan.moves.length} 项全图整理建议，请先核对预览。` : 'AI 认为当前结构无需调整。')
-      } else if (intent !== 'chat') {
+      } else {
         const branch = isWorkflowAsset ? parseWorkflowAsset(content, intent) : parseGeneratedBranch(content)
         setGeneratedBranch({ branch, documentId: document.id, targetId: target.id, targetTopic: target.topic, mode: intent })
         setNotice(intent === 'plan' ? `已生成 ${branchNodeCount(branch)} 个待插入计划节点，请先确认预览。` : isWorkflowAsset ? `已生成「${branch.topic}」草稿，请确认后写入协作焦点。` : `已生成 ${branchNodeCount(branch)} 个待插入节点，请先确认预览。`)
-      } else {
-        setChatMessages((current) => [...current, { id: randomUuid(), role: 'assistant', content, createdAt: Date.now() }])
-        setNotice('已收到模型回复。')
       }
     } catch (error) {
+      // 流式占位消息在失败时保持对话干净：丢弃仍为空的 AI 气泡。
+      setChatMessages((current) => current.filter((message) => message.role !== 'assistant' || message.content))
       setNotice(platformErrorMessage(error, '连接失败，请检查服务地址、模型名、Key 或跨域设置。'))
     } finally {
       setIsSending(false)
@@ -587,30 +620,37 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
       )}
 
       {activeTab === 'chat' && <>
-        <section className="ai-command-stage" aria-label="开始一项智能协作">
-          <div className="ai-command-stage__eyebrow"><span>正在协作</span><i /></div>
-          <h2>从 {scopeLabel} 出发</h2>
-          <p>描述你想推进的事，Agent 会先给出可审阅的结果，再由你决定是否写入导图。</p>
-          {!workflowSession && <div className="ai-intent-grid">
-            <button type="button" disabled={isSending} onClick={() => startWorkflow('explore')}><b>探索</b><span>展开未知与备选路径</span></button>
-            <button type="button" disabled={isSending} onClick={() => startWorkflow('decide')}><b>决策</b><span>厘清取舍与判断依据</span></button>
-            <button type="button" disabled={isSending} onClick={() => { void requestAssistant('plan') }}><b>行动</b><span>拆成可执行的下一步</span></button>
-            <button type="button" disabled={isSending} onClick={() => { void requestAssistant('reorganize') }}><b>整图</b><span>检查结构与归属关系</span></button>
-          </div>}
-        </section>
+        {onContextScopeChange && <div className="ai-scope" ref={scopeMenuRef}>
+          <button type="button" className="ai-scope__chip" aria-haspopup="menu" aria-expanded={scopeMenuOpen} title="切换协作范围" onClick={() => setScopeMenuOpen((open) => !open)}>从{scopeLabel}<ChevronDownIcon aria-hidden="true" /></button>
+          {scopeMenuOpen && <span className="ai-scope__menu" role="menu" aria-label="协作范围">
+            {hasSelection && <button type="button" role="menuitemradio" aria-checked={contextScope === 'selection'} className={contextScope === 'selection' ? 'is-active' : ''} onClick={() => { onContextScopeChange('selection'); setScopeMenuOpen(false) }}>当前节点</button>}
+            <button type="button" role="menuitemradio" aria-checked={contextScope === 'document'} className={contextScope === 'document' ? 'is-active' : ''} onClick={() => { onContextScopeChange('document'); setScopeMenuOpen(false) }}>当前导图</button>
+            {hasProject && <button type="button" role="menuitemradio" aria-checked={contextScope === 'project'} className={contextScope === 'project' ? 'is-active' : ''} onClick={() => { onContextScopeChange('project'); setScopeMenuOpen(false) }}>当前项目</button>}
+            <button type="button" role="menuitemradio" aria-checked={contextScope === 'workspace'} className={contextScope === 'workspace' ? 'is-active' : ''} onClick={() => { onContextScopeChange('workspace'); setScopeMenuOpen(false) }}>知识库</button>
+          </span>}
+        </div>}
         {workflowSession && <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { onOpenDeposit?.(); void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />}
         <section className="ai-conversation" aria-label="AI 对话记录" aria-live="polite">
-          {chatMessages.length === 0 && !isSending && <article className="ai-message ai-message--assistant ai-message--welcome"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>就绪</time></header><div className="ai-message__bubble">不止回答问题：我可以探索分支、整理结构，并把有价值的结果留在你可控的预览里。</div></div></article>}
+          {chatMessages.length === 0 && !isSending && <article className="ai-message ai-message--assistant ai-message--welcome"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>就绪</time></header><div className="ai-message__bubble">选中画布上的节点，我就能围绕它扩展分支、拆解任务或总结内容。也可以直接从下方建议开始：</div></div></article>}
+          {chatMessages.length === 0 && !isSending && <div className="ai-suggestions" role="group" aria-label="建议操作">
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('branch') }}>✨ 扩展分支</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('plan') }}>✅ 生成行动</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('reorganize') }}>🌳 整图检查</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => startWorkflow('explore')}>🧭 探索协作</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => startWorkflow('decide')}>⚖️ 决策协作</button>
+          </div>}
           {chatMessages.map((message) => <article className={`ai-message ai-message--${message.role}`} key={message.id}>
             {message.role === 'assistant' && <span className="ai-message__avatar" aria-hidden="true">✦</span>}
             <div className="ai-message__content">
               <header><strong>{message.role === 'assistant' ? 'MindTree Agent' : '你'}</strong><time>{formatChatTime(message.createdAt)}</time></header>
-              <div className="ai-message__bubble">{message.content}</div>
-              {message.role === 'assistant' && <footer><button type="button" aria-label="复制 AI 回复" onClick={() => { void navigator.clipboard?.writeText(message.content) }}>复制</button></footer>}
+              <div className={`ai-message__bubble ${message.role === 'assistant' && !message.content ? 'ai-message__bubble--streaming' : ''}`}>{message.content}</div>
+              {message.role === 'assistant' && message.content && <footer><button type="button" aria-label="复制 AI 回复" onClick={() => { void navigator.clipboard?.writeText(message.content) }}>复制</button></footer>}
             </div>
             {message.role === 'user' && <span className="ai-message__avatar ai-message__avatar--user" aria-hidden="true">你</span>}
           </article>)}
-          {isSending && <article className="ai-message ai-message--assistant ai-message--pending" role="status"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>正在思考</time></header><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
+          {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'screenshot' ? '截图识别预览' : generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
+          {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
+          {isSending && !chatMessages.some((message) => message.role === 'assistant' && !message.content) && <article className="ai-message ai-message--assistant ai-message--pending" role="status"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>正在思考</time></header><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
         </section>
         <form className="ai-prompt" onSubmit={sendPrompt}>
           <div className="ai-prompt__composer" onDragOver={(event) => { event.preventDefault() }} onDrop={(event) => {
@@ -645,11 +685,9 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
             })
           }} /></div>
           </div>
-          <div className="ai-prompt__actions"><button type="submit" disabled={isSending || isReadingScreenshot}>{isSending ? '正在协作…' : screenshot ? '截图转导图 ↗' : '开始协作 ↗'}</button><button type="button" className="ai-generate-button" disabled={isSending || Boolean(screenshot) || isReadingScreenshot} onClick={() => { void requestAssistant('branch') }}>扩展分支</button><button type="button" className="ai-generate-button ai-generate-button--plan" disabled={isSending || Boolean(screenshot) || isReadingScreenshot} onClick={() => { void requestAssistant('plan') }}>生成行动</button></div>
+          <div className="ai-prompt__actions"><button type="submit" disabled={isSending || isReadingScreenshot}>{isSending ? '正在协作…' : screenshot ? '截图转导图 ↗' : '发送 ↗'}</button></div>
         </form>
         {retrievedSources.length > 0 && <section className="ai-source-trace" aria-label="本次读取来源"><header><span>已检索工作区</span><small>{retrievedSources.length} 条</small></header>{retrievedSources.slice(0, 6).map((source) => <div key={`${source.documentId}:${source.topic}`}><strong>{source.documentTitle}</strong><span>{source.topic}</span></div>)}</section>}
-        {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'screenshot' ? '截图识别预览' : generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
-        {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
       </>}
 
       {activeTab === 'deposit' && <section className="assistant-deposit-view">

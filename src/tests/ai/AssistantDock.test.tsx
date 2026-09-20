@@ -44,17 +44,17 @@ describe('AssistantDock resizing', () => {
     expect(onWidthCommit).toHaveBeenCalledWith(440)
   })
 
-  it('exposes project-scoped tabs and explicit context controls', () => {
+  it('exposes view switches as header icons with a pending badge', () => {
     const onTabChange = vi.fn()
-    const onContextScopeChange = vi.fn()
-    render(<AssistantDock width={360} onWidthChange={vi.fn()} onWidthCommit={vi.fn()} onClose={vi.fn()} title="MindTree Agent" subtitle="重构项目 · 主导图" activeTab="chat" onTabChange={onTabChange} contextScope="project" onContextScopeChange={onContextScopeChange} hasSelection hasProject pendingCount={3}><p>AI 内容</p></AssistantDock>)
+    render(<AssistantDock width={360} onWidthChange={vi.fn()} onWidthCommit={vi.fn()} onClose={vi.fn()} title="MindTree Agent" subtitle="重构项目 · 主导图" activeTab="chat" onTabChange={onTabChange} pendingCount={3}><p>AI 内容</p></AssistantDock>)
 
     expect(screen.getByText('重构项目 · 主导图')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /待沉淀\s*3/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '当前项目' }).classList.contains('is-active')).toBe(true)
+    expect(screen.getByRole('button', { name: '对话' }).classList.contains('is-active')).toBe(true)
+    const depositButton = screen.getByRole('button', { name: '待沉淀 · 3 条待处理' })
+    expect(depositButton.textContent).toContain('3')
+    fireEvent.click(depositButton)
+    expect(onTabChange).toHaveBeenCalledWith('deposit')
     fireEvent.click(screen.getByRole('button', { name: '足迹' }))
     expect(onTabChange).toHaveBeenCalledWith('history')
-    fireEvent.click(screen.getByRole('button', { name: '知识库' }))
-    expect(onContextScopeChange).toHaveBeenCalledWith('workspace')
   })
 })

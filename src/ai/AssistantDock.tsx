@@ -1,5 +1,5 @@
 import { useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
-import { Cross2Icon, MagicWandIcon } from '@radix-ui/react-icons'
+import { ArchiveIcon, ChatBubbleIcon, CounterClockwiseClockIcon, Cross2Icon, MagicWandIcon } from '@radix-ui/react-icons'
 
 export type AssistantTab = 'chat' | 'deposit' | 'history'
 export type AssistantContextScope = 'selection' | 'document' | 'project' | 'workspace'
@@ -44,15 +44,11 @@ type AssistantDockProps = {
   subtitle?: string
   activeTab?: AssistantTab
   onTabChange?: (tab: AssistantTab) => void
-  contextScope?: AssistantContextScope
-  onContextScopeChange?: (scope: AssistantContextScope) => void
-  hasSelection?: boolean
-  hasProject?: boolean
   pendingCount?: number
   children: ReactNode
 }
 
-export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, title = 'AI 助手', subtitle = '当前导图', activeTab = 'chat', onTabChange, contextScope = 'selection', onContextScopeChange, hasSelection = false, hasProject = false, pendingCount = 0, children }: AssistantDockProps) {
+export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, title = 'AI 助手', subtitle = '当前导图', activeTab = 'chat', onTabChange, pendingCount = 0, children }: AssistantDockProps) {
   const dragRef = useRef<{ startX: number; startWidth: number; currentWidth: number } | null>(null)
 
   const resizeByKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -85,9 +81,17 @@ export function AssistantDock({ width, onWidthChange, onWidthCommit, onClose, ti
 
   return <aside className="assistant-dock" aria-label="AI 助手面板">
     <div className="assistant-dock__resize" role="separator" aria-label="调整 AI 助手宽度" aria-orientation="vertical" aria-valuemin={assistantDockLimits.min} aria-valuemax={assistantDockLimits.max} aria-valuenow={width} tabIndex={0} onKeyDown={resizeByKeyboard} onPointerDown={beginResize} onPointerMove={continueResize} onPointerUp={finishResize} onPointerCancel={finishResize} />
-    <header className="assistant-dock__header"><span><i><MagicWandIcon /></i><strong>{title}</strong><small>{subtitle}</small></span><button onClick={onClose} aria-label="收起 AI 助手"><Cross2Icon /></button></header>
-    {onTabChange && <nav className="assistant-dock__tabs" aria-label="AI 助手功能"><button type="button" className={activeTab === 'chat' ? 'is-active' : ''} onClick={() => onTabChange('chat')}>协作</button><button type="button" className={activeTab === 'deposit' ? 'is-active' : ''} onClick={() => onTabChange('deposit')}>待沉淀{pendingCount > 0 && <small>{pendingCount}</small>}</button><button type="button" className={activeTab === 'history' ? 'is-active' : ''} onClick={() => onTabChange('history')}>足迹</button></nav>}
-    {onContextScopeChange && activeTab === 'chat' && <div className="assistant-dock__context"><span>协作范围</span><div>{hasSelection && <button type="button" className={contextScope === 'selection' ? 'is-active' : ''} onClick={() => onContextScopeChange('selection')}>当前节点</button>}<button type="button" className={contextScope === 'document' ? 'is-active' : ''} onClick={() => onContextScopeChange('document')}>当前导图</button>{hasProject && <button type="button" className={contextScope === 'project' ? 'is-active' : ''} onClick={() => onContextScopeChange('project')}>当前项目</button>}<button type="button" className={contextScope === 'workspace' ? 'is-active' : ''} onClick={() => onContextScopeChange('workspace')}>知识库</button></div></div>}
+    <header className="assistant-dock__header">
+      <span><i><MagicWandIcon /></i><strong>{title}</strong><small>{subtitle}</small></span>
+      <span className="assistant-dock__header-actions">
+        {onTabChange && <>
+          <button type="button" className={activeTab === 'chat' ? 'is-active' : ''} aria-label="对话" title="对话" onClick={() => onTabChange('chat')}><ChatBubbleIcon /></button>
+          <button type="button" className={activeTab === 'deposit' ? 'is-active' : ''} aria-label={pendingCount > 0 ? `待沉淀 · ${pendingCount} 条待处理` : '待沉淀'} title="待沉淀" onClick={() => onTabChange('deposit')}><ArchiveIcon />{pendingCount > 0 && <i className="assistant-dock__badge" aria-hidden="true">{pendingCount}</i>}</button>
+          <button type="button" className={activeTab === 'history' ? 'is-active' : ''} aria-label="足迹" title="足迹" onClick={() => onTabChange('history')}><CounterClockwiseClockIcon /></button>
+        </>}
+        <button onClick={onClose} aria-label="收起 AI 助手"><Cross2Icon /></button>
+      </span>
+    </header>
     <div className="assistant-dock__body">{children}</div>
   </aside>
 }
