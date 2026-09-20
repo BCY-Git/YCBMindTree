@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { invoke } from '@tauri-apps/api/core'
 import type { MindNodeAttachment } from '../domain/document.types'
-import { getNodeAttachment } from '../persistence/database'
+import { resolveAttachmentBlob } from '../sync/attachment-sync'
 import { isTauriRuntime } from '../platform/tauri'
 import { desktopPreviewUrl, readBlobAsBase64 } from './html-attachment'
 
@@ -20,21 +20,21 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'missing' | 'failed'
  */
 const previewUrlCache = new Map<string, string>()
 
-async function resolvePreviewUrl(attachmentId: string): Promise<string> {
-  const cached = previewUrlCache.get(attachmentId)
+async function resolvePreviewUrl(attachment: MindNodeAttachment): Promise<string> {
+  const cached = previewUrlCache.get(attachment.id)
   if (cached) return cached
-  const stored = await getNodeAttachment(attachmentId)
-  if (!stored) throw new Error('missing')
+  const blob = await resolveAttachmentBlob(attachment)
+  if (!blob) throw new Error('missing')
   let url: string | null
   if (isTauriRuntime()) {
-    const base64 = await readBlobAsBase64(stored.blob)
-    await invoke('store_html_preview', { id: attachmentId, base64 })
-    url = desktopPreviewUrl(attachmentId)
+    const base64 = await readBlobAsBase64(blob)
+    await invoke('store_html_preview', { id: attachment.id, base64 })
+    url = desktopPreviewUrl(attachment.id)
   } else {
-    url = URL.createObjectURL(stored.blob)
+    url = URL.createObjectURL(blob)
   }
   if (!url) throw new Error('invalid-id')
-  previewUrlCache.set(attachmentId, url)
+  previewUrlCache.set(attachment.id, url)
   return url
 }
 
@@ -76,7 +76,7 @@ export function AttachmentHtmlPreview({ attachment, variant = 'inspector' }: Att
     if (!shouldLoad) return
     let active = true
     setState((current) => current === 'ready' ? current : 'loading')
-    resolvePreviewUrl(attachment.id)
+    resolvePreviewUrl(attachment)
       .then((resolved) => {
         if (!active) return
         setUrl(resolved)
@@ -110,7 +110,7 @@ export function AttachmentHtmlPreview({ attachment, variant = 'inspector' }: Att
   >
     <header>
       <strong>{attachment.name}</strong>
-      <span>沙箱预览 · 仅保存在本机工作区 · 按 Esc 关闭</span>
+      <span>沙箱预览 · 按 Esc 关闭</span>
       <button aria-label="关闭 HTML 预览" onClick={() => setExpanded(false)}>×</button>
     </header>
     {url

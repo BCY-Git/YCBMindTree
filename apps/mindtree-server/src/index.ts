@@ -8,6 +8,7 @@ import { requireAllowedHost, requireAllowedOrigin } from './auth.js'
 import type { DocumentRepository } from './document-repository.js'
 import type { AppOptions } from './http-options.js'
 import { attachMcpRoute } from './mcp-route.js'
+import { attachAttachmentRoutes } from './attachment-routes.js'
 import { attachWebHost } from './web-host.js'
 import { attachAiProxyRoute } from './ai-proxy.js'
 
@@ -33,6 +34,7 @@ export async function createApp(repository: DocumentRepository, options: AppOpti
 
   attachAiProxyRoute(expressApp, options.aiAllowedHosts)
   attachMcpRoute(expressApp, repository, options)
+  attachAttachmentRoutes(expressApp, repository, repository.attachments, options)
   if (webRoot) attachWebHost(expressApp, webRoot)
   await app.init()
   return app

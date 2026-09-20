@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { clampImageDisplayWidth } from './image-presentation'
 import type { MindNodeAttachment, MindNodeAttachmentImage } from '../domain/document.types'
-import { getNodeAttachment } from '../persistence/database'
+import { resolveAttachmentBlob } from '../sync/attachment-sync'
 
 type AttachmentImageProps = {
   attachment: MindNodeAttachment
@@ -34,10 +34,10 @@ export function AttachmentImage({ attachment, variant = 'inspector', onImageMeas
     setResizeMode(false)
     previewWidthRef.current = null
     measuredAttachmentRef.current = null
-    void getNodeAttachment(attachment.id).then((stored) => {
+    void resolveAttachmentBlob(attachment).then((blob) => {
       if (!active) return
-      if (!stored || !attachment.type.startsWith('image/')) { setMissing(true); return }
-      objectUrl = URL.createObjectURL(stored.blob)
+      if (!blob || !attachment.type.startsWith('image/')) { setMissing(true); return }
+      objectUrl = URL.createObjectURL(blob)
       setUrl(objectUrl)
     }).catch(() => { if (active) setMissing(true) })
     return () => {
@@ -104,7 +104,7 @@ export function AttachmentImage({ attachment, variant = 'inspector', onImageMeas
   if (missing) return <span className={`attachment-image attachment-image--${variant} is-missing`} title={attachment.name}>仅本机图片不可用</span>
   if (!url) return <span className={`attachment-image attachment-image--${variant} is-loading`} aria-label={`正在载入图片 ${attachment.name}`} />
   const viewer = expanded ? createPortal(<div className="attachment-viewer" role="dialog" aria-modal="true" aria-label={`图片预览 ${attachment.name}`} onMouseDown={() => setExpanded(false)}>
-    <header><strong>{attachment.name}</strong><span>仅保存在本机工作区</span><button aria-label="关闭图片预览" onClick={() => setExpanded(false)}>×</button></header>
+    <header><strong>{attachment.name}</strong><span>已同步云端时可在其他设备查看</span><button aria-label="关闭图片预览" onClick={() => setExpanded(false)}>×</button></header>
     <img src={url} alt={attachment.name} onMouseDown={(event) => event.stopPropagation()} />
   </div>, window.document.body) : null
   return <>

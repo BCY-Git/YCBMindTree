@@ -113,6 +113,7 @@ analyze_deposit { documentId, sourceNodeId }          ← 读受限子树
 3. **最小写入**：优先追加（append），不要试图整图重写；删改现有节点不在 MCP 能力内，需要时提示用户在界面操作
 4. **读不到 = 没同步**：MCP 只能看到用户 push 到服务端的导图；列表为空或内容陈旧时，提醒用户在 MindTree 里执行「上传」
 5. **幂等意识**：同一批沉淀不要重复 preview/apply；用 `list_deposit_batches` 查待处理批次
+6. **附件字节**：文档快照只含附件元数据；图片字节用 `mindtree_attach_image` 写入、REST `GET /api/v1/documents/:doc/attachments/:id` 下载，单文件 ≤ 15MB，仅限 image/png / jpeg / webp / gif
 
 ## 5. 示例对话脚本
 

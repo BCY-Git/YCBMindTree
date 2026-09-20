@@ -362,7 +362,7 @@ export async function deleteDocumentVersions(documentId: string, kinds?: Documen
   if (ids.length) await database.documentVersions.bulkDelete(ids)
 }
 
-/** 附件文件本体只留在当前浏览器，云同步的导图快照不会携带 Blob。 */
+/** 附件字节独立于导图快照传输（同步时走附件端点补传/下载）。 */
 export async function saveNodeAttachment(documentId: string, nodeId: string, file: File): Promise<MindNodeAttachment> {
   const attachment: MindNodeAttachment = {
     id: randomUuid(),
@@ -377,6 +377,11 @@ export async function saveNodeAttachment(documentId: string, nodeId: string, fil
 
 export async function getNodeAttachment(attachmentId: string): Promise<StoredAttachment | undefined> {
   return database.attachments.get(attachmentId)
+}
+
+/** 保存一份从云端下载的附件字节（元数据以远端快照为准）。 */
+export async function storeAttachmentBlob(documentId: string, nodeId: string, attachment: MindNodeAttachment, blob: Blob): Promise<void> {
+  await database.attachments.put({ ...attachment, documentId, nodeId, blob })
 }
 
 /** 工作区备份使用：读取全部附件，再由调用方按导图中的附件引用过滤。 */

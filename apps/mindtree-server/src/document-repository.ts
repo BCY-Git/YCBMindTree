@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { AttachmentStore, collectAttachmentMeta } from './attachment-store.js'
 import type { McpDepositBatch } from './mcp-deposit.js'
 
 export type DocumentRecord = {
@@ -77,9 +78,12 @@ export const DOCUMENT_CHANGE_RETENTION = 200
 
 export class DocumentRepository {
   private readonly database: Database.Database
+  /** 附件字节存储（文件系统）；元数据真相仍在文档 payload 里。 */
+  readonly attachments: AttachmentStore
 
   constructor(databasePath: string) {
     mkdirSync(dirname(databasePath), { recursive: true })
+    this.attachments = new AttachmentStore(databasePath)
     this.database = new Database(databasePath)
     this.database.pragma('journal_mode = WAL')
     this.database.exec(`
@@ -177,6 +181,12 @@ export class DocumentRepository {
         )`).run(next.id, next.id, DOCUMENT_CHANGE_RETENTION)
     })
     transaction()
+    // 快照保存成功后清理不再被引用的附件字节；清理失败不回滚文档写入。
+    try {
+      this.attachments.pruneDocument(input.ownerId, input.id, new Set(collectAttachmentMeta(next.payload).map((meta) => meta.id)))
+    } catch (error) {
+      console.warn('附件孤儿清理失败', error)
+    }
     return next
   }
 

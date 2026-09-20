@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { DocumentRepository, type DocumentRecord } from './document-repository.js'
+import { allowedAttachmentTypes, maxAttachmentBytes } from './attachment-store.js'
 import { applyMcpDepositPreview, createMcpDepositPreview, mcpDepositCandidateSchema } from './mcp-deposit.js'
 
 type Branch = { topic: string; children: Branch[] }
@@ -198,6 +199,42 @@ export function createMindTreeMcp(repository: DocumentRepository) {
       return text({ dryRun: false, insertedNodeId, version: saved.version })
     } catch (error) {
       return text({ error: error instanceof Error ? error.message : '写入失败' }, true)
+    }
+  })
+
+  server.registerTool('mindtree_attach_image', {
+    title: '向节点添加图片附件',
+    description: '把一张图片（base64）作为附件挂到指定节点：先写入附件元数据（带版本锁），再保存图片字节。两步在同一调用内完成；版本冲突时不产生任何修改。',
+    inputSchema: z.object({
+      documentId: z.string().uuid(),
+      nodeId: z.string().uuid(),
+      name: z.string().trim().min(1).max(120),
+      mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+      dataBase64: z.string().min(8).max(Math.ceil(maxAttachmentBytes * 4 / 3) + 16),
+      baseVersion: z.number().int().nonnegative(),
+    }),
+    annotations: { destructiveHint: false, idempotentHint: false },
+  }, async ({ documentId, nodeId, name, mimeType, dataBase64, baseVersion }, extra) => {
+    try {
+      const owner = ownerId(extra)
+      const document = documentForOwner(repository, owner, documentId)
+      if (document.version !== baseVersion) return text({ error: 'VERSION_CONFLICT', currentVersion: document.version }, true)
+      const bytes = Buffer.from(dataBase64, 'base64')
+      if (!bytes.byteLength) return text({ error: '图片内容为空或 base64 无效' }, true)
+      if (!allowedAttachmentTypes.has(mimeType)) return text({ error: `不支持的图片类型：${mimeType}` }, true)
+      const payload = structuredClone(document.payload) as MapPayload
+      const node = payload.nodes[nodeId]
+      if (!node) return text({ error: '目标节点不存在' }, true)
+      const attachmentId = randomUUID()
+      const now = Date.now()
+      node.attachments.push({ id: attachmentId, name, type: mimeType, size: bytes.byteLength, createdAt: now })
+      node.updatedAt = now
+      const saved = repository.save({ id: document.id, ownerId: owner, title: document.title, categoryId: document.categoryId, payload, baseVersion, kind: 'mcp_attach_image' })
+      if ('type' in saved) return text({ error: saved.type, currentVersion: saved.document.version }, true)
+      repository.attachments.save(owner, documentId, attachmentId, bytes)
+      return text({ attachmentId, nodeId, documentId, version: saved.version, size: bytes.byteLength })
+    } catch (error) {
+      return text({ error: error instanceof Error ? error.message : '附件写入失败' }, true)
     }
   })
 

@@ -1,7 +1,8 @@
 import { mindMapDocumentSchema } from '@/domain/document.schema'
 import { assertValidDocument } from '@/domain/document.validator'
-import type { MindMapDocument } from '@/domain/document.types'
+import type { MindMapDocument, MindNodeAttachment } from '@/domain/document.types'
 import { ApiHttpError, apiBaseUrl, createApiClient } from '@/api/http-client'
+import { platformFetch } from '@/platform/tauri'
 
 const configStorageKey = 'mindtree.sync-config.v1'
 
@@ -95,6 +96,36 @@ export async function pushDocument(config: SyncConfig, document: MindMapDocument
     }
     throw error
   }
+}
+
+/* —— 附件字节传输：元数据随文档快照走，字节走这两个端点 —— */
+
+function attachmentPath(documentId: string, attachmentId: string) {
+  return `/documents/${encodeURIComponent(documentId)}/attachments/${encodeURIComponent(attachmentId)}`
+}
+
+/** HEAD 探测远端是否已有该附件字节（不产生字节传输）。 */
+export async function remoteAttachmentExists(config: SyncConfig, documentId: string, attachmentId: string): Promise<boolean> {
+  const response = await platformFetch(`${apiBaseUrl(config.serverUrl)}${attachmentPath(documentId, attachmentId)}`, {
+    method: 'HEAD',
+    headers: { authorization: `Bearer ${config.token.trim()}` },
+  })
+  return response.ok
+}
+
+/** 上传附件字节；附件元数据必须先存在于云端文档版本里。 */
+export async function uploadAttachment(config: SyncConfig, documentId: string, meta: MindNodeAttachment, blob: Blob): Promise<void> {
+  await request(config).put(attachmentPath(documentId, meta.id), blob)
+}
+
+/** 下载附件字节；远端不存在返回 null。 */
+export async function fetchRemoteAttachment(config: SyncConfig, documentId: string, attachmentId: string): Promise<Blob | null> {
+  const response = await platformFetch(`${apiBaseUrl(config.serverUrl)}${attachmentPath(documentId, attachmentId)}`, {
+    headers: { authorization: `Bearer ${config.token.trim()}` },
+  })
+  if (response.status === 404) return null
+  if (!response.ok) throw new ApiHttpError(response.status, null, `附件下载失败（HTTP ${response.status}）`)
+  return response.blob()
 }
 
 export async function createPairingInvite(config: SyncConfig): Promise<PairingInvite> {
