@@ -13,7 +13,7 @@
  *   让 AI 理解当前思维导图结构
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ChevronDownIcon } from '@radix-ui/react-icons'
+import { ArrowUpIcon, CheckCircledIcon, ChevronDownIcon, CubeIcon, ImageIcon, LoopIcon, MagicWandIcon, Share1Icon, TokensIcon } from '@radix-ui/react-icons'
 import type { MindNodeClipboard } from '../domain/commands'
 import type { MindMapDocument } from '../domain/document.types'
 import { branchNodeCount, parseGeneratedBranch } from './generated-branch'
@@ -631,26 +631,24 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
         </div>}
         {workflowSession && <WorkflowPanel session={workflowSession} suggestedGoal={prompt.trim()} busy={isSending} onStart={startWorkflow} onChange={updateWorkflowSession} onCheckpoint={() => { void requestAssistant('checkpoint') }} onDeposit={() => { onOpenDeposit?.(); void requestAssistant('deposit') }} onGenerateAsset={(kind) => { void requestAssistant(kind) }} onComplete={completeWorkflow} />}
         <section className="ai-conversation" aria-label="AI 对话记录" aria-live="polite">
-          {chatMessages.length === 0 && !isSending && <article className="ai-message ai-message--assistant ai-message--welcome"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>就绪</time></header><div className="ai-message__bubble">选中画布上的节点，我就能围绕它扩展分支、拆解任务或总结内容。也可以直接从下方建议开始：</div></div></article>}
+          {chatMessages.length === 0 && !isSending && <div className="ai-welcome"><MagicWandIcon aria-hidden="true" /><p>选中画布上的节点，我就能围绕它扩展分支、拆解任务或总结内容。也可以直接从下方建议开始：</p></div>}
           {chatMessages.length === 0 && !isSending && <div className="ai-suggestions" role="group" aria-label="建议操作">
-            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('branch') }}>✨ 扩展分支</button>
-            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('plan') }}>✅ 生成行动</button>
-            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('reorganize') }}>🌳 整图检查</button>
-            <button type="button" disabled={!isConfigured || isSending} onClick={() => startWorkflow('explore')}>🧭 探索协作</button>
-            <button type="button" disabled={!isConfigured || isSending} onClick={() => startWorkflow('decide')}>⚖️ 决策协作</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('branch') }}><MagicWandIcon aria-hidden="true" />扩展分支</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('plan') }}><CheckCircledIcon aria-hidden="true" />生成行动</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => { void requestAssistant('reorganize') }}><LoopIcon aria-hidden="true" />整图检查</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => startWorkflow('explore')}><TokensIcon aria-hidden="true" />探索协作</button>
+            <button type="button" disabled={!isConfigured || isSending} onClick={() => startWorkflow('decide')}><CubeIcon aria-hidden="true" />决策协作</button>
           </div>}
-          {chatMessages.map((message) => <article className={`ai-message ai-message--${message.role}`} key={message.id}>
-            {message.role === 'assistant' && <span className="ai-message__avatar" aria-hidden="true">✦</span>}
+          {chatMessages.map((message) => <article className={`ai-message ai-message--${message.role}`} key={message.id} title={formatChatTime(message.createdAt)}>
             <div className="ai-message__content">
-              <header><strong>{message.role === 'assistant' ? 'MindTree Agent' : '你'}</strong><time>{formatChatTime(message.createdAt)}</time></header>
+              {message.role === 'assistant' && <span className="ai-message__agent"><MagicWandIcon aria-hidden="true" />MindTree Agent</span>}
               <div className={`ai-message__bubble ${message.role === 'assistant' && !message.content ? 'ai-message__bubble--streaming' : ''}`}>{message.content}</div>
               {message.role === 'assistant' && message.content && <footer><button type="button" aria-label="复制 AI 回复" onClick={() => { void navigator.clipboard?.writeText(message.content) }}>复制</button></footer>}
             </div>
-            {message.role === 'user' && <span className="ai-message__avatar ai-message__avatar--user" aria-hidden="true">你</span>}
           </article>)}
           {generatedBranch && <div className="ai-branch-preview"><div className="ai-branch-preview__heading"><strong>{generatedBranch.mode === 'screenshot' ? '截图识别预览' : generatedBranch.mode === 'plan' ? '待插入执行计划' : generatedBranch.mode === 'decision-record' ? '待写入决策记录' : generatedBranch.mode === 'knowledge-card' ? '待写入知识卡' : '待插入分支'} · 「{generatedBranch.targetTopic}」</strong><span>{branchNodeCount(generatedBranch.branch)} 节点</span></div><BranchPreview branch={generatedBranch.branch} /><div className="ai-branch-preview__actions"><button type="button" onClick={confirmGeneratedBranch}>确认插入</button><button type="button" onClick={() => { setGeneratedBranch(null); setNotice('已放弃本次生成。') }}>放弃</button></div></div>}
           {reorganization && <div className="ai-reorganization-preview"><div className="ai-branch-preview__heading"><strong>待应用全图整理</strong><span>{reorganization.plan.moves.length} 项调整</span></div><p>{reorganization.plan.summary}</p><ReorganizationPreview plan={reorganization.plan} document={document} /><div className="ai-branch-preview__actions"><button type="button" disabled={!reorganization.plan.moves.length} onClick={confirmReorganization}>确认应用</button><button type="button" onClick={() => { setReorganization(null); setNotice('已放弃本次全图整理建议。') }}>放弃</button></div></div>}
-          {isSending && !chatMessages.some((message) => message.role === 'assistant' && !message.content) && <article className="ai-message ai-message--assistant ai-message--pending" role="status"><span className="ai-message__avatar" aria-hidden="true">✦</span><div className="ai-message__content"><header><strong>MindTree Agent</strong><time>正在思考</time></header><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
+          {isSending && !chatMessages.some((message) => message.role === 'assistant' && !message.content) && <article className="ai-message ai-message--assistant ai-message--pending" role="status" aria-label="AI 正在思考"><div className="ai-message__content"><span className="ai-message__agent"><MagicWandIcon aria-hidden="true" />MindTree Agent</span><div className="ai-message__bubble"><i /><i /><i /></div></div></article>}
         </section>
         <form className="ai-prompt" onSubmit={sendPrompt}>
           <div className="ai-prompt__composer" onDragOver={(event) => { event.preventDefault() }} onDrop={(event) => {
@@ -664,11 +662,16 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
           }} />
           {screenshot && <div className="ai-screenshot"><img src={screenshot.dataUrl} alt="待转换的流程截图" /><span>{screenshot.name}</span><button type="button" disabled={isSending} aria-label="移除流程截图" onClick={() => { screenshotReadVersion.current += 1; setIsReadingScreenshot(false); setScreenshot(null) }}>×</button></div>}
           {isReadingScreenshot && <p className="ai-screenshot-hint" role="status">正在读取截图…</p>}
-          <textarea onPaste={(event) => {
+          <textarea onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              if (!isSending && !isReadingScreenshot) event.currentTarget.form?.requestSubmit()
+            }
+          }} onPaste={(event) => {
             const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'))
             if (images.length) { event.preventDefault(); void attachScreenshot(images) }
           }} aria-label="发送给 AI 的消息" value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={screenshot ? '补充转换要求（可选），例如：按用户操作顺序整理…' : contextScope === 'project' ? '例如：找出项目最大的风险，并给我可执行的缓解方案…' : contextScope === 'workspace' ? '例如：关联已有资料，为这个主题找出值得复用的想法…' : '例如：把这个问题想透，给出三条值得继续探索的路径…'} />
-          <div className="ai-prompt__toolbar"><button className="ai-screenshot-upload" type="button" disabled={isSending || isReadingScreenshot} onClick={() => screenshotInputRef.current?.click()} title="上传、拖入或粘贴流程截图（PNG / JPEG / WebP，最大 4 MB）">＋ 截图</button><ModelSelector settings={settings} connections={connections} disabled={isSending} onSelect={(next) => {
+          <div className="ai-prompt__toolbar"><button className="ai-screenshot-upload" type="button" disabled={isSending || isReadingScreenshot} onClick={() => screenshotInputRef.current?.click()} title="上传、拖入或粘贴流程截图（PNG / JPEG / WebP，最大 4 MB）"><ImageIcon aria-hidden="true" /><span>截图</span></button><ModelSelector settings={settings} connections={connections} disabled={isSending} onSelect={(next) => {
             try {
               saveAiSettings(next)
               setSettings(next)
@@ -683,9 +686,8 @@ export function AiAssistant({ document, targetNodeId, workspaceDocuments, onBefo
               settingsRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
               settingsRef.current?.querySelector('input')?.focus({ preventScroll: true })
             })
-          }} /></div>
+          }} /><button className="ai-prompt__send" type="submit" disabled={isSending || isReadingScreenshot || (!prompt.trim() && !screenshot)} aria-label={screenshot ? '截图转导图' : '发送'} title={screenshot ? '截图转导图 (Enter)' : '发送 (Enter · Shift+Enter 换行)'}><ArrowUpIcon aria-hidden="true" /></button></div>
           </div>
-          <div className="ai-prompt__actions"><button type="submit" disabled={isSending || isReadingScreenshot}>{isSending ? '正在协作…' : screenshot ? '截图转导图 ↗' : '发送 ↗'}</button></div>
         </form>
         {retrievedSources.length > 0 && <section className="ai-source-trace" aria-label="本次读取来源"><header><span>已检索工作区</span><small>{retrievedSources.length} 条</small></header>{retrievedSources.slice(0, 6).map((source) => <div key={`${source.documentId}:${source.topic}`}><strong>{source.documentTitle}</strong><span>{source.topic}</span></div>)}</section>}
       </>}

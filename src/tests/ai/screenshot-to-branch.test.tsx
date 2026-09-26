@@ -37,7 +37,7 @@ describe('流程截图转导图', () => {
   it('传递图片内容，确认前不改图，确认后写入所选节点且可以撤销', async () => {
     const original = setup()
     await upload()
-    fireEvent.click(screen.getByRole('button', { name: '截图转导图 ↗' }))
+    fireEvent.click(screen.getByRole('button', { name: '截图转导图' }))
     await screen.findByRole('button', { name: '确认插入' })
     expect(requestAiChat).toHaveBeenCalledWith('https://api.deepseek.com/chat/completions', expect.objectContaining({
       model: 'deepseek-v4-flash-vision-exp',
@@ -59,7 +59,7 @@ describe('流程截图转导图', () => {
     saveAiSettings({ endpoint: 'https://api.deepseek.com', model: 'deepseek-v4-flash', apiKey: 'test-key' })
     setup()
     await upload()
-    fireEvent.click(screen.getByRole('button', { name: '截图转导图 ↗' }))
+    fireEvent.click(screen.getByRole('button', { name: '截图转导图' }))
     await screen.findByText(/当前模型不支持图片/)
     expect(requestAiChat).not.toHaveBeenCalled()
     expect(screen.getByAltText('待转换的流程截图')).toBeTruthy()
@@ -70,19 +70,19 @@ describe('流程截图转导图', () => {
     fireEvent.paste(screen.getByRole('textbox', { name: '发送给 AI 的消息' }), { clipboardData: { files: [file()] } })
     await screen.findByAltText('待转换的流程截图')
     vi.mocked(requestAiChat).mockRejectedValueOnce(new Error('网络断开'))
-    fireEvent.click(screen.getByRole('button', { name: '截图转导图 ↗' }))
+    fireEvent.click(screen.getByRole('button', { name: '截图转导图' }))
     await screen.findByText('网络断开')
     expect(screen.getByAltText('待转换的流程截图')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '移除流程截图' }))
     expect(screen.queryByAltText('待转换的流程截图')).toBeNull()
-    expect(screen.getByRole('button', { name: '发送 ↗' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '发送' })).toBeTruthy()
   })
 
   it('模型返回错误结构时不产生可写入预览', async () => {
     setup()
     vi.mocked(requestAiChat).mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: '{"topic":"流程","children":"无效"}' } }] })))
     await upload()
-    fireEvent.click(screen.getByRole('button', { name: '截图转导图 ↗' }))
+    fireEvent.click(screen.getByRole('button', { name: '截图转导图' }))
     await waitFor(() => expect(screen.getByText('AI 返回的子节点格式无效')).toBeTruthy())
     expect(screen.queryByRole('button', { name: '确认插入' })).toBeNull()
   })

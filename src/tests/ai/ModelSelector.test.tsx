@@ -31,7 +31,7 @@ describe('助手模型选择', () => {
     expect(loadAiSettings().model).toBe('deepseek-v4-pro')
     expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.change(screen.getByRole('textbox', { name: '发送给 AI 的消息' }), { target: { value: '你好' } })
-    fireEvent.click(screen.getByRole('button', { name: '发送 ↗' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(streamAiChatReply).toHaveBeenCalled())
     expect(streamAiChatReply).toHaveBeenCalledWith('https://api.deepseek.com/chat/completions', expect.objectContaining({ model: 'deepseek-v4-pro' }), '', expect.any(Function))
     expect(await screen.findByText('模型回复')).toBeTruthy()

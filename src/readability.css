@@ -47,17 +47,17 @@
 .quick-assistant form button { min-width: 58px; font-size: 13px; }
 
 /* AI 工作台是主要工作面，使用与属性编辑器一致的正文尺度。 */
-.assistant-dock .ai-assistant__heading { font-size: 14px; }
+.assistant-dock .ai-assistant__heading { font-size: 12.5px; }
 .assistant-dock .ai-assistant__heading button { font-size: 12px; }
 .assistant-dock .ai-assistant__status { font-size: 12px; line-height: 1.55; }
 .assistant-dock .ai-settings { gap: 9px; }
 .assistant-dock .ai-settings label, .assistant-dock .ai-ghost-toggle { font-size: 12px !important; }
 .assistant-dock .ai-settings input, .assistant-dock .ai-prompt textarea { font-size: 13px; }
 .assistant-dock .ai-settings input { height: 35px; padding: 0 9px; }
-.assistant-dock .ai-save-button, .assistant-dock .ai-prompt button { min-height: 35px; font-size: 12px; }
+.assistant-dock .ai-save-button { min-height: 35px; font-size: 12px; }
 .assistant-dock .ai-assistant__privacy { font-size: 11px; line-height: 1.55; }
-.assistant-dock .ai-prompt { gap: 8px; margin-top: 13px; }
-.assistant-dock .ai-prompt textarea { min-height: 76px; padding: 9px; }
+.assistant-dock .ai-prompt { gap: 8px; }
+.assistant-dock .ai-prompt textarea { padding: 2px 4px; }
 .assistant-dock .ai-response { font-size: 13px; line-height: 1.65; }
 .assistant-dock .workflow-panel { gap: 9px; padding: 11px; }
 .assistant-dock .workflow-panel strong { font-size: 12px; }
@@ -145,3 +145,75 @@
 .document-import-status { position: fixed; z-index: 71; right: 22px; bottom: 38px; display: flex; max-width: min(420px, calc(100vw - 44px)); align-items: center; gap: 12px; border: 1px solid color-mix(in srgb, var(--accent, #47766a) 30%, var(--line, #d9dad0)); border-radius: 10px; background: var(--panel-bg, #fafaf6); box-shadow: 0 12px 32px rgba(22, 35, 28, .16); color: var(--app-text, #353831); padding: 11px 12px; font-size: 13px; line-height: 1.4; }
 .document-import-status button { border: 0; background: transparent; color: var(--muted-text, #77786f); font-size: 18px; line-height: 1; }
 .document-import-status .document-import-status__action { border: 1px solid color-mix(in srgb, var(--accent, #47766a) 35%, transparent); border-radius: 6px; color: var(--accent, #47766a); padding: 6px 8px; font-size: 11px; white-space: nowrap; }
+
+/* ── AI 助手面板重设计（1.27.4）：Cursor/ChatGPT 主流嵌入式聊天 ──────────────
+   三段式：固定头部 / 可滚动消息流 / 贴底单卡片输入区。
+   消息扁平化：AI 消息无气泡无边框全宽排布，用户消息右侧浅色气泡。 */
+
+/* 头部：更紧凑，图标按钮统一 28px */
+.assistant-dock__header { min-height: 48px; padding: 0 10px 0 14px; }
+.assistant-dock__header strong { font-size: 13px; font-weight: 600; }
+.assistant-dock__header small { font-size: 11px; }
+.assistant-dock__header i { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; }
+.assistant-dock__header button { width: 28px; height: 28px; border-radius: 6px; font-size: 15px; }
+
+/* 面板内标题行：降为小节标签样式，「连接模型」变 ghost 按钮 */
+.assistant-dock .ai-assistant { padding: 10px 12px 0; }
+.assistant-dock .ai-assistant__heading { color: var(--muted-text, #73756d); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.assistant-dock .ai-assistant__heading .ai-assistant__spark { display: none; }
+.assistant-dock .ai-assistant__heading button { height: 24px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--line, #d9dad0) 85%, transparent); border-radius: 6px; color: var(--muted-text, #73756d); font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.assistant-dock .ai-assistant__heading button:hover { background: color-mix(in srgb, var(--accent, #47766a) 8%, transparent); color: var(--accent, #47766a); }
+.assistant-dock .ai-assistant__status { margin: 6px 0 2px; font-size: 11px; }
+
+/* 范围 chip 与建议区收回面板内边距 */
+.assistant-dock .ai-scope { padding: 6px 0 0; }
+.assistant-dock .ai-scope__chip { font-size: 11px; }
+
+/* 消息流：扁平、全宽、无头像、无消息头 */
+.assistant-dock__body { display: flex; flex-direction: column; }
+.assistant-dock .ai-assistant { display: flex; min-height: 100%; flex-direction: column; }
+.assistant-dock .ai-conversation { display: flex; flex: 1 0 auto; flex-direction: column; gap: 16px; margin: 12px 0 14px; }
+.assistant-dock .ai-prompt { margin-top: auto; }
+.assistant-dock .ai-message { align-items: flex-start; gap: 0; }
+.assistant-dock .ai-message__avatar { display: none; }
+.assistant-dock .ai-message__content { max-width: 100%; gap: 3px; }
+.ai-message__agent { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 1px; color: var(--muted-text, #9a9c93); font-size: 11px; font-weight: 560; }
+.ai-message__agent svg { width: 11px; height: 11px; color: var(--accent, #5d8e7b); }
+.assistant-dock .ai-message__bubble { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--app-text, #3f443d); font-size: 12.5px; line-height: 1.72; }
+.assistant-dock .ai-message--user .ai-message__bubble { width: fit-content; max-width: 85%; padding: 8px 12px; border-radius: 12px; background: color-mix(in srgb, var(--accent, #47766a) 10%, transparent); color: var(--app-text, #2f3833); }
+.assistant-dock .ai-message--pending .ai-message__bubble { display: inline-flex; min-width: 46px; padding: 4px 0; }
+.assistant-dock .ai-message__content > footer { min-height: 16px; }
+.assistant-dock .ai-message__content > footer button { font-size: 11px; opacity: 0; }
+.assistant-dock .ai-message:hover .ai-message__content > footer button { opacity: 1; }
+
+/* 欢迎区：一行小图标 + 说明文字 */
+.ai-welcome { display: flex; gap: 8px; margin: 10px 0 2px; color: var(--app-text, #5b6058); font-size: 13px; line-height: 1.6; }
+.ai-welcome > svg { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 3px; color: var(--accent, #47766a); }
+.ai-welcome p { margin: 0; }
+
+/* 建议操作：两列网格、线性图标、无 emoji */
+.assistant-dock .ai-suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 10px 0 2px; }
+.assistant-dock .ai-suggestions button { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--line, #e0e1d7) 68%, transparent); border-radius: 8px; background: transparent; color: var(--app-text, #45473f); font-size: 12px; font-weight: 500; text-align: left; transition: background .15s ease, border-color .15s ease; }
+.assistant-dock .ai-suggestions button svg { flex: 0 0 auto; width: 14px; height: 14px; color: var(--muted-text, #85887f); transition: color .15s ease; }
+.assistant-dock .ai-suggestions button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent, #47766a) 42%, var(--line, #e0e1d7)); background: color-mix(in srgb, var(--accent, #47766a) 7%, transparent); color: var(--accent, #467566); }
+.assistant-dock .ai-suggestions button:hover:not(:disabled) svg { color: var(--accent, #467566); }
+.assistant-dock .ai-suggestions button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* 输入区：Cursor 式单卡片 composer —— textarea + 工具栏 + 发送钮同处一卡 */
+.assistant-dock .ai-prompt { position: sticky; bottom: 0; z-index: 2; display: grid; gap: 0; margin: 10px -10px -18px; padding: 8px 10px 12px; border-top: 0; border-radius: 0 0 0 0; background: color-mix(in srgb, var(--panel-bg, #fafaf6) 93%, transparent); backdrop-filter: blur(14px); box-shadow: none; }
+.assistant-dock .ai-prompt__composer { display: grid; gap: 2px; padding: 9px 9px 7px; border: 1px solid color-mix(in srgb, var(--line, #d9dad0) 88%, transparent); border-radius: 12px; background: var(--node-bg, #fffefa); box-shadow: 0 1px 2px rgba(38,51,44,.05); transition: border-color .15s ease, box-shadow .15s ease; }
+.assistant-dock .ai-prompt__composer:focus-within { border-color: color-mix(in srgb, var(--accent, #47766a) 48%, var(--line, #d9dad0)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #47766a) 9%, transparent); }
+.assistant-dock .ai-prompt .ai-prompt__composer textarea { min-height: 40px; max-height: 180px; padding: 2px 4px; border: 0; background: transparent; box-shadow: none; font-size: 12.5px; line-height: 1.6; resize: none; outline: none; }
+.assistant-dock .ai-prompt__toolbar { display: flex; align-items: center; gap: 4px; }
+.assistant-dock .ai-prompt__toolbar .ai-screenshot-upload { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-text, #7d8078); font-size: 11px; font-weight: 500; }
+.assistant-dock .ai-prompt__toolbar .ai-screenshot-upload svg { width: 13px; height: 13px; }
+.assistant-dock .ai-prompt__toolbar .ai-screenshot-upload:hover:not(:disabled) { background: color-mix(in srgb, var(--accent, #47766a) 9%, transparent); color: var(--accent, #47766a); filter: none; }
+.assistant-dock .ai-prompt button.ai-prompt__send { display: grid; place-items: center; width: 32px; height: 32px; margin-left: auto; border: 0; border-radius: 8px; background: var(--accent, #47766a); color: #fff; transition: background .15s ease, opacity .15s ease; }
+.assistant-dock .ai-prompt button.ai-prompt__send svg { width: 16px; height: 16px; }
+.assistant-dock .ai-prompt button.ai-prompt__send:hover:not(:disabled) { filter: brightness(1.06); }
+.assistant-dock .ai-prompt button.ai-prompt__send:disabled { background: color-mix(in srgb, var(--muted-text, #85887f) 24%, transparent); color: color-mix(in srgb, var(--panel-bg, #fafaf6) 92%, #fff); cursor: default; }
+.assistant-dock .ai-screenshot { margin-bottom: 4px; }
+
+/* 头部 tab 选中态：只用图标变色，不用实底块 */
+.assistant-dock__header-actions > button.is-active { background: transparent; color: var(--accent, #467566); }
+.assistant-dock__header-actions > button.is-active:hover { background: color-mix(in srgb, var(--accent, #47766a) 8%, transparent); }
