@@ -1796,3 +1796,34 @@ button:disabled { cursor: not-allowed; opacity: .38; }
 /* 自动同步开关 */
 .sync-dialog__autosync { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; color: var(--app-text, #45473f); font-size: 11px; cursor: pointer; }
 .sync-dialog__autosync input { accent-color: var(--accent, #47766a); }
+
+/* ── 侧栏/顶栏 shadcn 风格化覆盖（1.27.3）────────────────────────────────── */
+
+/* 工作区切换器：Notion/AFFiNE 式，悬停出背景，右侧上下箭头 */
+.sidebar-workspace-name { width: 100%; margin: 0 0 2px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; font-family: inherit; transition: background .15s ease; }
+.sidebar-workspace-name:hover, .sidebar-workspace-name[aria-expanded='true'] { background: color-mix(in srgb, var(--accent, #47766a) 8%, transparent); }
+.sidebar-workspace-name__caret { margin-left: auto; width: 14px; height: 14px; color: var(--muted-text, #8f918a); }
+.sidebar-workspace-name:hover .sidebar-workspace-name__caret { color: var(--app-text, #454941); }
+
+/* 从顶部切换器打开时，账户菜单出现在工作区行下方 */
+.sidebar-account__menu--top { position: fixed; top: 64px; right: auto; bottom: auto; left: 14px; width: calc(var(--left-panel-width, 256px) - 44px); }
+
+/* 搜索框右侧 ⌘K 提示徽标（Linear/AFFiNE 惯例） */
+.workspace-navigator__search kbd { position: absolute; top: 50%; right: 7px; display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--line, #d9dad0) 88%, transparent); border-radius: 5px; background: color-mix(in srgb, var(--node-bg, #fffefa) 75%, transparent); color: var(--muted-text, #93958c); font-family: inherit; font-size: 10.5px; line-height: 1; cursor: pointer; transform: translateY(-50%); transition: color .15s ease, border-color .15s ease; }
+.workspace-navigator__search kbd:hover { color: var(--accent, #47766a); border-color: color-mix(in srgb, var(--accent, #47766a) 45%, var(--line, #d9dad0)); }
+
+/* 顶栏：去玻璃拟态的厚重感，回归 shadcn 的扁平、克制 */
+.topbar { gap: 12px; padding: 0 16px; }
+.brand-mark { border-radius: 6px; }
+.floating-toolbar { min-height: 42px; padding: 4px; border-radius: 10px; background: color-mix(in srgb, var(--panel-bg, #fafaf6) 94%, transparent); box-shadow: 0 1px 2px rgba(38,51,44,.07), 0 3px 10px rgba(38,51,44,.05); backdrop-filter: blur(14px) saturate(150%); -webkit-backdrop-filter: blur(14px) saturate(150%); }
+.floating-toolbar::before { content: none; }
+.floating-toolbar__icon, .floating-toolbar__button, .topbar-utility__button { height: 32px; border-radius: 7px; transition: background .15s ease, color .15s ease; }
+.floating-toolbar__icon { width: 32px; }
+.floating-toolbar__button { padding: 0 10px; font-size: 12px; font-weight: 560; }
+.floating-toolbar__icon:hover:not(:disabled), .floating-toolbar__button:hover:not(:disabled), .topbar-utility__button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent, #47766a) 10%, transparent); box-shadow: none; color: var(--accent, #47766a); transform: none; }
+.floating-toolbar__icon:active:not(:disabled), .floating-toolbar__button:active:not(:disabled), .topbar-utility__button:active:not(:disabled) { transform: none; }
+.floating-toolbar__divider { height: 20px; }
+.topbar-utility { padding: 3px; border-radius: 9px; box-shadow: 0 1px 2px rgba(38,51,44,.06); backdrop-filter: blur(14px) saturate(150%); -webkit-backdrop-filter: blur(14px) saturate(150%); }
+.topbar-utility__button { width: 32px; height: 32px; border-radius: 7px; }
+.topbar-utility__button.desktop-search-trigger { width: auto; padding: 0 9px; font-size: 12px; }
+.topbar-utility__button.desktop-search-trigger kbd { margin-left: 2px; padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--line, #d9dad0) 88%, transparent); border-radius: 4px; color: var(--muted-text, #93958c); font-family: inherit; font-size: 10px; }

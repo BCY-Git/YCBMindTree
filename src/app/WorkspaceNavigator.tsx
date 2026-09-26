@@ -33,6 +33,7 @@ type WorkspaceNavigatorProps = {
   onCreateDocument: (projectId: string | null, kind: DocumentKind) => void
   onImport: () => void
   onRestore: () => void
+  onOpenGlobalSearch?: () => void
 }
 
 const kindMarks: Record<DocumentKind, string> = { map: '◇', record: '·', source: '↗', output: '✓', knowledge: '※' }
@@ -82,7 +83,7 @@ function SmartEntry({ active, icon, label, count, onClick }: { active: boolean; 
   return <button type="button" className={`workspace-smart-entry ${active ? 'is-active' : ''}`} onClick={onClick}><span aria-hidden="true">{icon}</span><strong>{label}</strong>{typeof count === 'number' && <small>{count}</small>}</button>
 }
 
-export function WorkspaceNavigator({ projects, documents, activeDocumentId, pendingDepositDocumentIds = new Set(), query, onQueryChange, onOpenDocument, onOpenProjectOverview, onAssignProject, onSetDocumentKind, onTogglePinned, onRenameDocument, onDeleteDocument, onDeleteDraft, onCreateProject, openTaskCount, onOpenTaskCenter, onRenameProject, onUpdateProject, onDeleteProject, onCreateDocument, onImport, onRestore }: WorkspaceNavigatorProps) {
+export function WorkspaceNavigator({ projects, documents, activeDocumentId, pendingDepositDocumentIds = new Set(), query, onQueryChange, onOpenDocument, onOpenProjectOverview, onAssignProject, onSetDocumentKind, onTogglePinned, onRenameDocument, onDeleteDocument, onDeleteDraft, onCreateProject, openTaskCount, onOpenTaskCenter, onRenameProject, onUpdateProject, onDeleteProject, onCreateDocument, onImport, onRestore, onOpenGlobalSearch = () => {} }: WorkspaceNavigatorProps) {
   const [expandedProjectIds, setExpandedProjectIds] = useState(loadExpandedProjects)
   const [unassignedOpen, setUnassignedOpen] = useState(() => localStorage.getItem(unassignedOpenStorageKey) === 'true')
   const [completedOpen, setCompletedOpen] = useState(false)
@@ -165,7 +166,7 @@ export function WorkspaceNavigator({ projects, documents, activeDocumentId, pend
   const toggleSmartView = (view: Exclude<SmartView, null>) => setSmartView((current) => current === view ? null : view)
 
   return <nav className="workspace-navigator" aria-label="工作区导航">
-    <label className="workspace-navigator__search"><MagnifyingGlassIcon /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索项目与内容…" aria-label="搜索项目与内容" /></label>
+    <label className="workspace-navigator__search"><MagnifyingGlassIcon /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索项目与内容…" aria-label="搜索项目与内容" /><kbd role="button" tabIndex={0} title="全局搜索工作区 (⌘K)" onClick={(event) => { event.preventDefault(); onOpenGlobalSearch() }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenGlobalSearch() } }}>⌘K</kbd></label>
 
     <section className="workspace-smart" aria-label="工作台">
       <header className="workspace-navigator__label"><span>工作台</span></header>

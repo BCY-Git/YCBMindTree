@@ -65,7 +65,7 @@ import { createProject, loadProjects, saveProjects, type WorkspaceProject } from
 import { ProjectOverviewDialog } from '../projects/ProjectOverviewDialog'
 import type { DepositBatch, DepositProvenance } from '../ai/deposit/deposit-types'
 import type { WorkflowSession } from '../ai/workflow/workflow-types'
-import { BellIcon, EnterIcon, ExitIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PersonIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
+import { BellIcon, CaretSortIcon, EnterIcon, ExitIcon, GearIcon, HamburgerMenuIcon, LightningBoltIcon, Link2Icon, MagnifyingGlassIcon, MixerHorizontalIcon, MixerVerticalIcon, PersonIcon, PlusIcon, QuestionMarkCircledIcon, ReloadIcon, RotateCounterClockwiseIcon, TargetIcon } from '@radix-ui/react-icons'
 import { PanelResizeHandle, loadPanelWidth } from './PanelResizeHandle'
 import { EditorPreferencesDialog } from '../editor/EditorPreferencesDialog'
 import { loadEditorPreferences, saveEditorPreferences, type EditorPreferences } from '../editor/editor-preferences'
@@ -155,6 +155,7 @@ export function App() {
   const [editorPreferencesOpen, setEditorPreferencesOpen] = useState(false)
   const [editorPreferences, setEditorPreferences] = useState<EditorPreferences>(loadEditorPreferences)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [accountMenuAnchor, setAccountMenuAnchor] = useState<'top' | 'bottom'>('bottom')
   const [loginOpen, setLoginOpen] = useState(false)
   const [accountSession, setAccountSession] = useState<AuthSession | null>(loadAccountSession)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('mindtree.sidebar-collapsed') === 'true')
@@ -1080,6 +1081,17 @@ export function App() {
     return () => window.removeEventListener('keydown', handleSaveShortcut)
   }, [saveCurrentToLocalFile])
 
+  // ⌘K / Ctrl K：全局搜索工作区节点（与顶栏「搜索」按钮的 kbd 提示一致）
+  useEffect(() => {
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return
+      event.preventDefault()
+      setWorkspaceSearchOpen(true)
+    }
+    window.addEventListener('keydown', handleSearchShortcut)
+    return () => window.removeEventListener('keydown', handleSearchShortcut)
+  }, [])
+
   const saveSyncSettings = useCallback((nextConfig: SyncConfig) => {
     saveSyncConfig(nextConfig)
     setSyncConfig(nextConfig)
@@ -1527,7 +1539,9 @@ export function App() {
         <aside className="left-rail">
           <PanelResizeHandle side="left" width={leftPanelWidth} onChange={setLeftPanelWidth} />
           <div className="sidebar-scroll">
-            <div className="sidebar-workspace-name"><span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong></div>
+            <button type="button" className="sidebar-workspace-name" onClick={() => { setAccountMenuAnchor('top'); setAccountMenuOpen((open) => !(accountMenuAnchor === 'top' && open)) }} aria-expanded={accountMenuOpen} aria-haspopup="menu" title="工作区与账户">
+              <span className="sidebar-workspace-mark">M</span><strong>我的工作区</strong><CaretSortIcon className="sidebar-workspace-name__caret" aria-hidden="true" />
+            </button>
             <div className="sidebar-quick-actions"><button onClick={() => { void startQuickNote() }} title="随手记 (⌘⇧N)"><span><LightningBoltIcon /></span>随手记</button><button onClick={() => { void startNewDocument() }} title="新建导图"><span><PlusIcon /></span>新建导图</button></div>
             <WorkspaceNavigator
               projects={projects}
@@ -1553,6 +1567,7 @@ export function App() {
               onCreateDocument={(projectId, kind) => { void startNewDocument(projectId, kind) }}
               onImport={() => importInputRef.current?.click()}
               onRestore={() => workspaceBackupInputRef.current?.click()}
+              onOpenGlobalSearch={() => setWorkspaceSearchOpen(true)}
             />
 
             <details className="sidebar-current-organize">
@@ -1567,12 +1582,12 @@ export function App() {
             <button className="sidebar-footer-action" type="button"><span><QuestionMarkCircledIcon /></span>帮助与反馈</button>
             <button className="sidebar-footer-action" type="button" onClick={() => setWorkspaceSearchOpen(true)}><span><MagnifyingGlassIcon /></span>搜索</button>
             <div className="sidebar-account">
-              <button className="sidebar-account__trigger" type="button" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => setAccountMenuOpen((open) => !open)}>
+              <button className="sidebar-account__trigger" type="button" aria-expanded={accountMenuOpen} aria-haspopup="menu" onClick={() => { setAccountMenuAnchor('bottom'); setAccountMenuOpen((open) => !(accountMenuAnchor === 'bottom' && open)) }}>
                 <span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span>
                 <span><strong>{accountSession?.user.email.split('@')[0] ?? '本地工作区'}</strong><small>{accountSession?.user.email ?? '未登录 · 本地保存'}</small></span>
                 <i aria-hidden="true">⋮</i>
               </button>
-              {accountMenuOpen && <div className="sidebar-account__menu" role="menu" aria-label="账户菜单">
+              {accountMenuOpen && <div className={`sidebar-account__menu ${accountMenuAnchor === 'top' ? 'sidebar-account__menu--top' : ''}`} role="menu" aria-label="账户菜单">
                 <div className="sidebar-account__menu-profile">
                   <span className="sidebar-avatar">{accountSession?.user.email.slice(0, 1).toUpperCase() ?? 'M'}</span>
                   <span><strong>{accountSession?.user.email.split('@')[0] ?? '本地工作区'}</strong><small>{accountSession?.user.email ?? '登录后可安全同步'}</small></span>
